@@ -196,6 +196,19 @@ export const PAPERS = {
 
 export const DEFAULT_PAPER = 'coldPress';
 
+// Paper tone, independent of texture. 'natural' uses the preset's own colour.
+// Dark and toned grounds matter for opaque and scattering paints (gouache,
+// interference mica), which show up by scattering light back.
+export const TONES = {
+  natural: { name: 'Natural', color: null },
+  white:   { name: 'Bright white', color: [0.98, 0.98, 0.975] },
+  cream:   { name: 'Cream', color: [0.96, 0.93, 0.84] },
+  grey:    { name: 'Grey', color: [0.55, 0.55, 0.54] },
+  tan:     { name: 'Tan', color: [0.72, 0.62, 0.48] },
+  blue:    { name: 'Blue-grey', color: [0.42, 0.47, 0.54] },
+  black:   { name: 'Black', color: [0.035, 0.035, 0.035] },
+};
+
 export function makePaper(W, H, preset = PAPERS[DEFAULT_PAPER], seed = (Math.random() * 1e9) | 0) {
   const g = preset.gen;
   const cells = mm => Math.max(mm / CELL_MM, 1);

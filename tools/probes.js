@@ -53,6 +53,45 @@
   }
 
   const probes = {
+    // Dark ground: interference lilac and ultramarine on black paper, alone
+    // and glazed over each other. For screenshots.
+    async dark(paper = 'coldPress') {
+      await fresh(paper);
+      h.setTone('black');
+      h.setSlotPigment(3, 'Interference Lilac');
+      await withValues({ brushRadius: 30, brushPigment: 0.8 }, async () => {
+        h.setSlot(3);
+        for (let y = 200; y <= 300; y += 25) { h.lift(); await h.paint(150, y, 870, y, 30); }
+        h.setSlot(0);
+        for (let x = 250; x <= 350; x += 25) { h.lift(); await h.paint(x, 150, x, 600, 30); }
+        await h.wait(25); await h.wait(10, { dry: true }); await h.wait(2);
+      });
+      h.end();
+      return 'painted';
+    },
+
+    // Multi-pigment test card: four pigments side by side and overlapping,
+    // plus wet-in-wet mixes. For screenshots.
+    async palette(paper = 'coldPress') {
+      await fresh(paper);
+      await withValues({ brushRadius: 22 }, async () => {
+        for (let k = 0; k < 4; k++) {
+          h.setSlot(k);
+          for (let y = 120 + k * 60; y <= 150 + k * 60; y += 15) { h.lift(); await h.paint(120, y, 900, y, 30); }
+        }
+        await h.wait(25); await h.wait(10, { dry: true }); await h.wait(2);
+        // Wet-in-wet: blue wash, then each other pigment dropped in.
+        h.setSlot(0);
+        for (let y = 420; y <= 640; y += 18) { h.lift(); await h.paint(150, y, 870, y, 30); }
+        await h.wait(1);
+        for (let k = 1; k < 4; k++) { h.setSlot(k); h.lift(); await h.paint(150 + k * 180, 530, 170 + k * 180, 535, 12); }
+        await h.wait(25); await h.wait(10, { dry: true }); await h.wait(2);
+        h.setSlot(0);
+      });
+      h.end();
+      return 'painted';
+    },
+
     // Gap: two parallel strokes with a narrow strip of dry paper between
     // them (gapMm wide). Fraction of the gap's centre line that ends up with
     // pigment, i.e. whether the water bridged. Should be 0 on sized paper

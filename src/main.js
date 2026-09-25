@@ -1,7 +1,7 @@
 import { PARAMS, SIM_PARAMS, simParamBufferSize } from './params.js';
-import { simWGSL, renderWGSL } from './shaders.js';
-import { makePaper, PAPERS, DEFAULT_PAPER } from './paper.js';
-import { PIGMENTS } from './pigments.js';
+import { simWGSL, renderWGSL, SLOTS } from './shaders.js';
+import { makePaper, PAPERS, DEFAULT_PAPER, TONES } from './paper.js';
+import { PIGMENTS, DEFAULT_SLOTS } from './pigments.js';
 
 const W = 1024, H = 768, N = W * H;
 const WG = 16;
@@ -9,8 +9,10 @@ const WG = 16;
 const values = Object.fromEntries(PARAMS.map(p => [p.key, p.v]));
 const state = {
   mode: 0,          // 0 paint, 1 water, 2 lift
-  pigment: 0,
+  slots: [...DEFAULT_SLOTS],  // palette: PIGMENTS index per slot
+  slot: 0,                   // slot the brush loads
   paper: DEFAULT_PAPER,
+  tone: 'natural',
   drying: false,
   paused: false,
   headless: false,
@@ -22,7 +24,11 @@ async function init() {
   if (!navigator.gpu) return fail('WebGPU is not available in this browser.');
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
   if (!adapter) return fail('No WebGPU adapter found.');
-  const device = await adapter.requestDevice();
+  // Up to 12 storage buffers per stage are needed; Apple GPUs allow many more
+  // than WebGPU's default of 8.
+  const device = await adapter.requestDevice({
+    requiredLimits: { maxStorageBuffersPerShaderStage: Math.min(adapter.limits.maxStorageBuffersPerShaderStage, 16) },
+  });
   device.lost.then(info => fail(`GPU device lost: ${info.message}`));
   device.addEventListener('uncapturederror', e => console.error('[wgpu]', e.error.message));
 
@@ -39,14 +45,17 @@ async function init() {
   const B = [buf(N * 16, S | CD), buf(N * 16, S | CD)];
   const mbBuf = buf(N * 4, S | CD);
   const tmpBuf = buf(N * 4, S | CD);
+  const G = [buf(N * 16, S | CD), buf(N * 16, S | CD)];  // suspended, per slot
+  const Dbuf = buf(N * 16, S | CD);                      // deposited, per slot
   const paramBuf = buf(simParamBufferSize(), U | CD);
-  const frameBuf = buf(48, U | CD);
-  const renderBuf = buf(80, U | CD);
+  const frameBuf = buf(64, U | CD);
+  const renderBuf = buf(48, U | CD);
+  const pigBuf = buf(SLOTS * 64, U | CD);
 
   const newPaper = seed => device.queue.writeBuffer(paperBuf, 0, makePaper(W, H, PAPERS[state.paper], seed));
   const clear = () => {
     const z = new Float32Array(N * 4);
-    for (const b of [...A, ...B]) device.queue.writeBuffer(b, 0, z);
+    for (const b of [...A, ...B, ...G, Dbuf]) device.queue.writeBuffer(b, 0, z);
   };
   newPaper();
 
@@ -70,6 +79,10 @@ async function init() {
       { binding: 6, visibility: C, buffer: { type: 'storage' } },
       { binding: 7, visibility: C, buffer: { type: 'storage' } },
       { binding: 8, visibility: C, buffer: { type: 'storage' } },
+      { binding: 9, visibility: C, buffer: { type: 'read-only-storage' } },
+      { binding: 10, visibility: C, buffer: { type: 'storage' } },
+      { binding: 11, visibility: C, buffer: { type: 'storage' } },
+      { binding: 12, visibility: C, buffer: { type: 'uniform' } },
     ],
   });
   const simPL = device.createPipelineLayout({ bindGroupLayouts: [simLayout] });
@@ -79,13 +92,12 @@ async function init() {
   const pipes = {
     blurH: compute('blurH'), blurV: compute('blurV'),
     velocity: compute('velocity'), transport: compute('transport'),
-    mixCompute: compute('mixCompute'), mixApply: compute('mixApply'),
   };
 
-  // Parity k reads A[k], B[k] and writes A[1-k], B[1-k].
+  // Parity k reads A[k], B[k], G[k] and writes A[1-k], B[1-k], G[1-k].
   const simBG = [0, 1].map(k => device.createBindGroup({
     layout: simLayout,
-    entries: [paramBuf, frameBuf, paperBuf, A[k], A[1 - k], B[k], B[1 - k], mbBuf, tmpBuf]
+    entries: [paramBuf, frameBuf, paperBuf, A[k], A[1 - k], B[k], B[1 - k], mbBuf, tmpBuf, G[k], G[1 - k], Dbuf, pigBuf]
       .map((buffer, binding) => ({ binding, resource: { buffer } })),
   }));
 
@@ -95,6 +107,9 @@ async function init() {
       { binding: 0, visibility: F, buffer: { type: 'uniform' } },
       { binding: 1, visibility: F, buffer: { type: 'read-only-storage' } },
       { binding: 2, visibility: F, buffer: { type: 'read-only-storage' } },
+      { binding: 3, visibility: F, buffer: { type: 'read-only-storage' } },
+      { binding: 4, visibility: F, buffer: { type: 'read-only-storage' } },
+      { binding: 5, visibility: F, buffer: { type: 'uniform' } },
     ],
   });
   const renderPipe = device.createRenderPipeline({
@@ -105,16 +120,17 @@ async function init() {
   });
   const renderBG = [0, 1].map(k => device.createBindGroup({
     layout: renderLayout,
-    entries: [renderBuf, A[k], paperBuf].map((buffer, binding) => ({ binding, resource: { buffer } })),
+    entries: [renderBuf, A[k], paperBuf, G[k], Dbuf, pigBuf].map((buffer, binding) => ({ binding, resource: { buffer } })),
   }));
 
   let parity = 0;
 
   // ---- uniforms
   const paramData = new Float32Array(simParamBufferSize() / 4);
-  const frameData = new ArrayBuffer(48);
+  const frameData = new ArrayBuffer(64);
   const frameU32 = new Uint32Array(frameData), frameF32 = new Float32Array(frameData);
-  const renderData = new ArrayBuffer(80);
+  const renderData = new ArrayBuffer(48);
+  const pigData = new Float32Array(SLOTS * 16);
   const renderU32 = new Uint32Array(renderData), renderF32 = new Float32Array(renderData);
 
   const pointerBrush = () => {
@@ -137,15 +153,22 @@ async function init() {
     }
     frameF32[9] = 1 / substeps;
     frameF32[10] = drying ? values.dryerStrength : 1;
+    frameU32[12] = state.slot;
     device.queue.writeBuffer(frameBuf, 0, frameData);
 
-    const pig = PIGMENTS[state.pigment];
+    // Palette: colour and physical properties of the pigment in each slot.
+    state.slots.forEach((pi, k) => {
+      const pg = PIGMENTS[pi];
+      pigData.set([...pg.K, 0, ...pg.S, 0,
+        pg.density, pg.staining, pg.granulation, pg.flocculation,
+        pg.mobility, pg.wick, 0, 0], k * 16);
+    });
+    device.queue.writeBuffer(pigBuf, 0, pigData);
+
     renderU32[0] = W; renderU32[1] = H;
     renderF32[2] = values.thickness; renderF32[3] = values.wetDarken;
-    renderF32.set([...pig.K, 0], 4);
-    renderF32.set([...pig.S, 0], 8);
-    renderF32.set([...PAPERS[state.paper].color, 1], 12);
-    renderF32[16] = values.paperShade; renderF32[17] = values.suspendedWeight;
+    renderF32.set([...(TONES[state.tone].color ?? PAPERS[state.paper].color), 1], 4);
+    renderF32[8] = values.paperShade; renderF32[9] = values.suspendedWeight;
     device.queue.writeBuffer(renderBuf, 0, renderData);
   }
 
@@ -160,7 +183,6 @@ async function init() {
   let stepDebt = 0, lastFrame = performance.now();
 
   function encodeSim(enc, substeps) {
-    const mixSteps = Math.max(Math.round(values.mixSubsteps), 0);
     const pass = enc.beginComputePass();
     pass.setBindGroup(0, simBG[parity]);
     pass.setPipeline(pipes.blurH); pass.dispatchWorkgroups(gx, gy);
@@ -169,11 +191,6 @@ async function init() {
       pass.setBindGroup(0, simBG[parity]);
       pass.setPipeline(pipes.velocity); pass.dispatchWorkgroups(gx, gy);
       pass.setPipeline(pipes.transport); pass.dispatchWorkgroups(gx, gy);
-      // Mixing runs inside transport for 1 substep; separately for more.
-      for (let k = 0; mixSteps > 1 && k < mixSteps; k++) {
-        pass.setPipeline(pipes.mixCompute); pass.dispatchWorkgroups(gx, gy);
-        pass.setPipeline(pipes.mixApply); pass.dispatchWorkgroups(gx, gy);
-      }
       parity ^= 1;
     }
     pass.end();
@@ -269,6 +286,14 @@ async function init() {
     },
     wait(seconds, { dry = false } = {}) { strokeFrame = 0; return simFrames(Math.round(seconds * HZ), () => null, dry); },
     setMode(m) { state.mode = m; },
+    setSlot(k) { state.slot = k; },
+    setTone(key) { state.tone = key; },
+    // Put a pigment (by name) into a palette slot.
+    setSlotPigment(k, name) {
+      const i = PIGMENTS.findIndex(pg => pg.name === name);
+      if (i < 0) throw new Error(`unknown pigment ${name}`);
+      state.slots[k] = i;
+    },
     // A fixed seed makes probe results comparable between runs.
     setPaper(key, seed = 1) {
       const sel = document.getElementById('paperType');
@@ -349,9 +374,27 @@ function buildUI({ clear, newPaper }) {
     groups[p.group].appendChild(row);
   }
 
-  const sel = document.getElementById('pigment');
-  PIGMENTS.forEach((pg, i) => sel.add(new Option(pg.name, i)));
-  sel.addEventListener('change', () => { state.pigment = +sel.value; });
+  // Palette: one row per slot, each with a pigment picker. Clicking a row
+  // loads the brush from that slot.
+  const palette = document.getElementById('palette');
+  const rows = state.slots.map((pi, k) => {
+    const row = document.createElement('div');
+    row.className = 'slot';
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    const sel = document.createElement('select');
+    PIGMENTS.forEach((pg, i) => sel.add(new Option(pg.name, i)));
+    sel.value = pi;
+    const paintChip = () => { chip.style.background = swatchColor(PIGMENTS[state.slots[k]]); };
+    sel.addEventListener('change', () => { state.slots[k] = +sel.value; paintChip(); });
+    row.addEventListener('pointerdown', () => setSlot(k));
+    paintChip();
+    row.append(chip, sel);
+    palette.appendChild(row);
+    return row;
+  });
+  const setSlot = k => { state.slot = k; rows.forEach((r, j) => r.classList.toggle('on', j === k)); };
+  setSlot(0);
 
   const modeBtns = [...document.querySelectorAll('[data-mode]')];
   const setMode = m => { state.mode = m; modeBtns.forEach(b => b.classList.toggle('on', +b.dataset.mode === m)); };
@@ -373,6 +416,10 @@ function buildUI({ clear, newPaper }) {
   const applyPaperKnobs = () => {
     for (const [k, v] of Object.entries(PAPERS[state.paper].knobs)) inputs[k](v);
   };
+  const toneSel = document.getElementById('tone');
+  for (const [key, t] of Object.entries(TONES)) toneSel.add(new Option(t.name, key));
+  toneSel.addEventListener('change', () => { state.tone = toneSel.value; });
+
   const paperSel = document.getElementById('paperType');
   for (const [key, pp] of Object.entries(PAPERS)) paperSel.add(new Option(pp.name, key));
   paperSel.value = state.paper;
@@ -391,11 +438,24 @@ function buildUI({ clear, newPaper }) {
   window.addEventListener('keydown', e => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
     if (e.key >= '1' && e.key <= '3') setMode(+e.key - 1);
+    else if (e.key === '[' || e.key === ']') setSlot((state.slot + (e.key === ']' ? 1 : SLOTS - 1)) % SLOTS);
     else if (e.key === 'd' && !e.repeat) setDry(true);
     else if (e.key === ' ') { e.preventDefault(); togglePause(); }
     else if (e.key === 'c') clear();
   });
   window.addEventListener('keyup', e => { if (e.key === 'd') setDry(false); });
+}
+
+// Display colour of a pigment at a mid-strength wash over white paper
+// (Kubelka-Munk), for the palette chips.
+function swatchColor(pg, thickness = 2) {
+  const c = [0, 1, 2].map(ch => {
+    const K = pg.K[ch], S = Math.max(pg.S[ch], 1e-4), a = 1 + K / S, b = Math.sqrt(a * a - 1);
+    const bs = Math.min(b * S * thickness, 20), sh = Math.sinh(bs), c = a * sh + b * Math.cosh(bs);
+    const R = sh / c, T = b / c, Rg = 0.97;
+    return Math.round(255 * Math.min(1, R + T * T * Rg / (1 - R * Rg)));
+  });
+  return `rgb(${c.join(',')})`;
 }
 
 function fail(msg) {
