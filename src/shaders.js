@@ -88,8 +88,10 @@ fn pres(i: i32) -> f32 {
   // depth (capillary waves: omega^2 ~ sigma*h*k^4), so deep puddles get a
   // capped strength; thin films get the full value.
   let sigma = min(p.surfaceTension, 0.023 / (max(a.x, 0.01) * p.dt * p.dt));
+  var tension = 0.0;
+  if (sigma > 0.0 && wet > 0.0) { tension = sigma * surfaceCurvature(i); }
   return p.gravity * eta(i)
-    - sigma * surfaceCurvature(i) * wet
+    - tension
     - p.edgePull * (1.0 - mb[i]) * wet;
 }
 
@@ -170,40 +172,8 @@ fn transport(@builtin(global_invocation_id) id: vec3u) {
   let wg = a.xy - p.dt * (FR - FL + FD - FU);
   var w = wg.x;
   var g = wg.y;
+  if (round(p.mixSubsteps) == 1.0) { g += mixDelta(x, y, a, aL, aR, aU, aD, p.dt); }
 
-  // Pigment also moves between touching wet cells without net water flow:
-  //  - diffusion down its concentration gradient, and
-  //  - the Marangoni surface current: paint (binder, wetting agents) has
-  //    lower surface tension than clean water, so the surface layer carrying
-  //    it slides outward. The rate scales with concentration, so a fresh
-  //    charge bursts outward with a defined front and slows as it dilutes.
-  //    Negative values pull paint into clumps.
-  // Mixing is suppressed near a wet edge (mb falls off there), so it can't
-  // undo the outward flow that builds edge darkening. Each exchange uses the
-  // smaller of the two cells' weights, so it stays symmetric and conserves
-  // pigment.
-  if (a.x > p.wEps) {
-    let c = a.y / a.x;
-    let wi = smoothstep(p.mixEdgeLo, p.mixEdgeHi, mb[i]);
-    var dg = 0.0;
-    for (var k = 0; k < 4; k++) {
-      var nx = x; var ny = y; var n = a;
-      if (k == 0) { nx = x - 1; n = aL; } else if (k == 1) { nx = x + 1; n = aR; }
-      else if (k == 2) { ny = y - 1; n = aU; } else { ny = y + 1; n = aD; }
-      if (!inb(nx, ny) || n.x <= p.wEps) { continue; }
-      let face = min(wi, smoothstep(p.mixEdgeLo, p.mixEdgeHi, mb[ix(nx, ny)]));
-      if (face <= 0.0) { continue; }
-      let cn = n.y / n.x;
-      // The Marangoni term only acts where paint meets much cleaner water
-      // (high contrast), not across the gentle gradients inside one body of
-      // paint. Capped at the explicit-scheme stability limit (4 neighbours).
-      let hi = max(c, cn);
-      let contrast = (hi - min(c, cn)) / (hi + 1e-4);
-      let rate = min(p.pigmentDiffusion + p.marangoni * hi * contrast * contrast, 0.24 / max(p.dt, 1e-6));
-      dg += face * rate * min(a.x, n.x) * (cn - c);
-    }
-    g += p.dt * dg;
-  }
   var d = a.z;
   var s = a.w;
 
@@ -287,6 +257,72 @@ fn transport(@builtin(global_invocation_id) id: vec3u) {
   if (w <= p.wEps) { d += max(g, 0.0); g = 0.0; }
 
   Aout[i] = vec4f(finite(w), finite(max(g, 0.0)), finite(max(d, 0.0)), finite(s));
+}
+
+// ---------------------------------------------------------------- pigment mixing
+// Pigment also moves between touching wet cells without net water flow:
+//  - diffusion down its concentration gradient, and
+//  - the Marangoni surface current: paint (binder, wetting agents) has lower
+//    surface tension than clean water, so the surface layer carrying it
+//    slides outward. The rate scales with concentration, so a fresh charge
+//    bursts outward with a defined front and slows as it dilutes. Negative
+//    values pull paint into clumps.
+// With mixSubsteps = 1 this runs inside the transport pass (cheapest). Above
+// 1 it runs as its own pass pair, mixSubsteps times per step at
+// dt/mixSubsteps, so faster spreading stays within the explicit stability
+// limit; mixCompute writes new g into tmp and mixApply copies it back.
+// mixSubsteps = 0 disables mixing.
+// Mixing is suppressed near a wet edge (mb falls off there), so it can't undo
+// the outward flow that builds edge darkening. Each exchange uses the smaller
+// of the two cells' weights, so it stays symmetric and conserves pigment.
+// Pigment change at (x, y) over time h, given this cell's state a and its
+// four neighbours' states (out-of-bounds neighbours passed as a copy of a).
+fn mixDelta(x: i32, y: i32, a: vec4f, aL: vec4f, aR: vec4f, aU: vec4f, aD: vec4f, h: f32) -> f32 {
+  if (a.x <= p.wEps) { return 0.0; }
+  let i = ix(x, y);
+  let c = a.y / a.x;
+  let wi = smoothstep(p.mixEdgeLo, p.mixEdgeHi, mb[i]);
+  var dg = 0.0;
+  for (var k = 0; k < 4; k++) {
+    var nx = x; var ny = y; var n = a;
+    if (k == 0) { nx = x - 1; n = aL; } else if (k == 1) { nx = x + 1; n = aR; }
+    else if (k == 2) { ny = y - 1; n = aU; } else { ny = y + 1; n = aD; }
+    if (!inb(nx, ny) || n.x <= p.wEps) { continue; }
+    let face = min(wi, smoothstep(p.mixEdgeLo, p.mixEdgeHi, mb[ix(nx, ny)]));
+    if (face <= 0.0) { continue; }
+    let cn = n.y / n.x;
+    // The Marangoni term acts most where paint meets much cleaner water
+    // (high contrast), less across the gentle gradients inside one body of
+    // paint. Capped at the explicit-scheme stability limit (4 neighbours).
+    let hi = max(c, cn);
+    let contrast = (hi - min(c, cn)) / (hi + 1e-4);
+    let rate = min(p.pigmentDiffusion + p.marangoni * hi * pow(contrast, p.marangoniContrast), 0.24 / max(h, 1e-6));
+    dg += face * rate * min(a.x, n.x) * (cn - c);
+  }
+  return h * dg;
+}
+
+// Separate passes, used only when mixSubsteps > 1.
+@compute @workgroup_size(16, 16)
+fn mixCompute(@builtin(global_invocation_id) id: vec3u) {
+  let x = i32(id.x); let y = i32(id.y);
+  if (!inb(x, y)) { return; }
+  let i = ix(x, y);
+  let a = Aout[i];
+  var aL = a; var aR = a; var aU = a; var aD = a;
+  if (x > 0)       { aL = Aout[ix(x - 1, y)]; }
+  if (x < W() - 1) { aR = Aout[ix(x + 1, y)]; }
+  if (y > 0)       { aU = Aout[ix(x, y - 1)]; }
+  if (y < H() - 1) { aD = Aout[ix(x, y + 1)]; }
+  tmp[i] = a.y + mixDelta(x, y, a, aL, aR, aU, aD, p.dt / max(round(p.mixSubsteps), 1.0));
+}
+
+@compute @workgroup_size(16, 16)
+fn mixApply(@builtin(global_invocation_id) id: vec3u) {
+  let x = i32(id.x); let y = i32(id.y);
+  if (!inb(x, y)) { return; }
+  let i = ix(x, y);
+  Aout[i].y = tmp[i];
 }
 `;
 

@@ -36,6 +36,8 @@ export const PARAMS = [
   { key: 'dryerStrength',    v: 15,     min: 1, max: 100,   group: 'Paper & drying', target: 'js',  label: 'blow-dryer ×' },
 
   // --- Pigment (Curtis's ρ, ω, γ) ---
+  { key: 'mixSubsteps', v: 1,    min: 0, max: 16,  group: 'Pigment', target: 'sim', label: 'mixing substeps' },
+  { key: 'marangoniContrast', v: 1, min: 0, max: 4, group: 'Pigment', target: 'sim', label: 'Marangoni needs contrast' },
   { key: 'marangoni',   v: 4,    min: -2, max: 10,   group: 'Pigment', target: 'sim', label: 'spreads on water (Marangoni)' },
   { key: 'pigmentDiffusion', v: 0.05, min: 0, max: 1, group: 'Pigment', target: 'sim', label: 'diffusion in water' },
   { key: 'mixEdgeLo',   v: 0.6,  min: 0, max: 1,   group: 'Pigment', target: 'sim', label: 'no mixing near edge (lo)' },

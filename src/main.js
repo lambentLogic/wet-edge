@@ -79,6 +79,7 @@ async function init() {
   const pipes = {
     blurH: compute('blurH'), blurV: compute('blurV'),
     velocity: compute('velocity'), transport: compute('transport'),
+    mixCompute: compute('mixCompute'), mixApply: compute('mixApply'),
   };
 
   // Parity k reads A[k], B[k] and writes A[1-k], B[1-k].
@@ -159,6 +160,7 @@ async function init() {
   let stepDebt = 0, lastFrame = performance.now();
 
   function encodeSim(enc, substeps) {
+    const mixSteps = Math.max(Math.round(values.mixSubsteps), 0);
     const pass = enc.beginComputePass();
     pass.setBindGroup(0, simBG[parity]);
     pass.setPipeline(pipes.blurH); pass.dispatchWorkgroups(gx, gy);
@@ -167,6 +169,11 @@ async function init() {
       pass.setBindGroup(0, simBG[parity]);
       pass.setPipeline(pipes.velocity); pass.dispatchWorkgroups(gx, gy);
       pass.setPipeline(pipes.transport); pass.dispatchWorkgroups(gx, gy);
+      // Mixing runs inside transport for 1 substep; separately for more.
+      for (let k = 0; mixSteps > 1 && k < mixSteps; k++) {
+        pass.setPipeline(pipes.mixCompute); pass.dispatchWorkgroups(gx, gy);
+        pass.setPipeline(pipes.mixApply); pass.dispatchWorkgroups(gx, gy);
+      }
       parity ^= 1;
     }
     pass.end();

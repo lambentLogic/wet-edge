@@ -53,6 +53,20 @@
   }
 
   const probes = {
+    // Throughput: simulated seconds per wall-clock second over a wet wash.
+    // Needs to stay above 1 for the interactive app to run in real time.
+    async speed(paper = 'coldPress') {
+      await fresh(paper);
+      await withValues({ brushRadius: 30 }, async () => {
+        for (let y = 100; y <= 660; y += 40) { h.lift(); await h.paint(100, y, 920, y, 10); }
+      });
+      const t0 = performance.now();
+      await h.wait(5);
+      const wall = (performance.now() - t0) / 1000;
+      h.end();
+      return +(5 / wall).toFixed(2);
+    },
+
     // Creep: a U-shaped stroke that curves back to join itself. Fraction of
     // final pigment lying more than 1 mm outside anywhere the brush touched.
     // Should be ~0 on sized paper.
