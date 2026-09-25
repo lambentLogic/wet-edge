@@ -1,7 +1,7 @@
 import { PARAMS, SIM_PARAMS, simParamBufferSize } from './params.js';
-import { simWGSL, renderWGSL, SLOTS } from './shaders.js';
+import { simWGSL, renderWGSL, MAX_PIGMENTS } from './shaders.js';
 import { makePaper, PAPERS, DEFAULT_PAPER, TONES } from './paper.js';
-import { PIGMENTS, DEFAULT_SLOTS } from './pigments.js';
+import { PIGMENTS } from './pigments.js';
 
 const W = 1024, H = 768, N = W * H;
 const WG = 16;
@@ -9,8 +9,9 @@ const WG = 16;
 const values = Object.fromEntries(PARAMS.map(p => [p.key, p.v]));
 const state = {
   mode: 0,          // 0 paint, 1 water, 2 lift
-  slots: [...DEFAULT_SLOTS],  // palette: PIGMENTS index per slot
-  slot: 0,                   // slot the brush loads
+  // What the brush is loaded with: up to 4 pigments (PIGMENTS indices) and
+  // their fractions of the load. One pigment straight from a pan, or a mix.
+  brush: [{ pigment: 0, frac: 1 }],
   paper: DEFAULT_PAPER,
   tone: 'natural',
   drying: false,
@@ -42,12 +43,12 @@ async function init() {
   const auxBuf = buf(N * 16, S | CD);  // (paper height, wet mask, scratch, -)
   const A = [buf(N * 16, S | CD), buf(N * 16, S | CD)];
   const B = [buf(N * 16, S | CD), buf(N * 16, S | CD)];
-  const G = [buf(N * 16, S | CD), buf(N * 16, S | CD)];  // suspended, per slot
-  const Dbuf = buf(N * 16, S | CD);                      // deposited, per slot
+  const G = [buf(N * 32, S | CD), buf(N * 32, S | CD)];  // suspended components
+  const Dbuf = buf(N * 64, S | CD);                      // deposited components + stain
   const paramBuf = buf(simParamBufferSize(), U | CD);
-  const frameBuf = buf(64, U | CD);
+  const frameBuf = buf(96, U | CD);
   const renderBuf = buf(48, U | CD);
-  const pigBuf = buf(SLOTS * 64, U | CD);
+  const pigBuf = buf(MAX_PIGMENTS * 64, U | CD);
   const TILE = 16, TX = Math.ceil(W / TILE), TY = Math.ceil(H / TILE);
   // Tiles struct: indirect args (16 bytes), then per-tile state, then list.
   const tilesBuf = buf(16 + TX * TY * 8, S | CD);
@@ -63,14 +64,16 @@ async function init() {
   };
   const clear = () => {
     const z = new Float32Array(N * 4);
-    for (const b of [...A, ...B, ...G, Dbuf]) device.queue.writeBuffer(b, 0, z);
+    for (const b of [...A, ...B]) device.queue.writeBuffer(b, 0, z);
+    for (const b of G) device.queue.writeBuffer(b, 0, new Float32Array(N * 8));
+    device.queue.writeBuffer(Dbuf, 0, new Float32Array(N * 16));
     device.queue.writeBuffer(tilesBuf, 16, new Uint32Array(TX * TY));
   };
   newPaper();
 
   // ---- pipelines
   const simModule = device.createShaderModule({ code: simWGSL(TX * TY) });
-  const renderModule = device.createShaderModule({ code: renderWGSL });
+  const renderModule = device.createShaderModule({ code: renderWGSL() });
   for (const m of [simModule, renderModule]) {
     const info = await m.getCompilationInfo();
     for (const msg of info.messages) console[msg.type === 'error' ? 'error' : 'warn'](`[wgsl ${msg.lineNum}:${msg.linePos}] ${msg.message}`);
@@ -128,10 +131,18 @@ async function init() {
 
   // ---- uniforms
   const paramData = new Float32Array(simParamBufferSize() / 4);
-  const frameData = new ArrayBuffer(64);
+  const frameData = new ArrayBuffer(96);
   const frameU32 = new Uint32Array(frameData), frameF32 = new Float32Array(frameData);
   const renderData = new ArrayBuffer(48);
-  const pigData = new Float32Array(SLOTS * 16);
+  // The pigment table: colour and physical properties of every pigment in
+  // the library. Constant, so it's uploaded once.
+  const pigData = new Float32Array(MAX_PIGMENTS * 16);
+  PIGMENTS.slice(0, MAX_PIGMENTS).forEach((pg, k) => {
+    pigData.set([...pg.K, 0, ...pg.S, 0,
+      pg.density, pg.staining, pg.granulation, pg.flocculation,
+      pg.mobility, pg.wick, 0, 0], k * 16);
+  });
+  device.queue.writeBuffer(pigBuf, 0, pigData);
   const renderU32 = new Uint32Array(renderData), renderF32 = new Float32Array(renderData);
 
   const pointerBrush = () => {
@@ -154,17 +165,14 @@ async function init() {
     }
     frameF32[9] = 1 / substeps;
     frameF32[10] = drying ? values.dryerStrength : 1;
-    frameU32[12] = state.slot;
+    // Brush load: pigment ids at u32 16..19, fractions at f32 20..23.
+    const total = state.brush.reduce((t, b) => t + b.frac, 0) || 1;
+    for (let b = 0; b < 4; b++) {
+      const item = state.brush[b];
+      frameU32[16 + b] = item ? item.pigment : 0;
+      frameF32[20 + b] = item ? item.frac / total : 0;
+    }
     device.queue.writeBuffer(frameBuf, 0, frameData);
-
-    // Palette: colour and physical properties of the pigment in each slot.
-    state.slots.forEach((pi, k) => {
-      const pg = PIGMENTS[pi];
-      pigData.set([...pg.K, 0, ...pg.S, 0,
-        pg.density, pg.staining, pg.granulation, pg.flocculation,
-        pg.mobility, pg.wick, 0, 0], k * 16);
-    });
-    device.queue.writeBuffer(pigBuf, 0, pigData);
 
     renderU32[0] = W; renderU32[1] = H;
     renderF32[2] = values.thickness; renderF32[3] = values.wetDarken;
@@ -299,13 +307,16 @@ async function init() {
     },
     wait(seconds, { dry = false } = {}) { strokeFrame = 0; return simFrames(Math.round(seconds * HZ), () => null, dry); },
     setMode(m) { state.mode = m; },
-    setSlot(k) { state.slot = k; },
     setTone(key) { state.tone = key; },
-    // Put a pigment (by name) into a palette slot.
-    setSlotPigment(k, name) {
-      const i = PIGMENTS.findIndex(pg => pg.name === name);
-      if (i < 0) throw new Error(`unknown pigment ${name}`);
-      state.slots[k] = i;
+    // Load the brush: setBrush('French Ultramarine') or a mix,
+    // setBrush([['French Ultramarine', 2], ['Burnt Umber', 1]]).
+    setBrush(load) {
+      const items = typeof load === 'string' ? [[load, 1]] : load;
+      state.brush = items.map(([name, frac]) => {
+        const i = PIGMENTS.findIndex(pg => pg.name === name);
+        if (i < 0) throw new Error(`unknown pigment ${name}`);
+        return { pigment: i, frac };
+      });
     },
     // A fixed seed makes probe results comparable between runs.
     setPaper(key, seed = 1) {
@@ -387,27 +398,25 @@ function buildUI({ clear, newPaper }) {
     groups[p.group].appendChild(row);
   }
 
-  // Palette: one row per slot, each with a pigment picker. Clicking a row
-  // loads the brush from that slot.
+  // Paint box: every pigment in the library. Clicking one loads the brush
+  // with it. Pigment already on the paper is never changed.
   const palette = document.getElementById('palette');
-  const rows = state.slots.map((pi, k) => {
-    const row = document.createElement('div');
-    row.className = 'slot';
-    const chip = document.createElement('span');
-    chip.className = 'chip';
-    const sel = document.createElement('select');
-    PIGMENTS.forEach((pg, i) => sel.add(new Option(pg.name, i)));
-    sel.value = pi;
-    const paintChip = () => { chip.style.background = swatchColor(PIGMENTS[state.slots[k]]); };
-    sel.addEventListener('change', () => { state.slots[k] = +sel.value; paintChip(); });
-    row.addEventListener('pointerdown', () => setSlot(k));
-    paintChip();
-    row.append(chip, sel);
-    palette.appendChild(row);
-    return row;
+  const pans = PIGMENTS.map((pg, i) => {
+    const pan = document.createElement('button');
+    pan.className = 'pan';
+    pan.title = `${pg.name} (${pg.code}, ${pg.kind})`;
+    pan.style.background = swatchColor(pg);
+    pan.addEventListener('click', () => setPigment(i));
+    palette.appendChild(pan);
+    return pan;
   });
-  const setSlot = k => { state.slot = k; rows.forEach((r, j) => r.classList.toggle('on', j === k)); };
-  setSlot(0);
+  const brushLabel = document.getElementById('brushLabel');
+  const setPigment = i => {
+    state.brush = [{ pigment: i, frac: 1 }];
+    pans.forEach((pan, j) => pan.classList.toggle('on', j === i));
+    brushLabel.textContent = `${PIGMENTS[i].name} · ${PIGMENTS[i].code}`;
+  };
+  setPigment(0);
 
   const modeBtns = [...document.querySelectorAll('[data-mode]')];
   const setMode = m => { state.mode = m; modeBtns.forEach(b => b.classList.toggle('on', +b.dataset.mode === m)); };
@@ -451,7 +460,10 @@ function buildUI({ clear, newPaper }) {
   window.addEventListener('keydown', e => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
     if (e.key >= '1' && e.key <= '3') setMode(+e.key - 1);
-    else if (e.key === '[' || e.key === ']') setSlot((state.slot + (e.key === ']' ? 1 : SLOTS - 1)) % SLOTS);
+    else if (e.key === '[' || e.key === ']') {
+      const n = PIGMENTS.length;
+      setPigment((state.brush[0].pigment + (e.key === ']' ? 1 : n - 1)) % n);
+    }
     else if (e.key === 'd' && !e.repeat) setDry(true);
     else if (e.key === ' ') { e.preventDefault(); togglePause(); }
     else if (e.key === 'c') clear();
@@ -463,7 +475,7 @@ function buildUI({ clear, newPaper }) {
 // (Kubelka-Munk), for the palette chips.
 function swatchColor(pg, thickness = 2) {
   const c = [0, 1, 2].map(ch => {
-    const K = pg.K[ch], S = Math.max(pg.S[ch], 1e-4), a = 1 + K / S, b = Math.sqrt(a * a - 1);
+    const K = pg.K[ch], S = Math.max(pg.S[ch], 1e-4), a = 1 + K / S, b = Math.max(Math.sqrt(a * a - 1), 1e-4);
     const bs = Math.min(b * S * thickness, 20), sh = Math.sinh(bs), c = a * sh + b * Math.cosh(bs);
     const R = sh / c, T = b / c, Rg = 0.97;
     return Math.round(255 * Math.min(1, R + T * T * Rg / (1 - R * Rg)));

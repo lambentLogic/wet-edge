@@ -3,24 +3,33 @@ import { paramStructWGSL } from './params.js';
 // Cell state, ping-pong buffers:
 //   A = (w, gSum, dSum, s)  surface water depth, total suspended pigment,
 //                           total deposited pigment, paper saturation
-//   G = suspended pigment per palette slot (4 slots, one vec4 per cell)
+//   G = suspended pigment: up to 4 components per cell, each a pigment id
+//       (index into the pigment table) and an amount
 //   B = (u, v, -, -)        staggered face velocities: u on the cell's right
 //                           face, v on its bottom face (y points down)
-// Plus D, deposited pigment per slot (updated in place: only a cell's own
-// thread touches it), and mb, a blurred wet mask for edge effects (Curtis's
-// M'). A's totals are kept in sync with G and D for rendering, edge effects
-// and probes.
+// Plus D, deposited pigment: 4 components like G, plus a "stain" layer
+// holding the Kubelka-Munk absorption and scattering totals of pigment that
+// is fixed in the paper for good (no longer liftable). D is updated in
+// place: only a cell's own thread touches it. A's totals are kept in sync
+// for rendering, edge effects and probes.
+//
+// Components: a wet cell can carry up to 4 distinct pigments. When a fifth
+// arrives, the smallest amount settles out of suspension into D; when D's 4
+// components are full, the smallest is fixed into the stain layer. Colour is
+// exact either way, since Kubelka-Munk absorption and scattering simply add.
 
-export const SLOTS = 4;
+export const MAX_PIGMENTS = 32;
 
-export const simWGSL = (NTILES) => /* wgsl */ `
+export const simWGSL = (NTILES, MAXP = MAX_PIGMENTS) => /* wgsl */ `
 ${paramStructWGSL()}
 
 struct Frame {
   W: u32, H: u32, mode: u32, brushOn: u32,
   bx0: f32, by0: f32, bx1: f32, by1: f32,
   pressure: f32, brushScale: f32, dryMul: f32, charge: f32,
-  slot: u32, _a: u32, _b: u32, _c: u32,
+  _a: u32, _b: u32, _c: u32, _d: u32,
+  brushId: vec4u,     // the brush's load: up to 4 pigments ...
+  brushFrac: vec4f,   // ... and their fractions of the load (sum 1)
 };
 
 // Per-pigment physical properties, each relative to French ultramarine (1).
@@ -36,10 +45,12 @@ struct Pigment { K: vec4f, S: vec4f, phys: vec4f, phys2: vec4f };
 @group(0) @binding(4) var<storage, read_write> Aout: array<vec4f>;
 @group(0) @binding(5) var<storage, read> Bin: array<vec4f>;
 @group(0) @binding(6) var<storage, read_write> Bout: array<vec4f>;
-@group(0) @binding(9) var<storage, read> Gin: array<vec4f>;
-@group(0) @binding(10) var<storage, read_write> Gout: array<vec4f>;
-@group(0) @binding(11) var<storage, read_write> D: array<vec4f>;
-@group(0) @binding(12) var<uniform> pig: array<Pigment, 4>;
+struct Comp4 { id: vec4u, amt: vec4f };
+struct Dep { id: vec4u, amt: vec4f, stainK: vec4f, stainS: vec4f };  // stainK.w = stained amount
+@group(0) @binding(9) var<storage, read> Gin: array<Comp4>;
+@group(0) @binding(10) var<storage, read_write> Gout: array<Comp4>;
+@group(0) @binding(11) var<storage, read_write> D: array<Dep>;
+@group(0) @binding(12) var<uniform> pig: array<Pigment, ${MAXP}>;
 struct Tiles {
   args: array<atomic<u32>, 4>,        // indirect dispatch (x, y, z) + pad
   state: array<u32, ${NTILES}>,       // frames left active
@@ -239,8 +250,46 @@ fn velocity(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) lid
 }
 
 // ---------------------------------------------------------------- transport + paper
-fn fin4(v: vec4f) -> vec4f { return vec4f(finite(v.x), finite(v.y), finite(v.z), finite(v.w)); }
 fn sum4(v: vec4f) -> f32 { return v.x + v.y + v.z + v.w; }
+
+// Amount of pigment id in a component list (0 if absent).
+fn amtOf(c: Comp4, id: u32) -> f32 {
+  var a = 0.0;
+  for (var k = 0; k < 4; k++) { if (c.amt[k] > 0.0 && c.id[k] == id) { a += c.amt[k]; } }
+  return a;
+}
+
+// Candidate list for this cell's suspended pigment: everything that ends up
+// here this step (own pigment that stays, inflow from neighbours, brush),
+// merged by id before the 4 largest are kept.
+const MAXC: u32 = 8u;
+var<private> cid: array<u32, 8>;
+var<private> camt: array<f32, 8>;
+var<private> cn: u32;
+// Pigment fixed into the stain layer this step (KM totals and amount).
+var<private> stK: vec3f;
+var<private> stS: vec3f;
+var<private> stA: f32;
+
+fn stainAdd(id: u32, a: f32) {
+  if (!(a > 0.0)) { return; }
+  stK += pig[id].K.rgb * a; stS += pig[id].S.rgb * a; stA += a;
+}
+
+fn candIndex(id: u32) -> i32 {
+  for (var k = 0u; k < cn; k++) { if (cid[k] == id) { return i32(k); } }
+  return -1;
+}
+
+// Add (or with a negative amount, remove) pigment id.
+fn addCand(id: u32, a: f32) {
+  if (a == 0.0 || a != a) { return; }
+  let k = candIndex(id);
+  if (k >= 0) { camt[k] += a; return; }
+  if (a < 0.0) { return; }
+  if (cn < MAXC) { cid[cn] = id; camt[cn] = a; cn++; return; }
+  stainAdd(id, a);   // nine or more pigments meeting in one cell: fix it
+}
 
 @compute @workgroup_size(16, 16)
 fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) lid: vec3u) {
@@ -250,6 +299,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   let i = ix(x, y);
   let a = Ain[i];
   let gi = Gin[i];
+  cn = 0u; stK = vec3f(0.0); stS = vec3f(0.0); stA = 0.0;
 
   // Upwind finite-volume flux of water and suspended pigment together,
   // so each pigment rides the water at its local concentration.
@@ -269,19 +319,23 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   let fwU = vU * select(a.x, aU.x, vU > 0.0);
   var w = a.x - p.dt * (fwR - fwL + fwD - fwU);
 
-  let fgR = uR * select(gR, gi, uR > 0.0);
-  let fgL = uL * select(gi, gL, uL > 0.0);
-  let fgD = vD * select(gD, gi, vD > 0.0);
-  let fgU = vU * select(gi, gU, vU > 0.0);
-  var g = gi - p.dt * (fgR - fgL + fgD - fgU);
+  // Own pigment keeps the fraction that doesn't flow out; neighbours' flows
+  // in carry their components.
+  let keep = 1.0 - p.dt * (max(uR, 0.0) + max(-uL, 0.0) + max(vD, 0.0) + max(-vU, 0.0));
+  for (var k = 0; k < 4; k++) { if (gi.amt[k] > 0.0) { addCand(gi.id[k], gi.amt[k] * keep); } }
+  for (var k = 0; k < 4; k++) {
+    if (uR < 0.0 && gR.amt[k] > 0.0) { addCand(gR.id[k], -p.dt * uR * gR.amt[k]); }
+    if (uL > 0.0 && gL.amt[k] > 0.0) { addCand(gL.id[k],  p.dt * uL * gL.amt[k]); }
+    if (vD < 0.0 && gD.amt[k] > 0.0) { addCand(gD.id[k], -p.dt * vD * gD.amt[k]); }
+    if (vU > 0.0 && gU.amt[k] > 0.0) { addCand(gU.id[k],  p.dt * vU * gU.amt[k]); }
+  }
 
-  if (p.mixing > 0.5) { g += mixDelta(x, y, a, aL, aR, aU, aD, gi, gL, gR, gU, gD); }
+  if (p.mixing > 0.5) { mixPigments(x, y, a, gi, aL, aR, aU, aD, gL, gR, gU, gD); }
 
-  var d = D[i];
   var s = a.w;
 
-  // Brush: stamped along the segment the pointer travelled this frame. It
-  // loads one palette slot.
+  // Brush: stamped along the segment the pointer travelled this frame. Its
+  // load can hold up to 4 pigments (a palette mix).
   if (fr.brushOn == 1u) {
     let P = vec2f(f32(x) + 0.5, f32(y) + 0.5);
     let A = vec2f(fr.bx0, fr.by0);
@@ -301,23 +355,50 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     // dragging a stroke through its own wet trail doesn't keep flooding.
     let charge = select(0.0, p.brushCharge * fr.charge * k, a.x > p.wEps);
     if (fr.mode == 0u) {
-      let sl = fr.slot;
-      let c0 = select(0.0, g[sl] / w, w > p.wEps);
+      for (var b = 0; b < 4; b++) {
+        let frac = fr.brushFrac[b];
+        if (frac <= 0.0) { continue; }
+        let id = fr.brushId[b];
+        let ci = candIndex(id);
+        let cur = select(0.0, camt[max(ci, 0)], ci >= 0);
+        let conc = p.brushPigment * frac;
+        let c0 = select(0.0, cur / w, w > p.wEps);
+        let next = max(cur, mix(cur, p.brushWater * conc, k)) + charge * max(conc - c0, 0.0);
+        addCand(id, next - cur);
+      }
       w = max(w, mix(w, p.brushWater, k)) + charge;
-      g[sl] = max(g[sl], mix(g[sl], p.brushWater * p.brushPigment, k)) + charge * max(p.brushPigment - c0, 0.0);
     } else if (fr.mode == 1u) {
       w = max(w, mix(w, p.brushWater, k)) + charge;
     } else {
       let kl = clamp(p.liftStrength * amt * 8.0, 0.0, 1.0);
       w *= 1.0 - kl;
-      g *= 1.0 - kl;
+      for (var j = 0u; j < cn; j++) { camt[j] *= 1.0 - kl; }
       s *= 1.0 - kl;
     }
   }
 
+  // Keep the 4 largest candidates in suspension; the rest settle out.
+  var gId = vec4u(0u); var gAmt = vec4f(0.0); var gOcc = vec4<bool>(false);
+  var taken: array<bool, 8>;
+  for (var slot = 0; slot < 4; slot++) {
+    var best = -1; var bestA = 0.0;
+    for (var j = 0u; j < cn; j++) {
+      if (!taken[j] && camt[j] > bestA) { best = i32(j); bestA = camt[j]; }
+    }
+    if (best < 0) { break; }
+    taken[best] = true;
+    gId[slot] = cid[best]; gAmt[slot] = bestA; gOcc[slot] = true;
+  }
+
+  var dep = D[i];
+  var dOcc = vec4<bool>(dep.amt.x > 0.0, dep.amt.y > 0.0, dep.amt.z > 0.0, dep.amt.w > 0.0);
+  for (var j = 0u; j < cn; j++) {
+    if (!taken[j] && camt[j] > 0.0) { depositInto(&dep, &dOcc, cid[j], camt[j]); }
+  }
+
   // Settled pigment fills the paper's valleys, so granulation fades as a
   // wash gets dense: pale washes speckle, masstone goes flat.
-  let h = min(aux[i].x + sum4(d) * p.valleyFill, 1.0);
+  let h = min(aux[i].x + (sum4(dep.amt) + dep.stainK.w) * p.valleyFill, 1.0);
 
   // Pigment adsorption / desorption (Curtis §4.5), per pigment. Valleys
   // (low h) catch more pigment when granulation is high. Unlike Curtis,
@@ -325,17 +406,39 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   // suspended and drops out as the water thins, which concentrates it at
   // drying edges. Global knobs multiply each pigment's own properties.
   if (w > p.wEps) {
+    // Deposited pigment can go back into suspension when there's room.
+    for (var j = 0; j < 4; j++) {
+      if (!dOcc[j]) { continue; }
+      var found = false;
+      for (var k = 0; k < 4; k++) { if (gOcc[k] && gId[k] == dep.id[j]) { found = true; } }
+      if (!found) {
+        for (var k = 0; k < 4; k++) {
+          if (!gOcc[k]) { gOcc[k] = true; gId[k] = dep.id[j]; gAmt[k] = 0.0; found = true; break; }
+        }
+      }
+    }
     let thin = p.settleDepth / (w + 0.01);
     for (var k = 0; k < 4; k++) {
-      let rho = p.density * pig[k].phys.x;
-      let omega = max(p.staining * pig[k].phys.y, 1e-4);
-      let gam = p.granulation * pig[k].phys.z;
-      let down = max(g[k] * (1.0 - h * gam), 0.0) * rho * thin * p.dt;
-      let up = max(d[k] * (1.0 + (h - 1.0) * gam), 0.0) * rho / omega * p.dt;
-      let dn = min(down, max(g[k], 0.0));
-      let upc = min(up, max(d[k], 0.0));
-      g[k] += upc - dn;
-      d[k] += dn - upc;
+      if (!gOcc[k]) { continue; }
+      let id = gId[k];
+      // Matching deposited component (allocate one if there's room).
+      var j = -1;
+      for (var m = 0; m < 4; m++) { if (dOcc[m] && dep.id[m] == id) { j = m; } }
+      if (j < 0) {
+        for (var m = 0; m < 4; m++) { if (!dOcc[m]) { j = m; dOcc[m] = true; dep.id[m] = id; dep.amt[m] = 0.0; break; } }
+      }
+      let rho = p.density * pig[id].phys.x;
+      let omega = max(p.staining * pig[id].phys.y, 1e-4);
+      let gam = p.granulation * pig[id].phys.z;
+      let down = min(max(gAmt[k] * (1.0 - h * gam), 0.0) * rho * thin * p.dt, gAmt[k]);
+      if (j < 0) {
+        // Nowhere to put it as a liftable deposit: it stains.
+        gAmt[k] -= down; stainAdd(id, down);
+        continue;
+      }
+      let up = min(max(dep.amt[j] * (1.0 + (h - 1.0) * gam), 0.0) * rho / omega * p.dt, dep.amt[j]);
+      gAmt[k] += up - down;
+      dep.amt[j] += down - up;
     }
   }
 
@@ -365,13 +468,39 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   if (w <= p.wEps) { s = max(s - p.paperEvaporation * fr.dryMul * p.dt, 0.0); }
 
   // Once the surface water is gone, whatever pigment it carried settles.
-  if (w <= p.wEps) { d += max(g, vec4f(0.0)); g = vec4f(0.0); }
+  if (w <= p.wEps) {
+    for (var k = 0; k < 4; k++) {
+      if (gOcc[k] && gAmt[k] > 0.0) { depositInto(&dep, &dOcc, gId[k], gAmt[k]); }
+      gAmt[k] = 0.0; gOcc[k] = false;
+    }
+  }
 
-  g = fin4(max(g, vec4f(0.0)));
-  d = fin4(max(d, vec4f(0.0)));
-  Gout[i] = g;
-  D[i] = d;
-  Aout[i] = vec4f(finite(w), sum4(g), sum4(d), finite(s));
+  // Write back; empty components get amount 0.
+  var gOut: Comp4;
+  for (var k = 0; k < 4; k++) {
+    let am = finite(select(0.0, gAmt[k], gOcc[k] && gAmt[k] > 1e-12));
+    gOut.id[k] = gId[k]; gOut.amt[k] = am;
+  }
+  for (var k = 0; k < 4; k++) {
+    dep.amt[k] = finite(select(0.0, dep.amt[k], dOcc[k] && dep.amt[k] > 1e-12));
+  }
+  dep.stainK += vec4f(stK, stA);
+  dep.stainS += vec4f(stS, 0.0);
+  Gout[i] = gOut;
+  D[i] = dep;
+  Aout[i] = vec4f(finite(w), sum4(gOut.amt), sum4(dep.amt) + dep.stainK.w, finite(s));
+}
+
+// Put pigment into a cell's deposited components: same pigment, else an
+// empty component, else the permanent stain layer.
+fn depositInto(dep: ptr<function, Dep>, occ: ptr<function, vec4<bool>>, id: u32, a: f32) {
+  if (!(a > 0.0)) { return; }
+  for (var m = 0; m < 4; m++) { if ((*occ)[m] && (*dep).id[m] == id) { (*dep).amt[m] += a; return; } }
+  for (var m = 0; m < 4; m++) {
+    if (!(*occ)[m]) { (*occ)[m] = true; (*dep).id[m] = id; (*dep).amt[m] = a; return; }
+  }
+  (*dep).stainK += vec4f(pig[id].K.rgb * a, a);
+  (*dep).stainS += vec4f(pig[id].S.rgb * a, 0.0);
 }
 
 // ---------------------------------------------------------------- pigment mixing
@@ -388,16 +517,13 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
 // the outward flow that builds edge darkening. Each exchange uses the smaller
 // of the two cells' weights and a rate symmetric in the two cells, so it
 // conserves pigment. Capped at the explicit-scheme stability limit.
-fn mixDelta(x: i32, y: i32, a: vec4f, aL: vec4f, aR: vec4f, aU: vec4f, aD: vec4f,
-            gi: vec4f, gL: vec4f, gR: vec4f, gU: vec4f, gD: vec4f) -> vec4f {
-  if (a.x <= p.wEps) { return vec4f(0.0); }
+fn mixPigments(x: i32, y: i32, a: vec4f, gi: Comp4,
+       aL: vec4f, aR: vec4f, aU: vec4f, aD: vec4f, gL: Comp4, gR: Comp4, gU: Comp4, gD: Comp4) {
+  if (a.x <= p.wEps) { return; }
   let i = ix(x, y);
-  let ci = gi / a.x;
   let cT = a.y / a.x;
   let wi = smoothstep(p.mixEdgeLo, p.mixEdgeHi, aux[i].y);
-  let mob = vec4f(pig[0].phys2.x, pig[1].phys2.x, pig[2].phys2.x, pig[3].phys2.x);
   let cap = 0.24 / max(p.dt, 1e-6);
-  var dg = vec4f(0.0);
   for (var k = 0; k < 4; k++) {
     var nx = x; var ny = y; var n = a; var gn = gi;
     if (k == 0) { nx = x - 1; n = aL; gn = gL; } else if (k == 1) { nx = x + 1; n = aR; gn = gR; }
@@ -412,26 +538,40 @@ fn mixDelta(x: i32, y: i32, a: vec4f, aL: vec4f, aR: vec4f, aU: vec4f, aD: vec4f
     let hi = max(cT, cnT);
     let contrast = (hi - min(cT, cnT)) / (hi + 1e-4);
     let base = p.pigmentDiffusion + p.marangoni * hi * pow(contrast, p.marangoniContrast);
-    let rate = min(base * mob, vec4f(cap));
-    dg += face * rate * min(a.x, n.x) * (gn / n.x - ci);
+    let wmin = min(a.x, n.x);
+    // Pigments present in the neighbour (and possibly here too).
+    for (var m = 0; m < 4; m++) {
+      if (gn.amt[m] <= 0.0) { continue; }
+      let id = gn.id[m];
+      let rate = min(base * pig[id].phys2.x, cap);
+      addCand(id, p.dt * face * rate * wmin * (gn.amt[m] / n.x - amtOf(gi, id) / a.x));
+    }
+    // Pigments present here but not in the neighbour.
+    for (var m = 0; m < 4; m++) {
+      if (gi.amt[m] <= 0.0 || amtOf(gn, gi.id[m]) > 0.0) { continue; }
+      let id = gi.id[m];
+      let rate = min(base * pig[id].phys2.x, cap);
+      addCand(id, -p.dt * face * rate * wmin * gi.amt[m] / a.x);
+    }
   }
-  return p.dt * dg;
 }
 `;
 
-export const renderWGSL = /* wgsl */ `
+export const renderWGSL = (MAXP = MAX_PIGMENTS) => /* wgsl */ `
 struct R {
   W: u32, H: u32, thickness: f32, wetDarken: f32,
   paperColor: vec4f,
   paperShade: f32, suspendedWeight: f32, _a: f32, _b: f32,
 };
 struct Pigment { K: vec4f, S: vec4f, phys: vec4f, phys2: vec4f };
+struct Comp4 { id: vec4u, amt: vec4f };
+struct Dep { id: vec4u, amt: vec4f, stainK: vec4f, stainS: vec4f };
 @group(0) @binding(0) var<uniform> r: R;
 @group(0) @binding(1) var<storage, read> A: array<vec4f>;
 @group(0) @binding(2) var<storage, read> aux: array<vec4f>;
-@group(0) @binding(3) var<storage, read> G: array<vec4f>;
-@group(0) @binding(4) var<storage, read> D: array<vec4f>;
-@group(0) @binding(5) var<uniform> pig: array<Pigment, 4>;
+@group(0) @binding(3) var<storage, read> G: array<Comp4>;
+@group(0) @binding(4) var<storage, read> D: array<Dep>;
+@group(0) @binding(5) var<uniform> pig: array<Pigment, ${MAXP}>;
 
 @vertex
 fn vs(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4f {
@@ -450,19 +590,25 @@ fn fs(@builtin(position) fc: vec4f) -> @location(0) vec4f {
   let Rg = r.paperColor.rgb * (1.0 - r.paperShade * (1.0 - h));
 
   // Kubelka-Munk: absorption and scattering of the pigments add, weighted
-  // by each pigment's amount; the layer is composited over the paper.
-  let amt = max(r.thickness * (D[i] + r.suspendedWeight * G[i]), vec4f(0.0));
-  var Kx = vec3f(0.0);
-  var Sx = vec3f(0.0);
+  // by each pigment's amount (plus the stain layer's totals); the layer is
+  // composited over the paper.
+  let g = G[i];
+  let dep = D[i];
+  var Kx = dep.stainK.rgb * r.thickness;
+  var Sx = dep.stainS.rgb * r.thickness;
+  var total = dep.stainK.w;
   for (var k = 0; k < 4; k++) {
-    Kx += pig[k].K.rgb * amt[k];
-    Sx += pig[k].S.rgb * amt[k];
+    let ag = max(g.amt[k], 0.0) * r.suspendedWeight;
+    let ad = max(dep.amt[k], 0.0);
+    if (ag > 0.0) { Kx += pig[g.id[k]].K.rgb * ag * r.thickness; Sx += pig[g.id[k]].S.rgb * ag * r.thickness; total += ag; }
+    if (ad > 0.0) { Kx += pig[dep.id[k]].K.rgb * ad * r.thickness; Sx += pig[dep.id[k]].S.rgb * ad * r.thickness; total += ad; }
   }
   var col = Rg;
-  if (amt.x + amt.y + amt.z + amt.w > 1e-6) {
+  if (total > 1e-6) {
     let Sx1 = max(Sx, vec3f(1e-5));
     let aa = 1.0 + Kx / Sx1;
-    let b = sqrt(aa * aa - 1.0);
+    // b -> 0 for a non-absorbing layer; keep it off zero so c stays finite.
+    let b = max(sqrt(aa * aa - 1.0), vec3f(1e-4));
     let bsx = min(b * Sx1, vec3f(20.0));
     let sh = sinh(bsx);
     let ch = cosh(bsx);

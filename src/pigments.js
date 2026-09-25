@@ -1,54 +1,137 @@
-// Pigments: Kubelka-Munk absorption (K) and scattering (S) per RGB channel,
-// after the table in Curtis et al. 1997 (fig. 5), plus physical behaviour.
+// The paint box: a real 23-pan palette.
 //
-// Physical properties are relative to French ultramarine (= 1) and are
-// estimates from each pigment's chemistry and its reputation among painters,
-// not measurements:
-//   density      settling speed. Mineral pigments (heavy, coarse particles)
-//                settle fast; synthetic organics (fine particles) stay
-//                suspended longer.
+// Colour: masstone and tint hex values are estimates from swatch
+// descriptions (research notes, 2026-09-25), not measurements. Replace them
+// with scans of real swatches when available. Kubelka-Munk absorption (K)
+// and scattering (S) per RGB channel are fitted from them (see fitKM): the
+// masstone is taken as a heavy application (thickness MASS_X) and the tint
+// as a light wash (TINT_X), both over white paper, and K and S are solved
+// together so both colours are reproduced. The transparency rating is a weak
+// prior on S, which settles channels the colours say little about (a
+// yellow's red channel, say) and is all there is for pigments without a
+// tint colour.
+//
+// Physical properties are relative to French ultramarine (= 1), mapped from
+// handprint.com ratings where they exist and maker data otherwise:
+//   density      settling speed. Minerals (heavy, coarse) settle fast;
+//                synthetic organics (fine) stay suspended longer.
 //   staining     grip on paper fibres once settled (resists lifting).
-//                Organics stain; most minerals lift readily.
 //   granulation  how strongly settling favours the paper's valleys.
-//   flocculation how strongly particles clump onto their own kind, giving
-//                speckle independent of the paper (ultramarine is the classic).
-//   mobility     how far the pigment travels by diffusion / Marangoni flow in
-//                wet-in-wet. Fine organics (phthalos especially) push through
-//                a wash; heavy minerals stay put.
-//   wick         how much suspended pigment the paper's capillary flow carries
-//                past the wet edge (the soft halo staining organics leave).
+//   flocculation how strongly particles clump onto their own kind.
+//   mobility     how far it travels by diffusion / Marangoni flow wet-in-wet
+//                (phthalos push through a wash; "inert" pigments stay put).
+//   wick         how much the paper's capillary flow carries past the wet
+//                edge (the soft halo staining organics leave).
 
-const mineral = { kind: 'mineral', density: 1.3, staining: 0.8, granulation: 0.6, flocculation: 0.3, mobility: 0.8, wick: 0 };
-const organic = { kind: 'organic', density: 0.3, staining: 2.5, granulation: 0.1, flocculation: 0, mobility: 1.7, wick: 0.5 };
+const PAPER_WHITE = 0.97;
+const MASS_X = 2.0;
+const TINT_X = 0.35;
+const OPACITY_S = { transparent: 0.04, semitransparent: 0.2, semiopaque: 0.8, opaque: 2.5 };
 
-export const PIGMENTS = [
-  { name: 'French Ultramarine', code: 'PB29', K: [0.86, 0.86, 0.06], S: [0.005, 0.005, 0.09],
-    ...mineral, density: 1, staining: 1, granulation: 1, flocculation: 1, mobility: 1 },
-  { name: 'Quinacridone Rose', code: 'PV19', K: [0.22, 1.47, 0.57], S: [0.05, 0.003, 0.03],
-    ...organic, staining: 3 },
-  // Not in Curtis's table: estimated. A bluer, cooler magenta than PV19.
-  { name: 'Quinacridone Magenta', code: 'PR122', K: [0.28, 1.75, 0.40], S: [0.04, 0.003, 0.025],
-    ...organic, staining: 2.8 },
-  { name: 'Indian Red', code: 'PR101', K: [0.46, 1.07, 1.50], S: [1.28, 0.38, 0.21],
-    ...mineral, density: 1.5, staining: 1.5, granulation: 0.5 },
-  { name: 'Cadmium Yellow', code: 'PY35', K: [0.10, 0.36, 3.45], S: [0.97, 0.65, 0.007],
-    ...mineral, granulation: 0.3, flocculation: 0.1 },
-  { name: "Hooker's Green", code: 'PG7+PY', K: [1.62, 0.61, 1.64], S: [0.01, 0.012, 0.003],
-    ...organic, mobility: 1.5 },
-  { name: 'Cerulean Blue', code: 'PB35', K: [1.52, 0.32, 0.25], S: [0.06, 0.26, 0.40],
-    ...mineral, density: 1.4, staining: 0.6, granulation: 1.2, flocculation: 0.5 },
-  { name: 'Burnt Umber', code: 'PBr7', K: [0.74, 1.54, 2.10], S: [0.09, 0.09, 0.004],
-    ...mineral, granulation: 0.8, flocculation: 0.4 },
-  { name: 'Cadmium Red', code: 'PR108', K: [0.14, 1.08, 1.68], S: [0.77, 0.015, 0.018],
-    ...mineral, granulation: 0.3, flocculation: 0.1 },
-  { name: 'Hansa Yellow', code: 'PY97', K: [0.06, 0.21, 1.78], S: [0.50, 0.88, 0.009],
-    ...organic, staining: 2 },
-  { name: 'Phthalo Green', code: 'PG7', K: [1.55, 0.47, 0.63], S: [0.01, 0.05, 0.035],
-    ...organic, density: 0.25, staining: 3.5, granulation: 0, mobility: 2.2, wick: 0.7 },
-  { name: 'Interference Lilac', code: 'mica', K: [0.08, 0.11, 0.07], S: [1.25, 0.42, 1.43],
-    ...mineral, density: 1.6, staining: 0.5, granulation: 0.5, flocculation: 0.2, mobility: 0.7 },
+// Staining / granulation ratings to multipliers (ultramarine: low-medium
+// staining, strong granulation).
+const STAIN = { low: 0.7, lowmed: 1, medium: 1.5, high: 2.5 };
+const GRAN = { none: 0, slight: 0.3, moderate: 0.6, strong: 1 };
+
+function hexToRGB(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255].map(v => v / 255);
+}
+
+// Kubelka-Munk reflectance of a layer (K, S, thickness x) over a ground.
+function kmReflect(K, S, x, Rg) {
+  const a = 1 + K / S, b = Math.sqrt(a * a - 1);
+  const bs = Math.min(b * S * x, 20), sh = Math.sinh(bs), c = a * sh + b * Math.cosh(bs);
+  const R = sh / c, T = b / c;
+  return R + T * T * Rg / (1 - R * Rg);
+}
+
+// Fit per-channel K and S so a heavy application reproduces the masstone
+// and a light wash the tint, with the transparency rating as a weak prior on
+// S. A coarse grid search over log K and log S is plenty for 23 pigments.
+function fitKM(masstone, tint, opacity) {
+  const Rm = hexToRGB(masstone), Rt = tint ? hexToRGB(tint) : null;
+  const prior = Math.log(OPACITY_S[opacity]);
+  const grid = [];
+  for (let v = Math.log(1e-3); v <= Math.log(40); v += 0.08) grid.push(v);
+  const K = [], S = [];
+  for (let ch = 0; ch < 3; ch++) {
+    let best = Infinity, bk = 0, bs = 0;
+    for (const lk of grid) for (const ls of grid) {
+      const k = Math.exp(lk), s = Math.exp(ls);
+      let err = (kmReflect(k, s, MASS_X, PAPER_WHITE) - Rm[ch]) ** 2;
+      if (Rt) err += (kmReflect(k, s, TINT_X, PAPER_WHITE) - Rt[ch]) ** 2;
+      err += 2e-4 * (ls - prior) ** 2;
+      if (err < best) { best = err; bk = k; bs = s; }
+    }
+    K.push(+bk.toFixed(5));
+    S.push(+bs.toFixed(5));
+  }
+  return { K, S };
+}
+
+const organic = { kind: 'organic', density: 0.3, granulation: 0, flocculation: 0, mobility: 1.5, wick: 0.5 };
+const mineral = { kind: 'mineral', density: 1.3, flocculation: 0.2, mobility: 0.8, wick: 0 };
+
+const PANS = [
+  { name: 'Phthalo Green', code: 'PG7', masstone: '#00594A', tint: '#1FA58C', opacity: 'transparent',
+    ...organic, staining: STAIN.high, mobility: 2.2, wick: 0.7 },
+  { name: 'Phthalo Blue (GS)', code: 'PB15:3', masstone: '#0B3A7E', tint: '#1C8FD8', opacity: 'transparent',
+    ...organic, staining: STAIN.high, mobility: 2.2, wick: 0.7 },
+  { name: 'Phthalo Turquoise', code: 'PB16', masstone: '#005F6E', tint: '#2CB3C2', opacity: 'transparent',
+    ...organic, staining: STAIN.high, mobility: 2, wick: 0.6 },
+  // Hostaperm Blue R5R; discontinued industrially, sold by handmade makers.
+  // Painter's note: dark and strong, lower chroma than PV23 or PB29 either
+  // side of it. A lower-chroma fit (#28284A / #65689A) was tried and read
+  // worse; the research estimate is kept for now.
+  { name: 'Benzimidazolone Blue', code: 'PB80', masstone: '#2E2A7A', tint: '#6C6FC4', opacity: 'transparent',
+    ...organic, staining: STAIN.high, mobility: 2, wick: 0.6 },
+  { name: 'French Ultramarine', code: 'PB29', masstone: '#20308E', tint: '#5A6FD0', opacity: 'semitransparent',
+    ...mineral, density: 1, staining: STAIN.lowmed, granulation: GRAN.strong, flocculation: 1, mobility: 1 },
+  { name: 'Dioxazine Violet', code: 'PV23', masstone: '#3A1F5E', tint: '#8A6FC0', opacity: 'semitransparent',
+    ...organic, staining: STAIN.high, mobility: 1.5 },
+  { name: 'Perylene Violet', code: 'PV29', masstone: '#4A2331', tint: '#B08090', opacity: 'semitransparent',
+    ...organic, staining: STAIN.medium, mobility: 1.2 },
+  { name: 'Quinacridone Magenta', code: 'PR122', masstone: '#B0206A', tint: '#E07AB5', opacity: 'transparent',
+    ...organic, staining: STAIN.high, mobility: 1.7 },
+  { name: 'Quinacridone Rose', code: 'PV19', masstone: '#C8285A', tint: '#EF8FA8', opacity: 'transparent',
+    ...organic, staining: STAIN.high, mobility: 1.7 },
+  { name: 'Pyrrole Rubine', code: 'PR264', masstone: '#8E1233', tint: '#E07090', opacity: 'semitransparent',
+    ...organic, staining: STAIN.medium, mobility: 1.3 },
+  // "Blooms very readily" yet "inert wet in wet" (handprint).
+  { name: 'Pyrrole Scarlet', code: 'PR255', masstone: '#D8321E', tint: '#F2826A', opacity: 'semitransparent',
+    ...organic, staining: STAIN.high, granulation: 0.1, mobility: 0.8 },
+  { name: 'Perylene Maroon', code: 'PR179', masstone: '#5A1A1E', tint: '#B8606A', opacity: 'transparent',
+    ...organic, staining: STAIN.high, mobility: 1.2 },
+  { name: 'Perylene Green', code: 'PBk31', masstone: '#1E2B24', tint: '#5E7F74', opacity: 'semitransparent',
+    ...organic, staining: STAIN.medium, mobility: 1.2 },
+  // "Inactive wet in wet but blossoms when rewetted" (handprint).
+  { name: 'Isoindolinone Yellow', code: 'PY110', masstone: '#E07A10', tint: '#F7B84A', opacity: 'transparent',
+    ...organic, staining: STAIN.medium, mobility: 0.8 },
+  { name: 'Azo Condensation Yellow', code: 'PY128', masstone: '#E8D400', tint: '#F2E24A', opacity: 'transparent',
+    ...organic, staining: STAIN.high, mobility: 1.4 },
+  // Inorganic but fine; "very inert with water" (handprint).
+  { name: 'Bismuth Vanadate Yellow', code: 'PY184', masstone: '#F4D020', tint: '#F8E27A', opacity: 'semiopaque',
+    ...mineral, staining: STAIN.medium, granulation: GRAN.none, flocculation: 0, mobility: 0.5 },
+  { name: 'Indian Red', code: 'PR101', masstone: '#7A2E24', tint: '#C08070', opacity: 'semiopaque',
+    ...mineral, density: 1.5, staining: STAIN.lowmed, granulation: GRAN.moderate },
+  // Sub-micron oxide, but granulates "in threads" in DS's formulation.
+  { name: 'Transparent Red Oxide', code: 'PR101', masstone: '#9A3A1A', tint: '#D88050', opacity: 'transparent',
+    ...mineral, density: 0.9, staining: STAIN.low, granulation: GRAN.moderate, flocculation: 0.5 },
+  { name: 'Transparent Yellow Oxide', code: 'PY42', masstone: '#B37A1E', tint: '#E0B060', opacity: 'transparent',
+    ...mineral, density: 0.9, staining: STAIN.low, granulation: GRAN.moderate, flocculation: 0.3 },
+  // Da Vinci natural raw umber; granulation seen wet largely vanishes dry.
+  { name: 'Raw Umber', code: 'PBr7', masstone: '#4A3F2E', tint: '#A09A80', opacity: 'transparent',
+    ...mineral, staining: STAIN.medium, granulation: GRAN.slight },
+  // A dropped brushload displaces pigment in a moist wash (DS).
+  { name: 'Titanium Buff', code: 'PW6:1', masstone: '#D9C9A8', tint: null, opacity: 'semiopaque',
+    ...mineral, density: 1.2, staining: STAIN.low, granulation: GRAN.moderate, mobility: 1 },
+  { name: 'White Gouache', code: 'PW6', masstone: '#F7F5F0', tint: null, opacity: 'opaque',
+    ...mineral, density: 1.2, staining: STAIN.low, granulation: GRAN.none, flocculation: 0 },
+  // Pearlescent mica. Really specular (angle-dependent flakes); rendered for
+  // now as an opaque gold scatterer. See the flake layer on the roadmap.
+  { name: 'Arabic Gold (Coliro)', code: 'mica', masstone: '#C9A24A', tint: null, opacity: 'opaque',
+    ...mineral, density: 1.6, staining: STAIN.low, granulation: GRAN.slight, flocculation: 0, mobility: 0.7 },
 ];
 
-// Default palette: a mineral blue, an organic rose, an earth red and an
-// organic yellow, so mixtures show mineral/organic separation.
-export const DEFAULT_SLOTS = [0, 1, 3, 9];
+export const PIGMENTS = PANS.map(p => ({ ...p, ...fitKM(p.masstone, p.tint, p.opacity) }));

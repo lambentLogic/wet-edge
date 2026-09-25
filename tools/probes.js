@@ -21,6 +21,7 @@
   async function fresh(paper) {
     h.begin();
     h.setPaper(paper);
+    h.setBrush('French Ultramarine');
     Object.assign(S.values, active);
     S.clear();
     h.setMode(0);
@@ -53,44 +54,47 @@
   }
 
   const probes = {
-    // Dark ground: interference lilac and ultramarine on black paper, alone
-    // and glazed over each other. For screenshots.
-    async dark(paper = 'coldPress') {
+    // Dark ground: a scattering pigment and a transparent one on black
+    // paper, alone and mixed. For screenshots.
+    async dark(paper = 'coldPress', opaque = 'White Gouache', clear = 'French Ultramarine') {
       await fresh(paper);
       h.setTone('black');
-      h.setSlotPigment(3, 'Interference Lilac');
       await withValues({ brushRadius: 30, brushPigment: 0.8 }, async () => {
-        h.setSlot(3);
+        h.setBrush(opaque);
         for (let y = 200; y <= 300; y += 25) { h.lift(); await h.paint(150, y, 870, y, 30); }
-        h.setSlot(0);
+        h.setBrush(clear);
         for (let x = 250; x <= 350; x += 25) { h.lift(); await h.paint(x, 150, x, 600, 30); }
         await h.wait(25); await h.wait(10, { dry: true }); await h.wait(2);
       });
+      h.setTone('natural');
+      h.setBrush(clear);
       h.end();
       return 'painted';
     },
 
-    // Multi-pigment test card: four pigments side by side and overlapping,
-    // plus wet-in-wet mixes. For screenshots.
-    async palette(paper = 'coldPress') {
+    // Multi-pigment test card: four pigments in adjacent wet bands, then
+    // drops of three of them into a wet wash of the first. For screenshots.
+    async palette(paper = 'coldPress', names = ['French Ultramarine', 'Quinacridone Rose', 'Transparent Red Oxide', 'Azo Condensation Yellow']) {
       await fresh(paper);
       await withValues({ brushRadius: 22 }, async () => {
         for (let k = 0; k < 4; k++) {
-          h.setSlot(k);
+          h.setBrush(names[k]);
           for (let y = 120 + k * 60; y <= 150 + k * 60; y += 15) { h.lift(); await h.paint(120, y, 900, y, 30); }
         }
         await h.wait(25); await h.wait(10, { dry: true }); await h.wait(2);
-        // Wet-in-wet: blue wash, then each other pigment dropped in.
-        h.setSlot(0);
+        h.setBrush(names[0]);
         for (let y = 420; y <= 640; y += 18) { h.lift(); await h.paint(150, y, 870, y, 30); }
         await h.wait(1);
-        for (let k = 1; k < 4; k++) { h.setSlot(k); h.lift(); await h.paint(150 + k * 180, 530, 170 + k * 180, 535, 12); }
+        for (let k = 1; k < 4; k++) { h.setBrush(names[k]); h.lift(); await h.paint(150 + k * 180, 530, 170 + k * 180, 535, 12); }
         await h.wait(25); await h.wait(10, { dry: true }); await h.wait(2);
-        h.setSlot(0);
       });
+      h.setBrush(names[0]);
       h.end();
       return 'painted';
     },
+
+    // Creep at hand-drawing speed (~1 mm per frame rather than ~2.5).
+    async creepSlow(paper = 'coldPress') { return probes.creep(paper, 20); },
 
     // Gap: two parallel strokes with a narrow strip of dry paper between
     // them (gapMm wide). Fraction of the gap's centre line that ends up with
@@ -112,11 +116,6 @@
       for (let x = 320; x < 700; x++, n++) if (a[(yc * W + x) * 4 + 2] > 1e-3) bridged++;
       return +(bridged / n).toFixed(3);
     },
-
-    // Throughput: simulated seconds per wall-clock second over a wet wash.
-    // Needs to stay above 1 for the interactive app to run in real time.
-    // Creep at hand-drawing speed (~1 mm per frame rather than ~2.5).
-    async creepSlow(paper = 'coldPress') { return probes.creep(paper, 20); },
 
     // Throughput with only part of the sheet wet (a single wash), the
     // common case once dry-tile skipping is on.
