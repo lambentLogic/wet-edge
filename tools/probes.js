@@ -7,16 +7,21 @@
   const S = window.__sim, h = S.headless;
 
   // Run fn with some knobs overridden, restoring them afterwards.
+  // Overrides are re-applied after a paper preset loads (see fresh), so
+  // paper knobs can be overridden too.
+  let active = {};
   async function withValues(over, fn) {
-    const saved = {};
+    const saved = {}, outer = active;
     for (const k of Object.keys(over)) saved[k] = S.values[k];
+    active = { ...outer, ...over };
     Object.assign(S.values, over);
-    try { return await fn(); } finally { Object.assign(S.values, saved); }
+    try { return await fn(); } finally { Object.assign(S.values, saved); active = outer; }
   }
 
   async function fresh(paper) {
     h.begin();
     h.setPaper(paper);
+    Object.assign(S.values, active);
     S.clear();
     h.setMode(0);
   }
@@ -48,6 +53,32 @@
   }
 
   const probes = {
+    // Conservation: total pigment after laying clean water over a painted
+    // stroke, relative to before. Should be 1.
+    async conserve(paper = 'coldPress') {
+      await fresh(paper);
+      const total = async () => {
+        const a = await S.read();
+        let p = 0;
+        for (let i = 0; i < a.length; i += 4) p += a[i + 1] + a[i + 2];
+        return p;
+      };
+      let before, after, dried;
+      await withValues({ brushRadius: 16 }, async () => {
+        for (let y = 300; y <= 400; y += 14) await h.paint(300, y, 700, y, 20);
+        await h.wait(3);
+        before = await total();
+        h.setMode(1);
+        for (let y = 290; y <= 410; y += 14) await h.paint(280, y, 720, y, 20);
+        await h.wait(3);
+        after = await total();
+        await h.wait(20); await h.wait(10, { dry: true });
+        dried = await total();
+      });
+      h.setMode(0); h.end();
+      return [+(after / before).toFixed(3), +(dried / before).toFixed(3)];
+    },
+
     // Edge darkening: peak deposited pigment near the right edge of a dried
     // wash divided by the interior mean. >1 means a dark rim.
     async edge(paper = 'coldPress') {

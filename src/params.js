@@ -17,7 +17,7 @@ export const PARAMS = [
   { key: 'paperRelief',   v: 0.2,    min: 0,    max: 2,     group: 'Flow', target: 'sim',  label: 'paper relief' },
   { key: 'tiltX',         v: 0,      min: -0.05, max: 0.05, group: 'Flow', target: 'sim',  label: 'tilt x' },
   { key: 'tiltY',         v: 0,      min: -0.05, max: 0.05, group: 'Flow', target: 'sim',  label: 'tilt y' },
-  { key: 'edgePull',      v: 0.1,    min: 0,    max: 0.2,   group: 'Flow', target: 'sim',  label: 'edge pull (Curtis η)' },
+  { key: 'edgePull',      v: 0.15,   min: 0,    max: 0.2,   group: 'Flow', target: 'sim',  label: 'edge pull (Curtis η)' },
 
   // --- Paper and drying (capillary layer) ---
   { key: 'evaporation',      v: 0.00001, min: 0, max: 0.0002,  group: 'Paper & drying', target: 'sim' },

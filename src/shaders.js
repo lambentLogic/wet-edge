@@ -144,27 +144,30 @@ fn transport(@builtin(global_invocation_id) id: vec3u) {
   //    charge bursts outward with a defined front and slows as it dilutes.
   //    Negative values pull paint into clumps.
   // Mixing is suppressed near a wet edge (mb falls off there), so it can't
-  // undo the outward flow that builds edge darkening.
-  let interior = smoothstep(p.mixEdgeLo, p.mixEdgeHi, mb[i]);
-  if (a.x > p.wEps && interior > 0.0) {
+  // undo the outward flow that builds edge darkening. Each exchange uses the
+  // smaller of the two cells' weights, so it stays symmetric and conserves
+  // pigment.
+  if (a.x > p.wEps) {
     let c = a.y / a.x;
+    let wi = smoothstep(p.mixEdgeLo, p.mixEdgeHi, mb[i]);
     var dg = 0.0;
     for (var k = 0; k < 4; k++) {
-      var n = aL;
-      if (k == 1) { n = aR; } else if (k == 2) { n = aU; } else if (k == 3) { n = aD; }
-      if (n.x > p.wEps) {
-        let cn = n.y / n.x;
-        // The Marangoni term only acts where paint meets much cleaner water
-        // (high contrast), not across the gentle gradients inside one body of
-        // paint, where it would erase edge darkening. Capped at the
-        // explicit-scheme stability limit (4 neighbours).
-        let hi = max(c, cn);
-        let contrast = (hi - min(c, cn)) / (hi + 1e-4);
-        let rate = min(p.pigmentDiffusion + p.marangoni * hi * contrast * contrast, 0.24 / max(p.dt, 1e-6));
-        dg += rate * min(a.x, n.x) * (cn - c);
-      }
+      var nx = x; var ny = y; var n = a;
+      if (k == 0) { nx = x - 1; n = aL; } else if (k == 1) { nx = x + 1; n = aR; }
+      else if (k == 2) { ny = y - 1; n = aU; } else { ny = y + 1; n = aD; }
+      if (!inb(nx, ny) || n.x <= p.wEps) { continue; }
+      let face = min(wi, smoothstep(p.mixEdgeLo, p.mixEdgeHi, mb[ix(nx, ny)]));
+      if (face <= 0.0) { continue; }
+      let cn = n.y / n.x;
+      // The Marangoni term only acts where paint meets much cleaner water
+      // (high contrast), not across the gentle gradients inside one body of
+      // paint. Capped at the explicit-scheme stability limit (4 neighbours).
+      let hi = max(c, cn);
+      let contrast = (hi - min(c, cn)) / (hi + 1e-4);
+      let rate = min(p.pigmentDiffusion + p.marangoni * hi * contrast * contrast, 0.24 / max(p.dt, 1e-6));
+      dg += face * rate * min(a.x, n.x) * (cn - c);
     }
-    g += p.dt * dg * interior;
+    g += p.dt * dg;
   }
   var d = a.z;
   var s = a.w;

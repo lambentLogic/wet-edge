@@ -5,6 +5,7 @@
 //   node tools/measure.mjs                         # all probes, defaults
 //   node tools/measure.mjs edge bleed              # selected probes
 //   node tools/measure.mjs edge --set marangoni=0  # with knob overrides
+//   node tools/measure.mjs --paper vellum          # on another paper preset
 //
 // CHROME_PATH overrides the browser; APP_URL overrides the address.
 
@@ -19,8 +20,10 @@ const APP_URL = process.env.APP_URL ?? 'http://127.0.0.1:8765/';
 const args = process.argv.slice(2);
 const overrides = {};
 const names = [];
+let paper = 'coldPress';
 for (let i = 0; i < args.length; i++) {
-  if (args[i] === '--set') {
+  if (args[i] === '--paper') paper = args[++i];
+  else if (args[i] === '--set') {
     const [k, v] = args[++i].split('=');
     overrides[k] = parseFloat(v);
   } else names.push(args[i]);
@@ -47,8 +50,8 @@ try {
   for (const name of run) {
     const t0 = Date.now();
     results[name] = await page.evaluate(
-      (name, over) => window.__probes.withValues(over, () => window.__probes[name]()),
-      name, overrides,
+      (name, over, paper) => window.__probes.withValues(over, () => window.__probes[name](paper)),
+      name, overrides, paper,
     );
     console.error(`${name}: ${JSON.stringify(results[name])}  (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
   }

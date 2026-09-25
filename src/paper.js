@@ -143,6 +143,25 @@ export const PAPERS = {
       capillarySpread: 0.1, capillaryMin: 0.02, dampThreshold: 0.06, staining: 1, paperShade: 0.14,
     },
   },
+  // After Strathmore 500 mixed media, vellum (190 gsm): 100% cotton,
+  // internally sized, light tooth. Values mapped from maker specs and user
+  // reports (absorbs about like 140 lb cold press, lifts moderately, soft
+  // edges, little texture); tooth and capacity are estimates.
+  vellum: {
+    name: 'Mixed-media vellum (Strathmore 500-like)',
+    color: [0.975, 0.972, 0.96],
+    gen: {
+      noise: [[20, 0.2], [5, 0.12], [0.6, 0.12]],
+      tooth: [[0.25, 0.3], [0.2, 0.15]],
+      fibers: { density: 1 / 3000, minLen: 1, maxLen: 3, strength: 0.02, wander: 0.5 },
+      contrast: 0.45, blurPasses: 1,
+    },
+    knobs: {
+      sizing: 0.65,
+      paperRelief: 0.08, absorption: 0.03, capacityMin: 0.018, capacityMax: 0.072,
+      capillarySpread: 0.16, capillaryMin: 0.02, dampThreshold: 0.035, staining: 1.15, paperShade: 0.04,
+    },
+  },
   washi: {
     name: 'Washi (kozo)',
     color: [0.955, 0.935, 0.88],
