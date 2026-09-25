@@ -53,6 +53,57 @@
   }
 
   const probes = {
+    // Creep: a U-shaped stroke that curves back to join itself. Fraction of
+    // final pigment lying more than 1 mm outside anywhere the brush touched.
+    // Should be ~0 on sized paper.
+    async creep(paper = 'coldPress') {
+      await fresh(paper);
+      const r = 14, path = [];
+      for (let t = 0; t <= 1.0001; t += 1 / 60) {
+        const ang = Math.PI * 0.2 + t * Math.PI * 1.8;   // most of a circle
+        path.push([512 + 120 * Math.cos(ang), 384 + 120 * Math.sin(ang)]);
+      }
+      path.push([512 + 120 * Math.cos(Math.PI * 0.25), 384 + 120 * Math.sin(Math.PI * 0.25)]); // close it
+      await withValues({ brushRadius: r }, async () => {
+        for (let i = 1; i < path.length; i++) await h.paint(...path[i - 1], ...path[i], 3);
+        await h.wait(20); await h.wait(10, { dry: true }); await h.wait(2);
+      });
+      h.end();
+      const a = await S.read();
+      const near = (x, y) => {
+        for (let i = 1; i < path.length; i++) {
+          const [ax, ay] = path[i - 1], [bx, by] = path[i];
+          const dx = bx - ax, dy = by - ay;
+          const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy || 1)));
+          if (Math.hypot(x - ax - dx * t, y - ay - dy * t) <= r + 5) return true;
+        }
+        return false;
+      };
+      let inside = 0, outside = 0;
+      for (let y = 200; y < 570; y++) for (let x = 330; x < 700; x++) {
+        const v = a[(y * W + x) * 4 + 2];
+        if (v <= 0) continue;
+        if (near(x + 0.5, y + 0.5)) inside += v; else outside += v;
+      }
+      return +(outside / (inside + outside)).toFixed(3);
+    },
+
+    // Graded swatch in the style of a pigment test card: pale at the top,
+    // dense at the bottom. For screenshots rather than numbers.
+    async swatch(paper = 'coldPress') {
+      await fresh(paper);
+      await withValues({ brushRadius: 16 }, async () => {
+        let i = 0;
+        for (let y = 200; y <= 560; y += 16, i++) {
+          S.values.brushPigment = 0.05 + 0.9 * Math.pow(i / 22, 2);
+          h.lift(); await h.paint(300, y, 720, y, 24);
+        }
+        await h.wait(20); await h.wait(10, { dry: true }); await h.wait(2);
+      });
+      h.end();
+      return 'painted';
+    },
+
     // Conservation: total pigment after laying clean water over a painted
     // stroke, relative to before. Should be 1.
     async conserve(paper = 'coldPress') {
@@ -65,11 +116,11 @@
       };
       let before, after, dried;
       await withValues({ brushRadius: 16 }, async () => {
-        for (let y = 300; y <= 400; y += 14) await h.paint(300, y, 700, y, 20);
+        for (let y = 300; y <= 400; y += 14) { h.lift(); await h.paint(300, y, 700, y, 20); }
         await h.wait(3);
         before = await total();
         h.setMode(1);
-        for (let y = 290; y <= 410; y += 14) await h.paint(280, y, 720, y, 20);
+        for (let y = 290; y <= 410; y += 14) { h.lift(); await h.paint(280, y, 720, y, 20); }
         await h.wait(3);
         after = await total();
         await h.wait(20); await h.wait(10, { dry: true });
@@ -84,7 +135,7 @@
     async edge(paper = 'coldPress') {
       await fresh(paper);
       await withValues({ granulation: 0, brushRadius: 16 }, async () => {
-        for (let y = 300; y <= 460; y += 20) await h.paint(300, y, 700, y, 20);
+        for (let y = 300; y <= 460; y += 20) { h.lift(); await h.paint(300, y, 700, y, 20); }
         await h.wait(30); await h.wait(10, { dry: true }); await h.wait(2);
       });
       h.end();
@@ -108,10 +159,10 @@
       await fresh(paper);
       const out = [];
       await withValues({ brushRadius: 16, brushPigment: 0.8 }, async () => {
-        for (let y = 300; y <= 400; y += 12) await h.paint(300, y, 500, y, 16);
+        for (let y = 300; y <= 400; y += 12) { h.lift(); await h.paint(300, y, 500, y, 16); }
         await h.wait(1);
         h.setMode(1);
-        for (let y = 300; y <= 400; y += 12) await h.paint(490, y, 700, y, 16);
+        for (let y = 300; y <= 400; y += 12) { h.lift(); await h.paint(490, y, 700, y, 16); }
         await h.wait(1); out.push(await region(530, 720, 280, 420));
         await h.wait(3); out.push(await region(530, 720, 280, 420));
       });
@@ -126,7 +177,7 @@
       const out = [];
       h.setMode(1);
       await withValues({ brushRadius: 20 }, async () => {
-        for (let y = 250; y <= 550; y += 15) await h.paint(350, y, 700, y, 20);
+        for (let y = 250; y <= 550; y += 15) { h.lift(); await h.paint(350, y, 700, y, 20); }
       });
       await h.wait(1);
       h.setMode(0);

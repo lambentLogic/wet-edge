@@ -13,7 +13,7 @@ ${paramStructWGSL()}
 struct Frame {
   W: u32, H: u32, mode: u32, brushOn: u32,
   bx0: f32, by0: f32, bx1: f32, by1: f32,
-  pressure: f32, brushScale: f32, dryMul: f32, _pad: f32,
+  pressure: f32, brushScale: f32, dryMul: f32, charge: f32,
 };
 
 @group(0) @binding(0) var<uniform> p: Params;
@@ -76,6 +76,16 @@ fn dragAt(i: i32, j: i32) -> f32 {
   return p.drag * min(r * r, p.dragMaxBoost);
 }
 
+// Contact-line pinning: a wet edge only advances onto paper that isn't
+// already wet when the pressure behind it exceeds a threshold (contact-angle
+// hysteresis). Between two wet cells water flows freely.
+fn pinned(i: i32, j: i32) -> bool {
+  let wi = isWet(i); let wj = isWet(j);
+  if (wi == wj) { return false; }
+  let push = select(pres(j) - pres(i), pres(i) - pres(j), wi);
+  return push < p.pinning;
+}
+
 fn uAt(x: i32, y: i32) -> f32 { if (!inb(x, y)) { return 0.0; } return Bin[ix(x, y)].x; }
 fn vAt(x: i32, y: i32) -> f32 { if (!inb(x, y)) { return 0.0; } return Bin[ix(x, y)].y; }
 
@@ -90,7 +100,7 @@ fn velocity(@builtin(global_invocation_id) id: vec3u) {
 
   if (x < W() - 1) {
     let j = ix(x + 1, y);
-    if ((isWet(i) || isWet(j)) && isOpen(i) && isOpen(j)) {
+    if ((isWet(i) || isWet(j)) && isOpen(i) && isOpen(j) && !pinned(i, j)) {
       let u0 = Bin[i].x;
       let lap = uAt(x - 1, y) + uAt(x + 1, y) + uAt(x, y - 1) + uAt(x, y + 1) - 4.0 * u0;
       let acc = -(pres(j) - pres(i)) + p.viscosity * lap + p.tiltX;
@@ -99,7 +109,7 @@ fn velocity(@builtin(global_invocation_id) id: vec3u) {
   }
   if (y < H() - 1) {
     let j = ix(x, y + 1);
-    if ((isWet(i) || isWet(j)) && isOpen(i) && isOpen(j)) {
+    if ((isWet(i) || isWet(j)) && isOpen(i) && isOpen(j) && !pinned(i, j)) {
       let v0 = Bin[i].y;
       let lap = vAt(x - 1, y) + vAt(x + 1, y) + vAt(x, y - 1) + vAt(x, y + 1) - 4.0 * v0;
       let acc = -(pres(j) - pres(i)) + p.viscosity * lap + p.tiltY;
@@ -186,9 +196,11 @@ fn transport(@builtin(global_invocation_id) id: vec3u) {
     // The brush tops the paper up toward its own water level and
     // pigment concentration rather than adding a fixed amount per frame.
     let k = clamp(p.brushRate * amt, 0.0, 1.0);
-    // Touching an already-wet surface, the loaded brush also releases a
+    // Touching an already-wet surface, a freshly loaded brush also releases a
     // charge of extra water, which pushes outward: the wet-in-wet burst.
-    let charge = select(0.0, p.brushCharge * k, a.x > p.wEps);
+    // fr.charge decays after touchdown (the brush's reservoir is finite), so
+    // dragging a stroke through its own wet trail doesn't keep flooding.
+    let charge = select(0.0, p.brushCharge * fr.charge * k, a.x > p.wEps);
     if (fr.mode == 0u) {
       let c0 = select(0.0, g / w, w > p.wEps);
       w = max(w, mix(w, p.brushWater, k)) + charge;

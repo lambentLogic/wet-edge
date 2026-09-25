@@ -14,9 +14,10 @@ export const PARAMS = [
   { key: 'drag',          v: 0.5,    min: 0,    max: 5,     group: 'Flow', target: 'sim',  label: 'paper drag' },
   { key: 'dragMaxBoost',  v: 1,      min: 1,    max: 100,   group: 'Flow', target: 'sim',  label: 'thin-film drag cap' },
   { key: 'dragDepth',     v: 0.1,    min: 0,    max: 0.5,   group: 'Flow', target: 'sim',  label: 'drag reference depth' },
-  { key: 'paperRelief',   v: 0.2,    min: 0,    max: 2,     group: 'Flow', target: 'sim',  label: 'paper relief' },
+  { key: 'paperRelief',   v: 0.03,    min: 0,    max: 2,     group: 'Flow', target: 'sim',  label: 'paper relief' },
   { key: 'tiltX',         v: 0,      min: -0.05, max: 0.05, group: 'Flow', target: 'sim',  label: 'tilt x' },
   { key: 'tiltY',         v: 0,      min: -0.05, max: 0.05, group: 'Flow', target: 'sim',  label: 'tilt y' },
+  { key: 'pinning',       v: 0.1,    min: 0,    max: 0.5,   group: 'Flow', target: 'sim',  label: 'edge pinning' },
   { key: 'edgePull',      v: 0.15,   min: 0,    max: 0.2,   group: 'Flow', target: 'sim',  label: 'edge pull (Curtis η)' },
 
   // --- Paper and drying (capillary layer) ---
@@ -47,10 +48,11 @@ export const PARAMS = [
   // --- Brush ---
   { key: 'brushRadius',   v: 18,   min: 1, max: 100, group: 'Brush', target: 'sim', label: 'radius' },
   { key: 'brushSoftness', v: 0.4,  min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'softness' },
-  { key: 'brushWater',    v: 0.2,  min: 0, max: 2,   group: 'Brush', target: 'sim', label: 'water level' },
+  { key: 'brushWater',    v: 0.3,  min: 0, max: 2,   group: 'Brush', target: 'sim', label: 'water level' },
   { key: 'brushPigment',  v: 0.4,  min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'pigment concentration' },
   { key: 'brushRate',     v: 0.4,  min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'load rate' },
   { key: 'brushCharge',   v: 0.1,  min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'wet-in-wet charge' },
+  { key: 'chargeDuration', v: 0.1, min: 0, max: 2,  group: 'Brush', target: 'js',  label: 'charge lasts (s)' },
   { key: 'liftStrength',  v: 0.2,  min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'lift strength' },
 
   // --- Render (Kubelka-Munk) ---

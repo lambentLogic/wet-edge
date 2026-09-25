@@ -118,7 +118,8 @@ async function init() {
 
   const pointerBrush = () => {
     const ptr = state.pointer;
-    return ptr.down ? { x0: ptr.px, y0: ptr.py, x1: ptr.x, y1: ptr.y, pressure: ptr.pressure } : null;
+    return ptr.down ? { x0: ptr.px, y0: ptr.py, x1: ptr.x, y1: ptr.y, pressure: ptr.pressure,
+                        age: (performance.now() - ptr.downAt) / 1000 } : null;
   };
 
   function writeUniforms(substeps, brush = pointerBrush(), drying = state.drying) {
@@ -129,6 +130,9 @@ async function init() {
     if (brush) {
       frameF32[4] = brush.x0; frameF32[5] = brush.y0; frameF32[6] = brush.x1; frameF32[7] = brush.y1;
       frameF32[8] = brush.pressure ?? 1;
+      // Wet-in-wet charge: strongest at touchdown, then the reservoir is spent.
+      const dur = Math.max(values.chargeDuration, 1e-3);
+      frameF32[11] = Math.exp(-(brush.age ?? 0) / dur);
     }
     frameF32[9] = 1 / substeps;
     frameF32[10] = drying ? values.dryerStrength : 1;
@@ -228,6 +232,7 @@ async function init() {
   // interactive loop's 120 Hz frame with simSpeed steps per second.
   const HZ = 120;
   let pending = 0;
+  let strokeFrame = 0;
   async function simFrames(nFrames, brushAt = () => null, drying = false) {
     const per = Math.max(1, Math.round(values.simSpeed / HZ));
     for (let f = 0; f < nFrames; f++) {
@@ -243,14 +248,19 @@ async function init() {
     begin() { state.headless = true; },
     end() { state.headless = false; },
     // A stroke from (x0,y0) to (x1,y1) over `frames` simulated frames.
-    paint(x0, y0, x1, y1, frames = 24) {
+    // Consecutive paint() calls continue one stroke (the brush isn't
+    // reloaded) unless lift() is called in between.
+    lift() { strokeFrame = 0; },
+    async paint(x0, y0, x1, y1, frames = 24) {
       const at = f => {
         const t0 = f / frames, t1 = (f + 1) / frames;
-        return { x0: x0 + (x1 - x0) * t0, y0: y0 + (y1 - y0) * t0, x1: x0 + (x1 - x0) * t1, y1: y0 + (y1 - y0) * t1 };
+        return { x0: x0 + (x1 - x0) * t0, y0: y0 + (y1 - y0) * t0, x1: x0 + (x1 - x0) * t1, y1: y0 + (y1 - y0) * t1,
+                 age: (strokeFrame + f) / HZ };
       };
-      return simFrames(frames, at);
+      await simFrames(frames, at);
+      strokeFrame += frames;
     },
-    wait(seconds, { dry = false } = {}) { return simFrames(Math.round(seconds * HZ), () => null, dry); },
+    wait(seconds, { dry = false } = {}) { strokeFrame = 0; return simFrames(Math.round(seconds * HZ), () => null, dry); },
     setMode(m) { state.mode = m; },
     // A fixed seed makes probe results comparable between runs.
     setPaper(key, seed = 1) {
@@ -265,7 +275,7 @@ async function init() {
   window.__sim.stroke = (x0, y0, x1, y1, frames = 30) => new Promise(done => {
     const ptr = state.pointer;
     let f = 0;
-    ptr.x = ptr.px = x0; ptr.y = ptr.py = y0; ptr.pressure = 1; ptr.down = true;
+    ptr.x = ptr.px = x0; ptr.y = ptr.py = y0; ptr.pressure = 1; ptr.downAt = performance.now(); ptr.down = true;
     const step = () => {
       f++;
       ptr.x = x0 + (x1 - x0) * f / frames; ptr.y = y0 + (y1 - y0) * f / frames;
@@ -292,6 +302,7 @@ function bindPointer(canvas) {
     [ptr.x, ptr.y] = toGrid(e);
     ptr.px = ptr.x; ptr.py = ptr.y;
     ptr.pressure = pressureOf(e);
+    ptr.downAt = performance.now();
     ptr.down = true;
   });
   canvas.addEventListener('pointermove', e => {

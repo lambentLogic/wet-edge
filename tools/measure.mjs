@@ -21,8 +21,10 @@ const args = process.argv.slice(2);
 const overrides = {};
 const names = [];
 let paper = 'coldPress';
+let shot = null;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--paper') paper = args[++i];
+  else if (args[i] === '--shot') shot = args[++i];
   else if (args[i] === '--set') {
     const [k, v] = args[++i].split('=');
     overrides[k] = parseFloat(v);
@@ -39,6 +41,7 @@ const browser = await puppeteer.launch({
 });
 try {
   const page = await browser.newPage();
+  await page.setViewport({ width: 1500, height: 900, deviceScaleFactor: 1 });
   page.on('console', m => { if (m.type() === 'error') console.error('[page]', m.text()); });
   await page.goto(APP_URL);
   await page.waitForFunction(() => window.__sim?.headless, { timeout: 20_000 });
@@ -54,6 +57,16 @@ try {
       name, overrides, paper,
     );
     console.error(`${name}: ${JSON.stringify(results[name])}  (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
+  }
+  if (shot) {
+    // Canvas at native resolution (1 px = 1 cell = 0.2 mm), after a frame
+    // has rendered the final state.
+    await new Promise(r => setTimeout(r, 300));
+    const el = await page.$('#canvas');
+    await page.evaluate(() => { const c = document.getElementById('canvas'); c.style.width = c.width + 'px'; c.style.maxWidth = 'none'; c.style.maxHeight = 'none'; });
+    await new Promise(r => setTimeout(r, 300));
+    await el.screenshot({ path: shot });
+    console.error(`saved ${shot}`);
   }
   console.log(JSON.stringify(results));
 } finally {
