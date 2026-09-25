@@ -157,7 +157,9 @@ fn transport(@builtin(global_invocation_id) id: vec3u) {
     }
   }
 
-  let h = paper[i];
+  // Settled pigment fills the paper's valleys, so granulation fades as a
+  // wash gets dense: pale washes speckle, masstone goes flat.
+  let h = min(paper[i] + d * p.valleyFill, 1.0);
 
   // Pigment adsorption / desorption (Curtis §4.5). Valleys (low h) catch
   // more pigment when granulation is high. Unlike Curtis, settling also
@@ -179,8 +181,11 @@ fn transport(@builtin(global_invocation_id) id: vec3u) {
   w = max(w, 0.0);
 
   // Paper drinks surface water up to its capacity (more in valleys).
-  let capI = mix(p.capacityMin, p.capacityMax, 1.0 - h);
-  let drink = min(w, p.absorption * p.dt * max(capI - s, 0.0));
+  // Sizing slows the drinking and evens it out across the texture; unsized
+  // paper absorbs fast and blotchily. Past 1, sized paper pushes water back up.
+  let texture = mix(1.0 - paper[i], 0.5, clamp(p.sizing, 0.0, 1.0));
+  let capI = mix(p.capacityMin, p.capacityMax, texture);
+  let drink = clamp(p.absorption * (1.0 - p.sizing) * p.dt * max(capI - s, 0.0), -s, w);
   w -= drink;
   s += drink;
 

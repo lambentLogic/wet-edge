@@ -1,5 +1,5 @@
-// Procedural paper height field in [0, 1]: multi-scale value noise for the
-// tooth, plus short wandering fibers pressed into the sheet.
+// Procedural paper height fields in [0, 1], plus presets that pair each
+// surface with the physics of that paper (absorbency, wicking, staining).
 
 function mulberry32(seed) {
   return function () {
@@ -10,6 +10,7 @@ function mulberry32(seed) {
   };
 }
 
+// Smooth random undulation.
 function addValueNoise(h, W, H, scale, amp, rand) {
   const gw = Math.ceil(W / scale) + 2, gh = Math.ceil(H / scale) + 2;
   const grid = new Float32Array(gw * gh);
@@ -27,19 +28,50 @@ function addValueNoise(h, W, H, scale, amp, rand) {
   }
 }
 
-function addFibers(h, W, H, rand) {
-  const count = Math.floor((W * H) / 220);
+// Overlapping soft hills of random size and height: the irregular "tooth"
+// that felts press into mould-made cotton paper. Summing Gaussians (rather
+// than taking the nearest bump) avoids a cell-like network of seams.
+function addTooth(h, W, H, scale, amp, rand) {
+  const gw = Math.ceil(W / scale) + 1, gh = Math.ceil(H / scale) + 1;
+  const n = gw * gh;
+  const px = new Float32Array(n), py = new Float32Array(n), ph = new Float32Array(n), pk = new Float32Array(n);
+  for (let j = 0; j < gh; j++) for (let i = 0; i < gw; i++) {
+    const k = j * gw + i;
+    px[k] = (i + rand()) * scale; py[k] = (j + rand()) * scale;
+    ph[k] = 0.3 + 0.7 * rand();
+    const sigma = scale * (0.3 + 0.35 * rand());
+    pk[k] = 1 / (2 * sigma * sigma);
+  }
+  for (let y = 0; y < H; y++) {
+    const cj = Math.floor(y / scale);
+    for (let x = 0; x < W; x++) {
+      const ci = Math.floor(x / scale);
+      let acc = 0;
+      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+        const i = ci + di, j = cj + dj;
+        if (i < 0 || j < 0 || i >= gw || j >= gh) continue;
+        const k = j * gw + i, dx = x - px[k], dy = y - py[k];
+        acc += ph[k] * Math.exp(-(dx * dx + dy * dy) * pk[k]);
+      }
+      h[y * W + x] += amp * acc;
+    }
+  }
+}
+
+function addFibers(h, W, H, rand, { density, minLen, maxLen, strength, wander }) {
+  const count = Math.floor(W * H * density);
   for (let f = 0; f < count; f++) {
     let x = rand() * W, y = rand() * H, ang = rand() * Math.PI * 2;
-    const len = 15 + rand() * 60, strength = 0.08 + rand() * 0.12;
+    const len = minLen + rand() * (maxLen - minLen);
+    const s0 = strength * (0.5 + rand());
     for (let s = 0; s < len; s++) {
-      ang += (rand() - 0.5) * 0.25;
+      ang += (rand() - 0.5) * wander;
       x += Math.cos(ang); y += Math.sin(ang);
       const xi = Math.round(x), yi = Math.round(y);
       if (xi < 1 || yi < 1 || xi >= W - 1 || yi >= H - 1) break;
-      h[yi * W + xi] += strength;
-      h[yi * W + xi + 1] += strength * 0.4;
-      h[(yi + 1) * W + xi] += strength * 0.4;
+      h[yi * W + xi] += s0;
+      h[yi * W + xi + 1] += s0 * 0.4;
+      h[(yi + 1) * W + xi] += s0 * 0.4;
     }
   }
 }
@@ -57,17 +89,108 @@ function blur3(h, W, H) {
   return out;
 }
 
-export function makePaper(W, H, seed = (Math.random() * 1e9) | 0) {
+// Physical scale: one grid cell is CELL_MM millimetres, so the 1024x768
+// canvas is about 20 x 15 cm. All paper features below are given in mm.
+export const CELL_MM = 0.2;
+
+// gen:    how the surface is built (sizes in mm). `contrast` squeezes the normalized height
+//         toward 0.5, so smooth papers stay smooth after normalization.
+// knobs:  physics overrides applied when the preset is chosen.
+// color:  paper white (linear-ish RGB).
+export const PAPERS = {
+  coldPress: {
+    name: 'Cold-press cotton',
+    color: [0.97, 0.955, 0.92],
+    gen: {
+      noise: [[24, 0.25], [6, 0.15], [1, 0.1], [0.4, 0.08]],
+      tooth: [[0.8, 0.45], [0.4, 0.2]],
+      fibers: { density: 1 / 1500, minLen: 2, maxLen: 6, strength: 0.05, wander: 0.4 },
+      contrast: 1, blurPasses: 1,
+    },
+    knobs: {
+      sizing: 0.8,
+      paperRelief: 0.2, absorption: 0.05, capacityMin: 0.03, capacityMax: 0.12,
+      capillarySpread: 0.1, capillaryMin: 0.02, dampThreshold: 0.05, staining: 1, paperShade: 0.14,
+    },
+  },
+  hotPress: {
+    name: 'Hot-press cotton',
+    color: [0.975, 0.965, 0.935],
+    gen: {
+      noise: [[32, 0.3], [8, 0.2], [0.6, 0.1]],
+      tooth: [[0.5, 0.2]],
+      fibers: { density: 1 / 2500, minLen: 2, maxLen: 6, strength: 0.03, wander: 0.4 },
+      contrast: 0.3, blurPasses: 2,
+    },
+    knobs: {
+      sizing: 0.9,
+      paperRelief: 0.05, absorption: 0.06, capacityMin: 0.03, capacityMax: 0.07,
+      capillarySpread: 0.06, capillaryMin: 0.025, dampThreshold: 0.05, staining: 0.7, paperShade: 0.06,
+    },
+  },
+  rough: {
+    name: 'Rough cotton',
+    color: [0.965, 0.95, 0.91],
+    gen: {
+      noise: [[18, 0.35], [5, 0.2], [0.4, 0.08]],
+      tooth: [[2.5, 0.7], [1.2, 0.3], [0.5, 0.1]],
+      fibers: { density: 1 / 1500, minLen: 2, maxLen: 6, strength: 0.05, wander: 0.4 },
+      contrast: 1, blurPasses: 1,
+    },
+    knobs: {
+      sizing: 0.75,
+      paperRelief: 0.45, absorption: 0.05, capacityMin: 0.02, capacityMax: 0.16,
+      capillarySpread: 0.1, capillaryMin: 0.02, dampThreshold: 0.06, staining: 1, paperShade: 0.14,
+    },
+  },
+  washi: {
+    name: 'Washi (kozo)',
+    color: [0.955, 0.935, 0.88],
+    gen: {
+      noise: [[19, 0.35], [5, 0.25], [1.2, 0.2], [0.4, 0.15]],
+      tooth: [],
+      fibers: { density: 1 / 180, minLen: 6, maxLen: 28, strength: 0.12, wander: 0.2 },
+      contrast: 1, blurPasses: 1,
+    },
+    knobs: {
+      sizing: 0.15,
+      paperRelief: 0.15, absorption: 0.06, capacityMin: 0.06, capacityMax: 0.2,
+      capillarySpread: 0.2, capillaryMin: 0.01, dampThreshold: 0.03, staining: 1.5, paperShade: 0.12,
+    },
+  },
+  yupo: {
+    name: 'Yupo (synthetic)',
+    color: [0.985, 0.985, 0.98],
+    gen: {
+      noise: [[40, 0.5], [10, 0.3], [0.8, 0.2]],
+      tooth: [],
+      fibers: null,
+      contrast: 0.08, blurPasses: 2,
+    },
+    knobs: {
+      sizing: 0,
+      paperRelief: 0.02, absorption: 0.0005, capacityMin: 0.002, capacityMax: 0.005,
+      capillarySpread: 0.01, capillaryMin: 0.05, dampThreshold: 1.0, staining: 0.2, paperShade: 0.02,
+    },
+  },
+};
+
+export const DEFAULT_PAPER = 'coldPress';
+
+export function makePaper(W, H, preset = PAPERS[DEFAULT_PAPER], seed = (Math.random() * 1e9) | 0) {
+  const g = preset.gen;
+  const cells = mm => Math.max(mm / CELL_MM, 1);
   const rand = mulberry32(seed);
   let h = new Float32Array(W * H);
-  addValueNoise(h, W, H, 96, 0.35, rand);
-  addValueNoise(h, W, H, 24, 0.25, rand);
-  addValueNoise(h, W, H, 6, 0.2, rand);
-  addValueNoise(h, W, H, 2, 0.15, rand);
-  addFibers(h, W, H, rand);
-  h = blur3(h, W, H);
+  for (const [mm, amp] of g.noise) addValueNoise(h, W, H, cells(mm), amp, rand);
+  for (const [mm, amp] of g.tooth) addTooth(h, W, H, cells(mm), amp, rand);
+  if (g.fibers) {
+    const f = g.fibers;
+    addFibers(h, W, H, rand, { ...f, minLen: cells(f.minLen), maxLen: cells(f.maxLen) });
+  }
+  for (let i = 0; i < g.blurPasses; i++) h = blur3(h, W, H);
   let lo = Infinity, hi = -Infinity;
   for (const v of h) { if (v < lo) lo = v; if (v > hi) hi = v; }
-  for (let i = 0; i < h.length; i++) h[i] = (h[i] - lo) / (hi - lo);
+  for (let i = 0; i < h.length; i++) h[i] = 0.5 + ((h[i] - lo) / (hi - lo) - 0.5) * g.contrast;
   return h;
 }

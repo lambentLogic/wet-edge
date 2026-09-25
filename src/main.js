@@ -1,6 +1,6 @@
 import { PARAMS, SIM_PARAMS, simParamBufferSize } from './params.js';
 import { simWGSL, renderWGSL } from './shaders.js';
-import { makePaper } from './paper.js';
+import { makePaper, PAPERS, DEFAULT_PAPER } from './paper.js';
 import { PIGMENTS } from './pigments.js';
 
 const W = 1024, H = 768, N = W * H;
@@ -10,8 +10,10 @@ const values = Object.fromEntries(PARAMS.map(p => [p.key, p.v]));
 const state = {
   mode: 0,          // 0 paint, 1 water, 2 lift
   pigment: 0,
+  paper: DEFAULT_PAPER,
   drying: false,
   paused: false,
+  headless: false,
   pointer: { down: false, x: 0, y: 0, px: 0, py: 0, pressure: 1 },
 };
 
@@ -41,7 +43,7 @@ async function init() {
   const frameBuf = buf(48, U | CD);
   const renderBuf = buf(80, U | CD);
 
-  const newPaper = () => device.queue.writeBuffer(paperBuf, 0, makePaper(W, H));
+  const newPaper = () => device.queue.writeBuffer(paperBuf, 0, makePaper(W, H, PAPERS[state.paper]));
   const clear = () => {
     const z = new Float32Array(N * 4);
     for (const b of [...A, ...B]) device.queue.writeBuffer(b, 0, z);
@@ -114,15 +116,22 @@ async function init() {
   const renderData = new ArrayBuffer(80);
   const renderU32 = new Uint32Array(renderData), renderF32 = new Float32Array(renderData);
 
-  function writeUniforms(substeps) {
+  const pointerBrush = () => {
+    const ptr = state.pointer;
+    return ptr.down ? { x0: ptr.px, y0: ptr.py, x1: ptr.x, y1: ptr.y, pressure: ptr.pressure } : null;
+  };
+
+  function writeUniforms(substeps, brush = pointerBrush(), drying = state.drying) {
     SIM_PARAMS.forEach((p, i) => { paramData[i] = values[p.key]; });
     device.queue.writeBuffer(paramBuf, 0, paramData);
 
-    const ptr = state.pointer;
-    frameU32[0] = W; frameU32[1] = H; frameU32[2] = state.mode; frameU32[3] = ptr.down ? 1 : 0;
-    frameF32[4] = ptr.px; frameF32[5] = ptr.py; frameF32[6] = ptr.x; frameF32[7] = ptr.y;
-    frameF32[8] = ptr.pressure; frameF32[9] = 1 / substeps;
-    frameF32[10] = state.drying ? values.dryerStrength : 1;
+    frameU32[0] = W; frameU32[1] = H; frameU32[2] = state.mode; frameU32[3] = brush ? 1 : 0;
+    if (brush) {
+      frameF32[4] = brush.x0; frameF32[5] = brush.y0; frameF32[6] = brush.x1; frameF32[7] = brush.y1;
+      frameF32[8] = brush.pressure ?? 1;
+    }
+    frameF32[9] = 1 / substeps;
+    frameF32[10] = drying ? values.dryerStrength : 1;
     device.queue.writeBuffer(frameBuf, 0, frameData);
 
     const pig = PIGMENTS[state.pigment];
@@ -130,7 +139,7 @@ async function init() {
     renderF32[2] = values.thickness; renderF32[3] = values.wetDarken;
     renderF32.set([...pig.K, 0], 4);
     renderF32.set([...pig.S, 0], 8);
-    renderF32.set([0.97, 0.955, 0.92, 1], 12);
+    renderF32.set([...PAPERS[state.paper].color, 1], 12);
     renderF32[16] = values.paperShade; renderF32[17] = values.suspendedWeight;
     device.queue.writeBuffer(renderBuf, 0, renderData);
   }
@@ -145,6 +154,20 @@ async function init() {
   const MAX_STEPS_PER_FRAME = 64;
   let stepDebt = 0, lastFrame = performance.now();
 
+  function encodeSim(enc, substeps) {
+    const pass = enc.beginComputePass();
+    pass.setBindGroup(0, simBG[parity]);
+    pass.setPipeline(pipes.blurH); pass.dispatchWorkgroups(gx, gy);
+    pass.setPipeline(pipes.blurV); pass.dispatchWorkgroups(gx, gy);
+    for (let s = 0; s < substeps; s++) {
+      pass.setBindGroup(0, simBG[parity]);
+      pass.setPipeline(pipes.velocity); pass.dispatchWorkgroups(gx, gy);
+      pass.setPipeline(pipes.transport); pass.dispatchWorkgroups(gx, gy);
+      parity ^= 1;
+    }
+    pass.end();
+  }
+
   function frame() {
     const t = performance.now();
     const elapsed = Math.min((t - lastFrame) / 1000, 0.1);
@@ -154,18 +177,8 @@ async function init() {
     stepDebt -= substeps;
     writeUniforms(Math.max(substeps, 1));
     const enc = device.createCommandEncoder();
-    if (!state.paused && substeps > 0) {
-      const pass = enc.beginComputePass();
-      pass.setBindGroup(0, simBG[parity]);
-      pass.setPipeline(pipes.blurH); pass.dispatchWorkgroups(gx, gy);
-      pass.setPipeline(pipes.blurV); pass.dispatchWorkgroups(gx, gy);
-      for (let s = 0; s < substeps; s++) {
-        pass.setBindGroup(0, simBG[parity]);
-        pass.setPipeline(pipes.velocity); pass.dispatchWorkgroups(gx, gy);
-        pass.setPipeline(pipes.transport); pass.dispatchWorkgroups(gx, gy);
-        parity ^= 1;
-      }
-      pass.end();
+    if (!state.paused && !state.headless && substeps > 0) {
+      encodeSim(enc, substeps);
       // Only consume the brush segment once the sim has actually stamped it.
       state.pointer.px = state.pointer.x; state.pointer.py = state.pointer.y;
     }
@@ -207,6 +220,39 @@ async function init() {
       }
       return out;
     },
+  };
+
+  // Headless stepping: drives the sim directly instead of through
+  // requestAnimationFrame, so scripted tests run the same (and faster than
+  // real time) even when the tab is hidden. Simulated time assumes the
+  // interactive loop's 120 Hz frame with simSpeed steps per second.
+  const HZ = 120;
+  let pending = 0;
+  async function simFrames(nFrames, brushAt = () => null, drying = false) {
+    const per = Math.max(1, Math.round(values.simSpeed / HZ));
+    for (let f = 0; f < nFrames; f++) {
+      writeUniforms(per, brushAt(f), drying);
+      const enc = device.createCommandEncoder();
+      encodeSim(enc, per);
+      device.queue.submit([enc.finish()]);
+      if (++pending >= 60) { await device.queue.onSubmittedWorkDone(); pending = 0; }
+    }
+    await device.queue.onSubmittedWorkDone(); pending = 0;
+  }
+  window.__sim.headless = {
+    begin() { state.headless = true; },
+    end() { state.headless = false; },
+    // A stroke from (x0,y0) to (x1,y1) over `frames` simulated frames.
+    paint(x0, y0, x1, y1, frames = 24) {
+      const at = f => {
+        const t0 = f / frames, t1 = (f + 1) / frames;
+        return { x0: x0 + (x1 - x0) * t0, y0: y0 + (y1 - y0) * t0, x1: x0 + (x1 - x0) * t1, y1: y0 + (y1 - y0) * t1 };
+      };
+      return simFrames(frames, at);
+    },
+    wait(seconds, { dry = false } = {}) { return simFrames(Math.round(seconds * HZ), () => null, dry); },
+    setMode(m) { state.mode = m; },
+    setPaper(key) { const sel = document.getElementById('paperType'); sel.value = key; sel.dispatchEvent(new Event('change')); },
   };
 
   // Debug hook: paint a straight stroke from (x0,y0) to (x1,y1) in grid
@@ -300,7 +346,24 @@ function buildUI({ clear, newPaper }) {
 
   document.getElementById('clear').addEventListener('click', clear);
   document.getElementById('paper').addEventListener('click', newPaper);
-  document.getElementById('reset').addEventListener('click', () => PARAMS.forEach(p => inputs[p.key](p.v)));
+  // A paper preset sets its surface and its physics knobs together.
+  const applyPaperKnobs = () => {
+    for (const [k, v] of Object.entries(PAPERS[state.paper].knobs)) inputs[k](v);
+  };
+  const paperSel = document.getElementById('paperType');
+  for (const [key, pp] of Object.entries(PAPERS)) paperSel.add(new Option(pp.name, key));
+  paperSel.value = state.paper;
+  paperSel.addEventListener('change', () => {
+    state.paper = paperSel.value;
+    applyPaperKnobs();
+    newPaper();
+  });
+  applyPaperKnobs();
+
+  document.getElementById('reset').addEventListener('click', () => {
+    PARAMS.forEach(p => inputs[p.key](p.v));
+    applyPaperKnobs();
+  });
 
   window.addEventListener('keydown', e => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;

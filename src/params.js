@@ -20,6 +20,7 @@ export const PARAMS = [
   // --- Paper and drying (capillary layer) ---
   { key: 'evaporation',      v: 0.00001, min: 0, max: 0.0002,  group: 'Paper & drying', target: 'sim' },
   { key: 'edgeEvaporation',  v: 4,      min: 0, max: 20,    group: 'Paper & drying', target: 'sim', label: 'edge evaporation boost' },
+  { key: 'sizing',           v: 0.8,    min: 0, max: 1,     group: 'Paper & drying', target: 'sim', label: 'sizing' },
   { key: 'absorption',       v: 0.02,   min: 0, max: 0.2,   group: 'Paper & drying', target: 'sim' },
   { key: 'capacityMin',      v: 0.03,   min: 0, max: 0.3,   group: 'Paper & drying', target: 'sim', label: 'capacity (peaks)' },
   { key: 'capacityMax',      v: 0.12,   min: 0, max: 0.5,   group: 'Paper & drying', target: 'sim', label: 'capacity (valleys)' },
@@ -34,6 +35,7 @@ export const PARAMS = [
   { key: 'density',     v: 0.02, min: 0, max: 0.2, group: 'Pigment', target: 'sim', label: 'density (settling)' },
   { key: 'staining',    v: 1,    min: 0, max: 10,  group: 'Pigment', target: 'sim' },
   { key: 'granulation', v: 0.6,  min: 0, max: 2,   group: 'Pigment', target: 'sim' },
+  { key: 'valleyFill',  v: 3,    min: 0, max: 20,  group: 'Pigment', target: 'sim', label: 'valleys fill up' },
   { key: 'settleDepth', v: 0.05, min: 0, max: 0.5, group: 'Pigment', target: 'sim', label: 'settles below depth' },
 
   // --- Brush ---
