@@ -53,8 +53,32 @@
   }
 
   const probes = {
+    // Gap: two parallel strokes with a narrow strip of dry paper between
+    // them (gapMm wide). Fraction of the gap's centre line that ends up with
+    // pigment, i.e. whether the water bridged. Should be 0 on sized paper
+    // at ordinary wetness.
+    async gap(paper = 'coldPress', gapMm = 1.5) {
+      await fresh(paper);
+      const r = 14, gap = Math.round(gapMm / 0.2);
+      const y1 = 350, y2 = y1 + 2 * r + gap;
+      await withValues({ brushRadius: r }, async () => {
+        h.lift(); await h.paint(300, y1, 720, y1, 24);
+        h.lift(); await h.paint(300, y2, 720, y2, 24);
+        await h.wait(20); await h.wait(10, { dry: true }); await h.wait(2);
+      });
+      h.end();
+      const a = await S.read();
+      const yc = Math.round((y1 + y2) / 2);
+      let bridged = 0, n = 0;
+      for (let x = 320; x < 700; x++, n++) if (a[(yc * W + x) * 4 + 2] > 1e-3) bridged++;
+      return +(bridged / n).toFixed(3);
+    },
+
     // Throughput: simulated seconds per wall-clock second over a wet wash.
     // Needs to stay above 1 for the interactive app to run in real time.
+    // Creep at hand-drawing speed (~1 mm per frame rather than ~2.5).
+    async creepSlow(paper = 'coldPress') { return probes.creep(paper, 20); },
+
     async speed(paper = 'coldPress') {
       await fresh(paper);
       await withValues({ brushRadius: 30 }, async () => {
@@ -70,7 +94,7 @@
     // Creep: a U-shaped stroke that curves back to join itself. Fraction of
     // final pigment lying more than 1 mm outside anywhere the brush touched.
     // Should be ~0 on sized paper.
-    async creep(paper = 'coldPress') {
+    async creep(paper = 'coldPress', framesPerSegment = 3) {
       await fresh(paper);
       const r = 14, path = [];
       for (let t = 0; t <= 1.0001; t += 1 / 60) {
@@ -79,7 +103,7 @@
       }
       path.push([512 + 120 * Math.cos(Math.PI * 0.25), 384 + 120 * Math.sin(Math.PI * 0.25)]); // close it
       await withValues({ brushRadius: r }, async () => {
-        for (let i = 1; i < path.length; i++) await h.paint(...path[i - 1], ...path[i], 3);
+        for (let i = 1; i < path.length; i++) await h.paint(...path[i - 1], ...path[i], framesPerSegment);
         await h.wait(20); await h.wait(10, { dry: true }); await h.wait(2);
       });
       h.end();
