@@ -100,7 +100,7 @@ export const CELL_MM = 0.2;
 export const PAPERS = {
   coldPress: {
     name: 'Cold-press cotton',
-    color: [0.97, 0.955, 0.92],
+    color: [0.975, 0.97, 0.955],
     gen: {
       noise: [[24, 0.25], [6, 0.15], [1, 0.1], [0.4, 0.08]],
       tooth: [[0.8, 0.45], [0.4, 0.2]],
@@ -110,7 +110,7 @@ export const PAPERS = {
     knobs: {
       sizing: 0.8,
       paperRelief: 0.2, absorption: 0.05, capacityMin: 0.03, capacityMax: 0.12,
-      capillarySpread: 0.1, capillaryMin: 0.02, dampThreshold: 0.05, staining: 1, paperShade: 0.14,
+      capillarySpread: 0.1, capillaryMin: 0.02, dampThreshold: 0.05, staining: 1, paperShade: 0.05,
     },
   },
   hotPress: {

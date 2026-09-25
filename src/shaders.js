@@ -68,6 +68,14 @@ fn pres(i: i32) -> f32 {
   return p.gravity * (a.x + p.paperRelief * paper[i]) - p.edgePull * (1.0 - mb[i]) * wet;
 }
 
+// Thin films stick to the paper; deep puddles flow. Viscous drag in a film
+// of depth h scales roughly as 1/h^2, referenced to dragDepth.
+fn dragAt(i: i32, j: i32) -> f32 {
+  let h = max(0.5 * (Ain[i].x + Ain[j].x), 0.002);
+  let r = p.dragDepth / h;
+  return p.drag * min(r * r, p.dragMaxBoost);
+}
+
 fn uAt(x: i32, y: i32) -> f32 { if (!inb(x, y)) { return 0.0; } return Bin[ix(x, y)].x; }
 fn vAt(x: i32, y: i32) -> f32 { if (!inb(x, y)) { return 0.0; } return Bin[ix(x, y)].y; }
 
@@ -86,7 +94,7 @@ fn velocity(@builtin(global_invocation_id) id: vec3u) {
       let u0 = Bin[i].x;
       let lap = uAt(x - 1, y) + uAt(x + 1, y) + uAt(x, y - 1) + uAt(x, y + 1) - 4.0 * u0;
       let acc = -(pres(j) - pres(i)) + p.viscosity * lap + p.tiltX;
-      u = (u0 + p.dt * acc) / (1.0 + p.dt * p.drag);
+      u = (u0 + p.dt * acc) / (1.0 + p.dt * dragAt(i, j));
     }
   }
   if (y < H() - 1) {
@@ -95,7 +103,7 @@ fn velocity(@builtin(global_invocation_id) id: vec3u) {
       let v0 = Bin[i].y;
       let lap = vAt(x - 1, y) + vAt(x + 1, y) + vAt(x, y - 1) + vAt(x, y + 1) - 4.0 * v0;
       let acc = -(pres(j) - pres(i)) + p.viscosity * lap + p.tiltY;
-      v = (v0 + p.dt * acc) / (1.0 + p.dt * p.drag);
+      v = (v0 + p.dt * acc) / (1.0 + p.dt * dragAt(i, j));
     }
   }
   Bout[i] = vec4f(clamp(finite(u), -vmax, vmax), clamp(finite(v), -vmax, vmax), 0.0, 0.0);
@@ -127,6 +135,37 @@ fn transport(@builtin(global_invocation_id) id: vec3u) {
   let wg = a.xy - p.dt * (FR - FL + FD - FU);
   var w = wg.x;
   var g = wg.y;
+
+  // Pigment also moves between touching wet cells without net water flow:
+  //  - diffusion down its concentration gradient, and
+  //  - the Marangoni surface current: paint (binder, wetting agents) has
+  //    lower surface tension than clean water, so the surface layer carrying
+  //    it slides outward. The rate scales with concentration, so a fresh
+  //    charge bursts outward with a defined front and slows as it dilutes.
+  //    Negative values pull paint into clumps.
+  // Mixing is suppressed near a wet edge (mb falls off there), so it can't
+  // undo the outward flow that builds edge darkening.
+  let interior = smoothstep(p.mixEdgeLo, p.mixEdgeHi, mb[i]);
+  if (a.x > p.wEps && interior > 0.0) {
+    let c = a.y / a.x;
+    var dg = 0.0;
+    for (var k = 0; k < 4; k++) {
+      var n = aL;
+      if (k == 1) { n = aR; } else if (k == 2) { n = aU; } else if (k == 3) { n = aD; }
+      if (n.x > p.wEps) {
+        let cn = n.y / n.x;
+        // The Marangoni term only acts where paint meets much cleaner water
+        // (high contrast), not across the gentle gradients inside one body of
+        // paint, where it would erase edge darkening. Capped at the
+        // explicit-scheme stability limit (4 neighbours).
+        let hi = max(c, cn);
+        let contrast = (hi - min(c, cn)) / (hi + 1e-4);
+        let rate = min(p.pigmentDiffusion + p.marangoni * hi * contrast * contrast, 0.24 / max(p.dt, 1e-6));
+        dg += rate * min(a.x, n.x) * (cn - c);
+      }
+    }
+    g += p.dt * dg * interior;
+  }
   var d = a.z;
   var s = a.w;
 
@@ -144,11 +183,15 @@ fn transport(@builtin(global_invocation_id) id: vec3u) {
     // The brush tops the paper up toward its own water level and
     // pigment concentration rather than adding a fixed amount per frame.
     let k = clamp(p.brushRate * amt, 0.0, 1.0);
+    // Touching an already-wet surface, the loaded brush also releases a
+    // charge of extra water, which pushes outward: the wet-in-wet burst.
+    let charge = select(0.0, p.brushCharge * k, a.x > p.wEps);
     if (fr.mode == 0u) {
-      w = max(w, mix(w, p.brushWater, k));
-      g = max(g, mix(g, p.brushWater * p.brushPigment, k));
+      let c0 = select(0.0, g / w, w > p.wEps);
+      w = max(w, mix(w, p.brushWater, k)) + charge;
+      g = max(g, mix(g, p.brushWater * p.brushPigment, k)) + charge * max(p.brushPigment - c0, 0.0);
     } else if (fr.mode == 1u) {
-      w = max(w, mix(w, p.brushWater, k));
+      w = max(w, mix(w, p.brushWater, k)) + charge;
     } else {
       let kl = clamp(p.liftStrength * amt * 8.0, 0.0, 1.0);
       w *= 1.0 - kl;

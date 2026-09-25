@@ -12,6 +12,8 @@ export const PARAMS = [
   { key: 'gravity',       v: 1.0,    min: 0,    max: 5,     group: 'Flow', target: 'sim',  label: 'pressure (gravity)' },
   { key: 'viscosity',     v: 0.1,    min: 0,    max: 1,     group: 'Flow', target: 'sim' },
   { key: 'drag',          v: 0.5,    min: 0,    max: 5,     group: 'Flow', target: 'sim',  label: 'paper drag' },
+  { key: 'dragMaxBoost',  v: 1,      min: 1,    max: 100,   group: 'Flow', target: 'sim',  label: 'thin-film drag cap' },
+  { key: 'dragDepth',     v: 0.1,    min: 0,    max: 0.5,   group: 'Flow', target: 'sim',  label: 'drag reference depth' },
   { key: 'paperRelief',   v: 0.2,    min: 0,    max: 2,     group: 'Flow', target: 'sim',  label: 'paper relief' },
   { key: 'tiltX',         v: 0,      min: -0.05, max: 0.05, group: 'Flow', target: 'sim',  label: 'tilt x' },
   { key: 'tiltY',         v: 0,      min: -0.05, max: 0.05, group: 'Flow', target: 'sim',  label: 'tilt y' },
@@ -32,6 +34,10 @@ export const PARAMS = [
   { key: 'dryerStrength',    v: 15,     min: 1, max: 100,   group: 'Paper & drying', target: 'js',  label: 'blow-dryer ×' },
 
   // --- Pigment (Curtis's ρ, ω, γ) ---
+  { key: 'marangoni',   v: 4,    min: -2, max: 10,   group: 'Pigment', target: 'sim', label: 'spreads on water (Marangoni)' },
+  { key: 'pigmentDiffusion', v: 0.05, min: 0, max: 1, group: 'Pigment', target: 'sim', label: 'diffusion in water' },
+  { key: 'mixEdgeLo',   v: 0.6,  min: 0, max: 1,   group: 'Pigment', target: 'sim', label: 'no mixing near edge (lo)' },
+  { key: 'mixEdgeHi',   v: 0.9,  min: 0, max: 1,   group: 'Pigment', target: 'sim', label: 'no mixing near edge (hi)' },
   { key: 'density',     v: 0.02, min: 0, max: 0.2, group: 'Pigment', target: 'sim', label: 'density (settling)' },
   { key: 'staining',    v: 1,    min: 0, max: 10,  group: 'Pigment', target: 'sim' },
   { key: 'granulation', v: 0.6,  min: 0, max: 2,   group: 'Pigment', target: 'sim' },
@@ -41,9 +47,10 @@ export const PARAMS = [
   // --- Brush ---
   { key: 'brushRadius',   v: 18,   min: 1, max: 100, group: 'Brush', target: 'sim', label: 'radius' },
   { key: 'brushSoftness', v: 0.4,  min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'softness' },
-  { key: 'brushWater',    v: 0.3,  min: 0, max: 2,   group: 'Brush', target: 'sim', label: 'water level' },
-  { key: 'brushPigment',  v: 0.15, min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'pigment concentration' },
+  { key: 'brushWater',    v: 0.2,  min: 0, max: 2,   group: 'Brush', target: 'sim', label: 'water level' },
+  { key: 'brushPigment',  v: 0.4,  min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'pigment concentration' },
   { key: 'brushRate',     v: 0.4,  min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'load rate' },
+  { key: 'brushCharge',   v: 0.1,  min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'wet-in-wet charge' },
   { key: 'liftStrength',  v: 0.2,  min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'lift strength' },
 
   // --- Render (Kubelka-Munk) ---

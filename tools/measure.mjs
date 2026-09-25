@@ -1,0 +1,59 @@
+// Runs calibration probes in a private headless Chrome (WebGPU on Metal),
+// independent of any visible browser window.
+//
+//   python3 -m http.server 8765 &     # serve the app
+//   node tools/measure.mjs                         # all probes, defaults
+//   node tools/measure.mjs edge bleed              # selected probes
+//   node tools/measure.mjs edge --set marangoni=0  # with knob overrides
+//
+// CHROME_PATH overrides the browser; APP_URL overrides the address.
+
+import puppeteer from 'puppeteer-core';
+import { readFile, mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+const CHROME = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const APP_URL = process.env.APP_URL ?? 'http://127.0.0.1:8765/';
+
+const args = process.argv.slice(2);
+const overrides = {};
+const names = [];
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === '--set') {
+    const [k, v] = args[++i].split('=');
+    overrides[k] = parseFloat(v);
+  } else names.push(args[i]);
+}
+
+const profile = await mkdtemp(join(tmpdir(), 'watercolor-measure-'));
+const browser = await puppeteer.launch({
+  executablePath: CHROME,
+  headless: 'new',
+  userDataDir: profile,
+  args: ['--enable-unsafe-webgpu'],
+  protocolTimeout: 600_000,
+});
+try {
+  const page = await browser.newPage();
+  page.on('console', m => { if (m.type() === 'error') console.error('[page]', m.text()); });
+  await page.goto(APP_URL);
+  await page.waitForFunction(() => window.__sim?.headless, { timeout: 20_000 });
+  await page.evaluate(await readFile(new URL('./probes.js', import.meta.url), 'utf8'));
+
+  const all = await page.evaluate(() => Object.keys(window.__probes).filter(k => k !== 'withValues'));
+  const run = names.length ? names : all;
+  const results = {};
+  for (const name of run) {
+    const t0 = Date.now();
+    results[name] = await page.evaluate(
+      (name, over) => window.__probes.withValues(over, () => window.__probes[name]()),
+      name, overrides,
+    );
+    console.error(`${name}: ${JSON.stringify(results[name])}  (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
+  }
+  console.log(JSON.stringify(results));
+} finally {
+  await browser.close();
+  await rm(profile, { recursive: true, force: true });
+}

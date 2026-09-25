@@ -43,7 +43,7 @@ async function init() {
   const frameBuf = buf(48, U | CD);
   const renderBuf = buf(80, U | CD);
 
-  const newPaper = () => device.queue.writeBuffer(paperBuf, 0, makePaper(W, H, PAPERS[state.paper]));
+  const newPaper = seed => device.queue.writeBuffer(paperBuf, 0, makePaper(W, H, PAPERS[state.paper], seed));
   const clear = () => {
     const z = new Float32Array(N * 4);
     for (const b of [...A, ...B]) device.queue.writeBuffer(b, 0, z);
@@ -252,7 +252,12 @@ async function init() {
     },
     wait(seconds, { dry = false } = {}) { return simFrames(Math.round(seconds * HZ), () => null, dry); },
     setMode(m) { state.mode = m; },
-    setPaper(key) { const sel = document.getElementById('paperType'); sel.value = key; sel.dispatchEvent(new Event('change')); },
+    // A fixed seed makes probe results comparable between runs.
+    setPaper(key, seed = 1) {
+      const sel = document.getElementById('paperType');
+      sel.value = key; sel.dispatchEvent(new Event('change'));
+      newPaper(seed);
+    },
   };
 
   // Debug hook: paint a straight stroke from (x0,y0) to (x1,y1) in grid
@@ -345,7 +350,7 @@ function buildUI({ clear, newPaper }) {
   pauseBtn.addEventListener('click', togglePause);
 
   document.getElementById('clear').addEventListener('click', clear);
-  document.getElementById('paper').addEventListener('click', newPaper);
+  document.getElementById('paper').addEventListener('click', () => newPaper());
   // A paper preset sets its surface and its physics knobs together.
   const applyPaperKnobs = () => {
     for (const [k, v] of Object.entries(PAPERS[state.paper].knobs)) inputs[k](v);
