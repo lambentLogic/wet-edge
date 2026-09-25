@@ -17,6 +17,7 @@ export const PARAMS = [
   { key: 'paperRelief',   v: 0.03,    min: 0,    max: 2,     group: 'Flow', target: 'sim',  label: 'paper relief' },
   { key: 'tiltX',         v: 0,      min: -0.05, max: 0.05, group: 'Flow', target: 'sim',  label: 'tilt x' },
   { key: 'tiltY',         v: 0,      min: -0.05, max: 0.05, group: 'Flow', target: 'sim',  label: 'tilt y' },
+  { key: 'surfaceTension', v: 0.5,  min: 0,    max: 3,     group: 'Flow', target: 'sim',  label: 'surface tension' },
   { key: 'pinning',       v: 0.1,    min: 0,    max: 0.5,   group: 'Flow', target: 'sim',  label: 'edge pinning' },
   { key: 'edgePull',      v: 0.15,   min: 0,    max: 0.2,   group: 'Flow', target: 'sim',  label: 'edge pull (Curtis η)' },
 

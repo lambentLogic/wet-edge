@@ -60,12 +60,37 @@ fn isWet(i: i32) -> bool { return Ain[i].x > p.wEps; }
 // Surface water may only enter paper that is already wet or damp enough.
 fn isOpen(i: i32) -> bool { let a = Ain[i]; return a.x > p.wEps || a.w > p.dampThreshold; }
 
+// Height of the free water surface above a common datum.
+fn eta(i: i32) -> f32 { return Ain[i].x + p.paperRelief * paper[i]; }
+
+// Laplacian of the free surface over wet neighbours only; dry neighbours
+// count as level with this cell, so the contact line itself adds no
+// curvature (pinning handles the edge).
+fn surfaceCurvature(i: i32) -> f32 {
+  let x = i % W(); let y = i / W();
+  let e = eta(i);
+  var lap = 0.0;
+  if (x > 0       && isWet(i - 1))   { lap += eta(i - 1) - e; }
+  if (x < W() - 1 && isWet(i + 1))   { lap += eta(i + 1) - e; }
+  if (y > 0       && isWet(i - W())) { lap += eta(i - W()) - e; }
+  if (y < H() - 1 && isWet(i + W())) { lap += eta(i + W()) - e; }
+  return lap;
+}
+
 fn pres(i: i32) -> f32 {
   let a = Ain[i];
   let wet = select(0.0, 1.0, a.x > p.wEps);
-  // Lowering pressure near the wet edge draws water (and pigment) outward:
-  // the coffee-ring edge darkening.
-  return p.gravity * (a.x + p.paperRelief * paper[i]) - p.edgePull * (1.0 - mb[i]) * wet;
+  // Hydrostatic pressure, plus surface tension (Laplace pressure from the
+  // free surface's curvature: bumps push water away, dips draw it in, which
+  // keeps a thin film smooth over the paper's tooth). Lowering pressure near
+  // the wet edge draws water (and pigment) outward: edge darkening.
+  // The explicit scheme's stability limit for surface tension tightens with
+  // depth (capillary waves: omega^2 ~ sigma*h*k^4), so deep puddles get a
+  // capped strength; thin films get the full value.
+  let sigma = min(p.surfaceTension, 0.023 / (max(a.x, 0.01) * p.dt * p.dt));
+  return p.gravity * eta(i)
+    - sigma * surfaceCurvature(i) * wet
+    - p.edgePull * (1.0 - mb[i]) * wet;
 }
 
 // Thin films stick to the paper; deep puddles flow. Viscous drag in a film
