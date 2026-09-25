@@ -118,6 +118,20 @@
     // Creep at hand-drawing speed (~1 mm per frame rather than ~2.5).
     async creepSlow(paper = 'coldPress') { return probes.creep(paper, 20); },
 
+    // Throughput with only part of the sheet wet (a single wash), the
+    // common case once dry-tile skipping is on.
+    async speedPartial(paper = 'coldPress') {
+      await fresh(paper);
+      await withValues({ brushRadius: 20 }, async () => {
+        for (let y = 300; y <= 420; y += 20) { h.lift(); await h.paint(350, y, 650, y, 10); }
+      });
+      const t0 = performance.now();
+      await h.wait(5);
+      const wall = (performance.now() - t0) / 1000;
+      h.end();
+      return +(5 / wall).toFixed(2);
+    },
+
     async speed(paper = 'coldPress') {
       await fresh(paper);
       await withValues({ brushRadius: 30 }, async () => {

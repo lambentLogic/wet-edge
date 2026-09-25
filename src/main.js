@@ -24,10 +24,9 @@ async function init() {
   if (!navigator.gpu) return fail('WebGPU is not available in this browser.');
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
   if (!adapter) return fail('No WebGPU adapter found.');
-  // Up to 12 storage buffers per stage are needed; Apple GPUs allow many more
-  // than WebGPU's default of 8.
+  // 9 storage buffers per stage are needed; WebGPU's default limit is 8.
   const device = await adapter.requestDevice({
-    requiredLimits: { maxStorageBuffersPerShaderStage: Math.min(adapter.limits.maxStorageBuffersPerShaderStage, 16) },
+    requiredLimits: { maxStorageBuffersPerShaderStage: Math.min(adapter.limits.maxStorageBuffersPerShaderStage, 10) },
   });
   device.lost.then(info => fail(`GPU device lost: ${info.message}`));
   device.addEventListener('uncapturederror', e => console.error('[wgpu]', e.error.message));
@@ -40,27 +39,37 @@ async function init() {
   // ---- buffers
   const S = GPUBufferUsage.STORAGE, CD = GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC, U = GPUBufferUsage.UNIFORM;
   const buf = (size, usage) => device.createBuffer({ size, usage });
-  const paperBuf = buf(N * 4, S | CD);
+  const auxBuf = buf(N * 16, S | CD);  // (paper height, wet mask, scratch, -)
   const A = [buf(N * 16, S | CD), buf(N * 16, S | CD)];
   const B = [buf(N * 16, S | CD), buf(N * 16, S | CD)];
-  const mbBuf = buf(N * 4, S | CD);
-  const tmpBuf = buf(N * 4, S | CD);
   const G = [buf(N * 16, S | CD), buf(N * 16, S | CD)];  // suspended, per slot
   const Dbuf = buf(N * 16, S | CD);                      // deposited, per slot
   const paramBuf = buf(simParamBufferSize(), U | CD);
   const frameBuf = buf(64, U | CD);
   const renderBuf = buf(48, U | CD);
   const pigBuf = buf(SLOTS * 64, U | CD);
+  const TILE = 16, TX = Math.ceil(W / TILE), TY = Math.ceil(H / TILE);
+  // Tiles struct: indirect args (16 bytes), then per-tile state, then list.
+  const tilesBuf = buf(16 + TX * TY * 8, S | CD);
+  // Indirect args are copied out of tilesBuf: a buffer can't be both bound as
+  // writable storage and used for an indirect dispatch.
+  const argsBuf = buf(16, CD | GPUBufferUsage.INDIRECT);
 
-  const newPaper = seed => device.queue.writeBuffer(paperBuf, 0, makePaper(W, H, PAPERS[state.paper], seed));
+  const newPaper = seed => {
+    const h = makePaper(W, H, PAPERS[state.paper], seed);
+    const aux = new Float32Array(N * 4);
+    for (let i = 0; i < N; i++) aux[i * 4] = h[i];
+    device.queue.writeBuffer(auxBuf, 0, aux);
+  };
   const clear = () => {
     const z = new Float32Array(N * 4);
     for (const b of [...A, ...B, ...G, Dbuf]) device.queue.writeBuffer(b, 0, z);
+    device.queue.writeBuffer(tilesBuf, 16, new Uint32Array(TX * TY));
   };
   newPaper();
 
   // ---- pipelines
-  const simModule = device.createShaderModule({ code: simWGSL() });
+  const simModule = device.createShaderModule({ code: simWGSL(TX * TY) });
   const renderModule = device.createShaderModule({ code: renderWGSL });
   for (const m of [simModule, renderModule]) {
     const info = await m.getCompilationInfo();
@@ -70,20 +79,10 @@ async function init() {
   const C = GPUShaderStage.COMPUTE;
   const simLayout = device.createBindGroupLayout({
     entries: [
-      { binding: 0, visibility: C, buffer: { type: 'uniform' } },
-      { binding: 1, visibility: C, buffer: { type: 'uniform' } },
-      { binding: 2, visibility: C, buffer: { type: 'read-only-storage' } },
-      { binding: 3, visibility: C, buffer: { type: 'read-only-storage' } },
-      { binding: 4, visibility: C, buffer: { type: 'storage' } },
-      { binding: 5, visibility: C, buffer: { type: 'read-only-storage' } },
-      { binding: 6, visibility: C, buffer: { type: 'storage' } },
-      { binding: 7, visibility: C, buffer: { type: 'storage' } },
-      { binding: 8, visibility: C, buffer: { type: 'storage' } },
-      { binding: 9, visibility: C, buffer: { type: 'read-only-storage' } },
-      { binding: 10, visibility: C, buffer: { type: 'storage' } },
-      { binding: 11, visibility: C, buffer: { type: 'storage' } },
-      { binding: 12, visibility: C, buffer: { type: 'uniform' } },
-    ],
+      [0, 'uniform'], [1, 'uniform'], [2, 'storage'],
+      [3, 'read-only-storage'], [4, 'storage'], [5, 'read-only-storage'], [6, 'storage'],
+      [7, 'storage'], [9, 'read-only-storage'], [10, 'storage'], [11, 'storage'], [12, 'uniform'],
+    ].map(([binding, type]) => ({ binding, visibility: C, buffer: { type } })),
   });
   const simPL = device.createPipelineLayout({ bindGroupLayouts: [simLayout] });
   const compute = entryPoint => device.createComputePipeline({
@@ -92,13 +91,15 @@ async function init() {
   const pipes = {
     blurH: compute('blurH'), blurV: compute('blurV'),
     velocity: compute('velocity'), transport: compute('transport'),
+    markTiles: compute('markTiles'), compactTiles: compute('compactTiles'),
   };
 
   // Parity k reads A[k], B[k], G[k] and writes A[1-k], B[1-k], G[1-k].
   const simBG = [0, 1].map(k => device.createBindGroup({
     layout: simLayout,
-    entries: [paramBuf, frameBuf, paperBuf, A[k], A[1 - k], B[k], B[1 - k], mbBuf, tmpBuf, G[k], G[1 - k], Dbuf, pigBuf]
-      .map((buffer, binding) => ({ binding, resource: { buffer } })),
+    entries: [[0, paramBuf], [1, frameBuf], [2, auxBuf], [3, A[k]], [4, A[1 - k]], [5, B[k]], [6, B[1 - k]],
+              [7, tilesBuf], [9, G[k]], [10, G[1 - k]], [11, Dbuf], [12, pigBuf]]
+      .map(([binding, buffer]) => ({ binding, resource: { buffer } })),
   }));
 
   const F = GPUShaderStage.FRAGMENT;
@@ -120,7 +121,7 @@ async function init() {
   });
   const renderBG = [0, 1].map(k => device.createBindGroup({
     layout: renderLayout,
-    entries: [renderBuf, A[k], paperBuf, G[k], Dbuf, pigBuf].map((buffer, binding) => ({ binding, resource: { buffer } })),
+    entries: [renderBuf, A[k], auxBuf, G[k], Dbuf, pigBuf].map((buffer, binding) => ({ binding, resource: { buffer } })),
   }));
 
   let parity = 0;
@@ -182,18 +183,30 @@ async function init() {
   const MAX_STEPS_PER_FRAME = 64;
   let stepDebt = 0, lastFrame = performance.now();
 
+  const argsReset = new Uint32Array([0, 1, 1, 0]);
+
+  // One frame's worth of simulation: find active tiles, then run the physics
+  // passes on those tiles only (indirect dispatch; the tile count never
+  // leaves the GPU). Must be the only sim work in its command buffer, since
+  // the tile counter is reset by writeBuffer at submit time.
   function encodeSim(enc, substeps) {
+    device.queue.writeBuffer(tilesBuf, 0, argsReset);
     const pass = enc.beginComputePass();
     pass.setBindGroup(0, simBG[parity]);
     pass.setPipeline(pipes.blurH); pass.dispatchWorkgroups(gx, gy);
     pass.setPipeline(pipes.blurV); pass.dispatchWorkgroups(gx, gy);
+    pass.setPipeline(pipes.markTiles); pass.dispatchWorkgroups(gx, gy);
+    pass.setPipeline(pipes.compactTiles); pass.dispatchWorkgroups(Math.ceil(TX * TY / 64));
+    pass.end();
+    enc.copyBufferToBuffer(tilesBuf, 0, argsBuf, 0, 16);
+    const step = enc.beginComputePass();
     for (let s = 0; s < substeps; s++) {
-      pass.setBindGroup(0, simBG[parity]);
-      pass.setPipeline(pipes.velocity); pass.dispatchWorkgroups(gx, gy);
-      pass.setPipeline(pipes.transport); pass.dispatchWorkgroups(gx, gy);
+      step.setBindGroup(0, simBG[parity]);
+      step.setPipeline(pipes.velocity); step.dispatchWorkgroupsIndirect(argsBuf, 0);
+      step.setPipeline(pipes.transport); step.dispatchWorkgroupsIndirect(argsBuf, 0);
       parity ^= 1;
     }
-    pass.end();
+    step.end();
   }
 
   function frame() {

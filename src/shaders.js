@@ -13,7 +13,7 @@ import { paramStructWGSL } from './params.js';
 
 export const SLOTS = 4;
 
-export const simWGSL = () => /* wgsl */ `
+export const simWGSL = (NTILES) => /* wgsl */ `
 ${paramStructWGSL()}
 
 struct Frame {
@@ -30,23 +30,90 @@ struct Pigment { K: vec4f, S: vec4f, phys: vec4f, phys2: vec4f };
 
 @group(0) @binding(0) var<uniform> p: Params;
 @group(0) @binding(1) var<uniform> fr: Frame;
-@group(0) @binding(2) var<storage, read> paper: array<f32>;
+// aux = (paper height, blurred wet mask mb, blur scratch, -)
+@group(0) @binding(2) var<storage, read_write> aux: array<vec4f>;
 @group(0) @binding(3) var<storage, read> Ain: array<vec4f>;
 @group(0) @binding(4) var<storage, read_write> Aout: array<vec4f>;
 @group(0) @binding(5) var<storage, read> Bin: array<vec4f>;
 @group(0) @binding(6) var<storage, read_write> Bout: array<vec4f>;
-@group(0) @binding(7) var<storage, read_write> mb: array<f32>;
-@group(0) @binding(8) var<storage, read_write> tmp: array<f32>;
 @group(0) @binding(9) var<storage, read> Gin: array<vec4f>;
 @group(0) @binding(10) var<storage, read_write> Gout: array<vec4f>;
 @group(0) @binding(11) var<storage, read_write> D: array<vec4f>;
 @group(0) @binding(12) var<uniform> pig: array<Pigment, 4>;
+struct Tiles {
+  args: array<atomic<u32>, 4>,        // indirect dispatch (x, y, z) + pad
+  state: array<u32, ${NTILES}>,       // frames left active
+  list: array<u32, ${NTILES}>,        // active tiles this frame
+};
+@group(0) @binding(7) var<storage, read_write> tiles: Tiles;
 
 fn W() -> i32 { return i32(fr.W); }
 fn H() -> i32 { return i32(fr.H); }
 fn ix(x: i32, y: i32) -> i32 { return y * W() + x; }
 fn inb(x: i32, y: i32) -> bool { return x >= 0 && y >= 0 && x < W() && y < H(); }
 fn finite(v: f32) -> f32 { return select(0.0, v, v == v && abs(v) < 1e30); }
+
+// ---------------------------------------------------------------- active tiles
+// The physics passes only run on 16x16-cell tiles that are wet, damp, under
+// the brush, or next to such a tile (water can cross tile edges). Dry paint
+// is left alone. A tile stays listed for TILE_HOLD frames after it goes
+// quiet so both ping-pong copies of its state settle to the same values.
+const TILE: i32 = 16;
+const TILE_HOLD: u32 = 4u;
+fn tilesX() -> i32 { return (W() + TILE - 1) / TILE; }
+fn tilesY() -> i32 { return (H() + TILE - 1) / TILE; }
+
+// Cell handled by this invocation of a tiled pass.
+fn tileCell(wid: vec3u, lid: vec3u) -> vec2i {
+  let t = i32(tiles.list[wid.x]);
+  return vec2i((t % tilesX()) * TILE + i32(lid.x), (t / tilesX()) * TILE + i32(lid.y));
+}
+
+var<workgroup> tileHot: atomic<u32>;
+
+// One workgroup per tile: is anything in it active this frame?
+@compute @workgroup_size(16, 16)
+fn markTiles(@builtin(global_invocation_id) gid: vec3u, @builtin(workgroup_id) wid: vec3u,
+             @builtin(local_invocation_index) li: u32) {
+  if (li == 0u) { atomicStore(&tileHot, 0u); }
+  workgroupBarrier();
+  let x = i32(gid.x); let y = i32(gid.y);
+  if (inb(x, y)) {
+    let a = Ain[ix(x, y)];
+    if (a.x > 0.0 || a.w > 0.0 || p.activeTiles < 0.5) { atomicStore(&tileHot, 1u); }
+  }
+  workgroupBarrier();
+  if (li == 0u) {
+    var hot = atomicLoad(&tileHot);
+    if (fr.brushOn == 1u) {
+      let r = p.brushRadius * 1.5 + 2.0;
+      let lo = min(vec2f(fr.bx0, fr.by0), vec2f(fr.bx1, fr.by1)) - r;
+      let hi = max(vec2f(fr.bx0, fr.by0), vec2f(fr.bx1, fr.by1)) + r;
+      let t0 = vec2f(f32(i32(wid.x) * TILE), f32(i32(wid.y) * TILE));
+      let t1 = t0 + f32(TILE);
+      if (all(hi >= t0) && all(lo <= t1)) { hot = 1u; }
+    }
+    let t = i32(wid.y) * tilesX() + i32(wid.x);
+    let prev = tiles.state[t];
+    tiles.state[t] = select(select(prev - 1u, 0u, prev == 0u), TILE_HOLD, hot == 1u);
+  }
+}
+
+// One thread per tile: list it if it or any neighbour tile is active.
+@compute @workgroup_size(64)
+fn compactTiles(@builtin(global_invocation_id) gid: vec3u) {
+  let t = i32(gid.x);
+  if (t >= tilesX() * tilesY()) { return; }
+  let tx = t % tilesX(); let ty = t / tilesX();
+  var on = false;
+  for (var dy = -1; dy <= 1; dy++) {
+    for (var dx = -1; dx <= 1; dx++) {
+      let nx = tx + dx; let ny = ty + dy;
+      if (nx >= 0 && ny >= 0 && nx < tilesX() && ny < tilesY() && tiles.state[ny * tilesX() + nx] > 0u) { on = true; }
+    }
+  }
+  if (on) { tiles.list[atomicAdd(&tiles.args[0], 1u)] = u32(t); }
+}
 
 // ---------------------------------------------------------------- wet mask blur
 const BR: i32 = 8;
@@ -59,7 +126,7 @@ fn blurH(@builtin(global_invocation_id) id: vec3u) {
   if (!inb(x, y)) { return; }
   var acc = 0.0;
   for (var k = -BR; k <= BR; k++) { acc += wetInd(ix(clamp(x + k, 0, W() - 1), y)); }
-  tmp[ix(x, y)] = acc / f32(2 * BR + 1);
+  aux[ix(x, y)].z = acc / f32(2 * BR + 1);
 }
 
 @compute @workgroup_size(16, 16)
@@ -67,8 +134,8 @@ fn blurV(@builtin(global_invocation_id) id: vec3u) {
   let x = i32(id.x); let y = i32(id.y);
   if (!inb(x, y)) { return; }
   var acc = 0.0;
-  for (var k = -BR; k <= BR; k++) { acc += tmp[ix(x, clamp(y + k, 0, H() - 1))]; }
-  mb[ix(x, y)] = acc / f32(2 * BR + 1);
+  for (var k = -BR; k <= BR; k++) { acc += aux[ix(x, clamp(y + k, 0, H() - 1))].z; }
+  aux[ix(x, y)].y = acc / f32(2 * BR + 1);
 }
 
 // ---------------------------------------------------------------- velocity
@@ -77,7 +144,7 @@ fn isWet(i: i32) -> bool { return Ain[i].x > p.wEps; }
 fn isOpen(i: i32) -> bool { let a = Ain[i]; return a.x > p.wEps || a.w > p.dampThreshold; }
 
 // Height of the free water surface above a common datum.
-fn eta(i: i32) -> f32 { return Ain[i].x + p.paperRelief * paper[i]; }
+fn eta(i: i32) -> f32 { return Ain[i].x + p.paperRelief * aux[i].x; }
 
 // Laplacian of the free surface over wet neighbours only; dry neighbours
 // count as level with this cell, so the contact line itself adds no
@@ -108,7 +175,7 @@ fn pres(i: i32) -> f32 {
   if (sigma > 0.0 && wet > 0.0) { tension = sigma * surfaceCurvature(i); }
   return p.gravity * eta(i)
     - tension
-    - p.edgePull * (1.0 - mb[i]) * wet;
+    - p.edgePull * (1.0 - aux[i].y) * wet;
 }
 
 // Thin films stick to the paper; deep puddles flow. Viscous drag in a film
@@ -141,8 +208,9 @@ fn uAt(x: i32, y: i32) -> f32 { if (!inb(x, y)) { return 0.0; } return Bin[ix(x,
 fn vAt(x: i32, y: i32) -> f32 { if (!inb(x, y)) { return 0.0; } return Bin[ix(x, y)].y; }
 
 @compute @workgroup_size(16, 16)
-fn velocity(@builtin(global_invocation_id) id: vec3u) {
-  let x = i32(id.x); let y = i32(id.y);
+fn velocity(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) lid: vec3u) {
+  let c = tileCell(wid, lid);
+  let x = c.x; let y = c.y;
   if (!inb(x, y)) { return; }
   let i = ix(x, y);
   let vmax = 0.24 / max(abs(p.dt), 1e-6);  // keeps upwind transport positive
@@ -175,8 +243,9 @@ fn fin4(v: vec4f) -> vec4f { return vec4f(finite(v.x), finite(v.y), finite(v.z),
 fn sum4(v: vec4f) -> f32 { return v.x + v.y + v.z + v.w; }
 
 @compute @workgroup_size(16, 16)
-fn transport(@builtin(global_invocation_id) id: vec3u) {
-  let x = i32(id.x); let y = i32(id.y);
+fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) lid: vec3u) {
+  let c = tileCell(wid, lid);
+  let x = c.x; let y = c.y;
   if (!inb(x, y)) { return; }
   let i = ix(x, y);
   let a = Ain[i];
@@ -248,7 +317,7 @@ fn transport(@builtin(global_invocation_id) id: vec3u) {
 
   // Settled pigment fills the paper's valleys, so granulation fades as a
   // wash gets dense: pale washes speckle, masstone goes flat.
-  let h = min(paper[i] + sum4(d) * p.valleyFill, 1.0);
+  let h = min(aux[i].x + sum4(d) * p.valleyFill, 1.0);
 
   // Pigment adsorption / desorption (Curtis §4.5), per pigment. Valleys
   // (low h) catch more pigment when granulation is high. Unlike Curtis,
@@ -271,14 +340,14 @@ fn transport(@builtin(global_invocation_id) id: vec3u) {
   }
 
   // Evaporation, faster where the wet area is thin (near its edge).
-  let edge = 1.0 - mb[i];
+  let edge = 1.0 - aux[i].y;
   if (w > 0.0) { w -= p.evaporation * fr.dryMul * p.dt * (1.0 + p.edgeEvaporation * edge); }
   w = max(w, 0.0);
 
   // Paper drinks surface water up to its capacity (more in valleys).
   // Sizing slows the drinking and evens it out across the texture; unsized
   // paper absorbs fast and blotchily. Past 1, sized paper pushes water back up.
-  let texture = mix(1.0 - paper[i], 0.5, clamp(p.sizing, 0.0, 1.0));
+  let texture = mix(1.0 - aux[i].x, 0.5, clamp(p.sizing, 0.0, 1.0));
   let capI = mix(p.capacityMin, p.capacityMax, texture);
   let drink = clamp(p.absorption * (1.0 - p.sizing) * p.dt * max(capI - s, 0.0), -s, w);
   w -= drink;
@@ -325,7 +394,7 @@ fn mixDelta(x: i32, y: i32, a: vec4f, aL: vec4f, aR: vec4f, aU: vec4f, aD: vec4f
   let i = ix(x, y);
   let ci = gi / a.x;
   let cT = a.y / a.x;
-  let wi = smoothstep(p.mixEdgeLo, p.mixEdgeHi, mb[i]);
+  let wi = smoothstep(p.mixEdgeLo, p.mixEdgeHi, aux[i].y);
   let mob = vec4f(pig[0].phys2.x, pig[1].phys2.x, pig[2].phys2.x, pig[3].phys2.x);
   let cap = 0.24 / max(p.dt, 1e-6);
   var dg = vec4f(0.0);
@@ -334,7 +403,7 @@ fn mixDelta(x: i32, y: i32, a: vec4f, aL: vec4f, aR: vec4f, aU: vec4f, aD: vec4f
     if (k == 0) { nx = x - 1; n = aL; gn = gL; } else if (k == 1) { nx = x + 1; n = aR; gn = gR; }
     else if (k == 2) { ny = y - 1; n = aU; gn = gU; } else { ny = y + 1; n = aD; gn = gD; }
     if (!inb(nx, ny) || n.x <= p.wEps) { continue; }
-    let face = min(wi, smoothstep(p.mixEdgeLo, p.mixEdgeHi, mb[ix(nx, ny)]));
+    let face = min(wi, smoothstep(p.mixEdgeLo, p.mixEdgeHi, aux[ix(nx, ny)].y));
     if (face <= 0.0) { continue; }
     // The Marangoni term acts most where paint meets much cleaner water
     // (high contrast), less across the gentle gradients inside one body of
@@ -359,7 +428,7 @@ struct R {
 struct Pigment { K: vec4f, S: vec4f, phys: vec4f, phys2: vec4f };
 @group(0) @binding(0) var<uniform> r: R;
 @group(0) @binding(1) var<storage, read> A: array<vec4f>;
-@group(0) @binding(2) var<storage, read> paper: array<f32>;
+@group(0) @binding(2) var<storage, read> aux: array<vec4f>;
 @group(0) @binding(3) var<storage, read> G: array<vec4f>;
 @group(0) @binding(4) var<storage, read> D: array<vec4f>;
 @group(0) @binding(5) var<uniform> pig: array<Pigment, 4>;
@@ -376,7 +445,7 @@ fn fs(@builtin(position) fc: vec4f) -> @location(0) vec4f {
   let y = min(u32(fc.y), r.H - 1u);
   let i = y * r.W + x;
   let a = A[i];
-  let h = paper[i];
+  let h = aux[i].x;
 
   let Rg = r.paperColor.rgb * (1.0 - r.paperShade * (1.0 - h));
 

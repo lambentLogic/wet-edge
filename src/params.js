@@ -7,6 +7,7 @@
 
 export const PARAMS = [
   // --- Flow (shallow-water layer) ---
+  { key: 'activeTiles',   v: 1,      min: 0,    max: 1,     group: 'Flow', target: 'sim',  label: 'skip dry tiles (0/1)' },
   { key: 'dt',            v: 0.4,    min: 0.01, max: 1,     group: 'Flow', target: 'sim',  label: 'timestep' },
   { key: 'simSpeed',      v: 600,    min: 0,    max: 4000,  group: 'Flow', target: 'js',   label: 'steps / second' },
   { key: 'gravity',       v: 1.0,    min: 0,    max: 5,     group: 'Flow', target: 'sim',  label: 'pressure (gravity)' },
