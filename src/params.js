@@ -67,6 +67,7 @@ export const PARAMS = [
   { key: 'chargeDuration', v: 0.1, min: 0, max: 2,  group: 'Brush', target: 'js',  label: 'charge lasts (s)' },
   { key: 'taperMin',      v: 0.15, min: 0, max: 1,   group: 'Brush', target: 'js',  label: 'taper (width at no pressure)' },
   { key: 'brushCapacity', v: 5000, min: 0, max: 30000, group: 'Brush', target: 'js', label: 'reservoir (0 = endless)' },
+  { key: 'contactLength', v: 0,    min: 0, max: 120, group: 'Brush', target: 'js',  label: 'contact length (cells, 0 = 2×radius)' },
   { key: 'speedTouch',    v: 0.8,  min: 0, max: 5,   group: 'Brush', target: 'js',  label: 'mouse: faster = lighter' },
   { key: 'touchdownEase', v: 0.12, min: 0, max: 1,   group: 'Brush', target: 'js',  label: 'mouse: ease-in (s)' },
   { key: 'emptyLevel',    v: 0.35, min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'water left when empty' },

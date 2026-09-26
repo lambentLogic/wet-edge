@@ -2,6 +2,7 @@ import { PARAMS, SIM_PARAMS, simParamBufferSize } from './params.js';
 import { simWGSL, renderWGSL, MAX_PIGMENTS, MAX_CHARGES } from './shaders.js';
 import { SHAPES, buildCharges, drawMagnet, hitMagnet } from './magnets.js';
 import { BRUSHES, DEFAULT_BRUSH } from './brushes.js';
+import { makeMinds } from './minds.js';
 import { makePaper, PAPERS, DEFAULT_PAPER, TONES } from './paper.js';
 import { PIGMENTS } from './pigments.js';
 
@@ -218,7 +219,10 @@ async function init() {
     if (brush) {
       const seg = Math.hypot(brush.x1 - brush.x0, brush.y1 - brush.y0);
       state.smoothSeg = brush.age < 0.02 ? seg : state.smoothSeg * 0.6 + seg * 0.4;
-      dwell = Math.min(1, Math.max(0.15, 2 * frameF32[13] / Math.max(state.smoothSeg, 1e-3)));
+      // Contact length: how much hair trails along the paper feeding paint
+      // to the line (a rigger's long hairs), else about the brush's width.
+      const contact = values.contactLength > 0 ? values.contactLength : 2 * frameF32[13];
+      dwell = Math.min(1, Math.max(0.3, contact / Math.max(state.smoothSeg, 1e-3)));
     }
     frameF32[9] = dwell / substeps;
     frameF32[10] = drying ? values.dryerStrength : 1;
@@ -449,6 +453,7 @@ async function init() {
     setBrushPreset(key) { const b = BRUSHES[key]; Object.assign(values, b.knobs); state.brushType = b.type; state.reservoir = 1; state.pigStore = 1; },
     squeeze(seconds) { state.reservoir = Math.min(1, state.reservoir + values.squeezeRate * seconds); },
     brushStores() { return { water: +state.reservoir.toFixed(3), pigment: +state.pigStore.toFixed(3) }; },
+    brushPigmentNames() { return state.brush.map(b => PIGMENTS[b.pigment].name); },
     // Magnets under the paper: [{ x, y, moment }] in grid cells.
     setMagnets(list) { state.magnets = list.map(mg => ({ shape: 'disc', angle: 0, moment: 1, ...mg })); drawMagnets(); },
     magnetCount() { return state.magnets.length; },
@@ -635,6 +640,7 @@ async function init() {
     return { water: +(water / n).toFixed(4), damp: +(damp / n).toFixed(4), wet: avg(wet), settled: avg(dry), reservoir: +state.reservoir.toFixed(3) };
   };
   window.__sim.savePNG = savePNG;
+  window.__minds = makeMinds(window.__sim);
   window.__sim.savePainting = savePainting;
 
   bindPointer(canvas);
