@@ -9,8 +9,9 @@
 //                        brush's effective width, following the outline, and
 //                        keep a wet edge: before each row, check the last one
 //                        is still wet and rewet its edge if it's drying
-//   soften(line)         run a clean damp brush along an edge while the
-//                        paint is wet, so it fades out instead of stopping
+//   soften(line, out)    find where the wet paint ends along a line and run
+//                        a clean damp brush half over that edge, so it fades
+//                        out instead of stopping hard
 //   waitDry(points)      wait until the paper there is bone dry
 //   waitDamp(points)     wait until it has lost its shine (for soft drop-ins)
 
@@ -62,7 +63,7 @@ export function makeMinds(sim) {
     return out;
   };
 
-  async function fill(poly, { mode = 0, wetEdge = 0.05, framesPerSeg = 2, spacing = 1.4, log = () => {} } = {}) {
+  async function fill(poly, { mode = 0, wetEdge = 0.05, framesPerSeg = 2, spacing = 1.4, grade = null, log = () => {} } = {}) {
     // Effective width: a soft brush wets fully only near its core, so rows
     // overlap more (spacing is in core widths).
     const r = V.brushRadius, core = r * (1 - 0.5 * V.brushSoftness);
@@ -74,6 +75,7 @@ export function makeMinds(sim) {
     const inset = Math.min(r * 0.5, (bottom - top) / 3);
     if (bottom - top < r) log(`fill: shape is ${Math.round(bottom - top)} cells tall, brush is ${Math.round(2 * r)} wide`);
     let dir = 1, prev = null, rewets = 0;
+    const basePigment = V.brushPigment;
     const first = Math.min(top + inset, (top + bottom) / 2);
     for (let y = first; y <= Math.max(first, bottom - inset * 0.5); y += dy, dir = -dir) {
       for (const [x0, x1] of spans(poly, y)) {
@@ -94,25 +96,48 @@ export function makeMinds(sim) {
             h.setMode(mode);
           }
         }
+        // A graded wash: the brush's paint strength goes from grade[0] at
+        // the top row to grade[1] at the bottom (multiples of brushPigment).
+        if (grade) V.brushPigment = basePigment * (grade[0] + (grade[1] - grade[0]) * Math.min(1, (y - first) / Math.max(1, bottom - inset * 0.5 - first)));
         const n = Math.max(2, Math.ceil((b - a) / 30));
         const row = Array.from({ length: n + 1 }, (_, k) => [a + (b - a) * k / n + (b === a ? k - n / 2 : 0), y]);
         await sim.path(dir > 0 ? row : row.reverse(), framesPerSeg);
         prev = [a, b, y, dir];
       }
     }
+    V.brushPigment = basePigment;
     log(`fill: done (${rewets} edge ${rewets === 1 ? 'rewet' : 'rewets'})`);
     return { rewets };
   }
 
   // Soften an edge while the paint is still wet: a clean, damp brush run
-  // along it (just outside the paint) lets the colour creep out and fade
-  // instead of stopping at a hard line. Uses the current brush size.
-  async function soften(line, { framesPerSeg = 2, pressure = 0.7, log = () => {} } = {}) {
+  // just outside the paint lets the colour creep out and fade instead of
+  // stopping at a hard line. line runs roughly along the edge; out = [dx, dy]
+  // points away from the paint. For each point it looks (along out) for
+  // where the wet paint actually ends, and puts the brush half over it.
+  // Limited for now: the sim's brush lays water but doesn't drag wet paint
+  // along with it, which is most of how a real damp brush softens an edge.
+  // A graded fill that fades to almost nothing (fill's grade) reads softer.
+  async function soften(line, out, { framesPerSeg = 2, pressure = 0.7, reach = 80, log = () => {} } = {}) {
+    const [ox, oy] = (l => [out[0] / l, out[1] / l])(Math.hypot(out[0], out[1]));
+    const a = await sim.read(), W = 1024, H = a.length / 4 / W, r = V.brushRadius;
+    const wetAt = (x, y) => { const xi = Math.round(x), yi = Math.round(y); return xi >= 0 && yi >= 0 && xi < W && yi < H ? a[(yi * W + xi) * 4] : 0; };
+    let found = 0;
+    const pts = line.map(([x, y, p = pressure]) => {
+      // From inside (reach back) walk outward to the last wet cell.
+      let edge = null;
+      for (let d = -reach; d <= reach; d += 2) if (wetAt(x + ox * d, y + oy * d) > 0.02) edge = d;
+      if (edge === null) return null;
+      found++;
+      const d = edge + r * 0.4;
+      return [x + ox * d, y + oy * d, p];
+    }).filter(Boolean);
+    if (pts.length < 2) { log('soften: no wet edge found'); return; }
     const m = h.mode();
     h.setMode(1);
-    try { await sim.path(line.map(([x, y, p = pressure]) => [x, y, p]), framesPerSeg); }
+    try { await sim.path(pts, framesPerSeg); }
     finally { h.setMode(m); }
-    log(`soften: ran a damp brush along ${line.length} points`);
+    log(`soften: found the wet edge at ${found}/${line.length} points and ran a damp brush along it`);
   }
 
   // Wait until the paper at these points is bone dry (not just matt), then

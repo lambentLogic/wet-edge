@@ -596,7 +596,7 @@ async function init() {
       const db = await open();
       return new Promise((res, rej) => {
         const t = db.transaction('autosave', mode), st = t.objectStore('autosave'), out = fn(st);
-        t.oncomplete = () => res(out.result ?? out); t.onerror = () => rej(t.error);
+        t.oncomplete = () => res(out?.result); t.onerror = () => rej(t.error);
       });
     };
     let saving = false;
@@ -684,6 +684,8 @@ async function init() {
     const d = await f(Dbuf, 20), du = new Uint32Array(d.buffer);
     return { A: [...await f(A[parity], 4)], aux: [...await f(auxBuf, 4)], dep: [0, 1, 2, 3].filter(k => d[4 + k] > 0).map(k => ({ pig: PIGMENTS[du[k]]?.name, amt: d[4 + k], stamp: d[16 + k] })), time: state.simTime };
   };
+  window.__sim.open = blob => openPainting(blob);
+  window.__sim.paintingBlob = paintingBlob;
   window.__sim.savePNG = savePNG;
   window.__minds = makeMinds(window.__sim);
   window.__sim.savePainting = savePainting;
