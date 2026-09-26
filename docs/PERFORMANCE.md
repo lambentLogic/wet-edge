@@ -49,18 +49,32 @@ estimate, not profiled.
   (`node tools/measure.mjs edge bleed floc drybrush --set dt=0.8 --set simSpeed=300`).
 - Pigment conservation must hold (`conserve` probe = [1, 1]).
 
+## Tried
+
+- 8 x 8 workgroups for velocity and transport (four per tile; suggested
+  by Sol, 2026-09-26). The result was bit-identical but not faster: over
+  three runs each, the whole sheet ran at 0.37-0.41x real time versus
+  0.38-0.39x, and part of the sheet at 1.24-1.37x versus 1.41-1.68x. So
+  occupancy doesn't look like the limit, which leaves bandwidth. Reverted.
+
 ## Ideas not yet tried
 
 - Settle and absorb every few steps (multi-rate), so D is touched less.
   This changes results slightly.
 - Load neighbour A and G tiles into workgroup shared memory.
-- Pack G smaller (ids as u8, amounts as f16), though conservation over
-  thousands of steps worries me.
+- Pack G's four pigment ids into one u32, keeping f32 amounts: 32 B down
+  to 20 B per read, bit-exact (Sol's second suggestion; next to try).
+- f16 amounts: conservation over thousands of steps worries me.
 - Split transport into lighter passes, or cut register pressure: it's
   a big shader with small arrays, so occupancy may be the real limit.
 - Skip tiles that are wet but static.
 
 ## Measuring
+
+`node tools/measure.mjs stateHash` paints a fixed scene and returns the
+SHA-256 of every state buffer. A change that shouldn't alter results must
+leave these identical. Speed varies from run to run, so compare several
+runs.
 
 ```
 python3 tools/serve.py 8765 &          # no-cache dev server
