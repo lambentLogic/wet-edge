@@ -17,6 +17,7 @@ const state = {
   drying: false,
   paused: false,
   headless: false,
+  simTime: 0,       // simulated seconds (deposit timestamps)
   pointer: { down: false, x: 0, y: 0, px: 0, py: 0, pressure: 1 },
 };
 
@@ -44,7 +45,7 @@ async function init() {
   const A = [buf(N * 16, S | CD), buf(N * 16, S | CD)];
   const B = [buf(N * 16, S | CD), buf(N * 16, S | CD)];
   const G = [buf(N * 32, S | CD), buf(N * 32, S | CD)];  // suspended components
-  const Dbuf = buf(N * 64, S | CD);                      // deposited components + stain
+  const Dbuf = buf(N * 80, S | CD);                      // deposited components + stain + stamps
   const paramBuf = buf(simParamBufferSize(), U | CD);
   const frameBuf = buf(96, U | CD);
   const renderBuf = buf(48, U | CD);
@@ -66,7 +67,7 @@ async function init() {
     const z = new Float32Array(N * 4);
     for (const b of [...A, ...B]) device.queue.writeBuffer(b, 0, z);
     for (const b of G) device.queue.writeBuffer(b, 0, new Float32Array(N * 8));
-    device.queue.writeBuffer(Dbuf, 0, new Float32Array(N * 16));
+    device.queue.writeBuffer(Dbuf, 0, new Float32Array(N * 20));
     device.queue.writeBuffer(tilesBuf, 16, new Uint32Array(TX * TY));
   };
   newPaper();
@@ -165,6 +166,7 @@ async function init() {
     }
     frameF32[9] = 1 / substeps;
     frameF32[10] = drying ? values.dryerStrength : 1;
+    frameF32[12] = state.simTime;
     // Brush load: pigment ids at u32 16..19, fractions at f32 20..23.
     const total = state.brush.reduce((t, b) => t + b.frac, 0) || 1;
     for (let b = 0; b < 4; b++) {
@@ -198,6 +200,7 @@ async function init() {
   // leaves the GPU). Must be the only sim work in its command buffer, since
   // the tile counter is reset by writeBuffer at submit time.
   function encodeSim(enc, substeps) {
+    state.simTime += substeps / Math.max(values.simSpeed, 1);
     device.queue.writeBuffer(tilesBuf, 0, argsReset);
     const pass = enc.beginComputePass();
     pass.setBindGroup(0, simBG[parity]);
@@ -308,6 +311,7 @@ async function init() {
     wait(seconds, { dry = false } = {}) { strokeFrame = 0; return simFrames(Math.round(seconds * HZ), () => null, dry); },
     setMode(m) { state.mode = m; },
     setTone(key) { state.tone = key; },
+    pigmentNames() { return PIGMENTS.map(pg => pg.name); },
     // Load the brush: setBrush('French Ultramarine') or a mix,
     // setBrush([['French Ultramarine', 2], ['Burnt Umber', 1]]).
     setBrush(load) {

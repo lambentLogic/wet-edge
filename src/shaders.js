@@ -27,7 +27,8 @@ struct Frame {
   W: u32, H: u32, mode: u32, brushOn: u32,
   bx0: f32, by0: f32, bx1: f32, by1: f32,
   pressure: f32, brushScale: f32, dryMul: f32, charge: f32,
-  _a: u32, _b: u32, _c: u32, _d: u32,
+  time: f32,          // simulated seconds, for deposit timestamps
+  _b: u32, _c: u32, _d: u32,
   brushId: vec4u,     // the brush's load: up to 4 pigments ...
   brushFrac: vec4f,   // ... and their fractions of the load (sum 1)
 };
@@ -39,14 +40,17 @@ struct Pigment { K: vec4f, S: vec4f, phys: vec4f, phys2: vec4f };
 
 @group(0) @binding(0) var<uniform> p: Params;
 @group(0) @binding(1) var<uniform> fr: Frame;
-// aux = (paper height, blurred wet mask mb, blur scratch, -)
+// aux = (paper height, blurred wet mask mb, blur scratch, time this cell's
+//        current wetting began)
 @group(0) @binding(2) var<storage, read_write> aux: array<vec4f>;
 @group(0) @binding(3) var<storage, read> Ain: array<vec4f>;
 @group(0) @binding(4) var<storage, read_write> Aout: array<vec4f>;
 @group(0) @binding(5) var<storage, read> Bin: array<vec4f>;
 @group(0) @binding(6) var<storage, read_write> Bout: array<vec4f>;
 struct Comp4 { id: vec4u, amt: vec4f };
-struct Dep { id: vec4u, amt: vec4f, stainK: vec4f, stainS: vec4f };  // stainK.w = stained amount
+// stainK.w = stained amount; stamp = when each component last received
+// pigment, so the renderer can stack washes in the order they dried.
+struct Dep { id: vec4u, amt: vec4f, stainK: vec4f, stainS: vec4f, stamp: vec4f };
 @group(0) @binding(9) var<storage, read> Gin: array<Comp4>;
 @group(0) @binding(10) var<storage, read_write> Gout: array<Comp4>;
 @group(0) @binding(11) var<storage, read_write> D: array<Dep>;
@@ -377,6 +381,11 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     }
   }
 
+  // When this cell's current wetting began: pigment deposited before then
+  // has dried and is bound.
+  var wetStart = aux[i].w;
+  if (a.x <= p.wEps && w > p.wEps) { wetStart = fr.time; aux[i].w = wetStart; }
+
   // Keep the 4 largest candidates in suspension; the rest settle out.
   var gId = vec4u(0u); var gAmt = vec4f(0.0); var gOcc = vec4<bool>(false);
   var taken: array<bool, 8>;
@@ -425,7 +434,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
       var j = -1;
       for (var m = 0; m < 4; m++) { if (dOcc[m] && dep.id[m] == id) { j = m; } }
       if (j < 0) {
-        for (var m = 0; m < 4; m++) { if (!dOcc[m]) { j = m; dOcc[m] = true; dep.id[m] = id; dep.amt[m] = 0.0; break; } }
+        for (var m = 0; m < 4; m++) { if (!dOcc[m]) { j = m; dOcc[m] = true; dep.id[m] = id; dep.amt[m] = 0.0; dep.stamp[m] = fr.time; break; } }
       }
       let rho = p.density * pig[id].phys.x;
       let omega = max(p.staining * pig[id].phys.y, 1e-4);
@@ -436,8 +445,12 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
         gAmt[k] -= down; stainAdd(id, down);
         continue;
       }
-      let up = min(max(dep.amt[j] * (1.0 + (h - 1.0) * gam), 0.0) * rho / omega * p.dt, dep.amt[j]);
+      // Pigment that dried before this wetting began is bound by its gum
+      // arabic and rewets slowly: only a fraction goes back into suspension.
+      let bound = select(1.0, p.rewetLift, dep.stamp[j] < wetStart);
+      let up = min(max(dep.amt[j] * (1.0 + (h - 1.0) * gam), 0.0) * rho / omega * bound * p.dt, dep.amt[j]);
       gAmt[k] += up - down;
+      dep.stamp[j] = stampMix(dep.stamp[j], dep.amt[j], down);
       dep.amt[j] += down - up;
     }
   }
@@ -491,13 +504,21 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   Aout[i] = vec4f(finite(w), sum4(gOut.amt), sum4(dep.amt) + dep.stainK.w, finite(s));
 }
 
+// A deposited component's timestamp is the amount-weighted mean time its
+// pigment settled, so a little old paint lifting and resettling under a new
+// wash doesn't drag the whole old layer up into it.
+fn stampMix(stamp: f32, amt: f32, added: f32) -> f32 {
+  if (added <= 0.0) { return stamp; }
+  return (stamp * max(amt, 0.0) + fr.time * added) / (max(amt, 0.0) + added);
+}
+
 // Put pigment into a cell's deposited components: same pigment, else an
 // empty component, else the permanent stain layer.
 fn depositInto(dep: ptr<function, Dep>, occ: ptr<function, vec4<bool>>, id: u32, a: f32) {
   if (!(a > 0.0)) { return; }
-  for (var m = 0; m < 4; m++) { if ((*occ)[m] && (*dep).id[m] == id) { (*dep).amt[m] += a; return; } }
+  for (var m = 0; m < 4; m++) { if ((*occ)[m] && (*dep).id[m] == id) { (*dep).stamp[m] = stampMix((*dep).stamp[m], (*dep).amt[m], a); (*dep).amt[m] += a; return; } }
   for (var m = 0; m < 4; m++) {
-    if (!(*occ)[m]) { (*occ)[m] = true; (*dep).id[m] = id; (*dep).amt[m] = a; return; }
+    if (!(*occ)[m]) { (*occ)[m] = true; (*dep).id[m] = id; (*dep).amt[m] = a; (*dep).stamp[m] = fr.time; return; }
   }
   (*dep).stainK += vec4f(pig[id].K.rgb * a, a);
   (*dep).stainS += vec4f(pig[id].S.rgb * a, 0.0);
@@ -565,13 +586,31 @@ struct R {
 };
 struct Pigment { K: vec4f, S: vec4f, phys: vec4f, phys2: vec4f };
 struct Comp4 { id: vec4u, amt: vec4f };
-struct Dep { id: vec4u, amt: vec4f, stainK: vec4f, stainS: vec4f };
+struct Dep { id: vec4u, amt: vec4f, stainK: vec4f, stainS: vec4f, stamp: vec4f };
 @group(0) @binding(0) var<uniform> r: R;
 @group(0) @binding(1) var<storage, read> A: array<vec4f>;
 @group(0) @binding(2) var<storage, read> aux: array<vec4f>;
 @group(0) @binding(3) var<storage, read> G: array<Comp4>;
 @group(0) @binding(4) var<storage, read> D: array<Dep>;
 @group(0) @binding(5) var<uniform> pig: array<Pigment, ${MAXP}>;
+
+const LAYER_GAP: f32 = 2.0;
+
+// Composite a Kubelka-Munk layer (absorption Kx and scattering Sx already
+// multiplied by thickness) over a ground of reflectance Rg.
+fn overLayer(Rg: vec3f, Kx: vec3f, Sx: vec3f, amount: f32) -> vec3f {
+  if (amount <= 1e-6) { return Rg; }
+  let Sx1 = max(Sx, vec3f(1e-5));
+  let aa = 1.0 + Kx / Sx1;
+  // b -> 0 for a non-absorbing layer; keep it off zero so c stays finite.
+  let b = max(sqrt(aa * aa - 1.0), vec3f(1e-4));
+  let bsx = min(b * Sx1, vec3f(20.0));
+  let sh = sinh(bsx);
+  let c = aa * sh + b * cosh(bsx);
+  let Rl = sh / c;
+  let T = b / c;
+  return Rl + T * T * Rg / (1.0 - Rl * Rg);
+}
 
 @vertex
 fn vs(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4f {
@@ -589,34 +628,42 @@ fn fs(@builtin(position) fc: vec4f) -> @location(0) vec4f {
 
   let Rg = r.paperColor.rgb * (1.0 - r.paperShade * (1.0 - h));
 
-  // Kubelka-Munk: absorption and scattering of the pigments add, weighted
-  // by each pigment's amount (plus the stain layer's totals); the layer is
-  // composited over the paper.
+  // Kubelka-Munk layers, composited bottom-up over the paper: the stain
+  // layer (oldest), then deposited pigment grouped into washes by when it
+  // settled (pigment settling within LAYER_GAP seconds counts as one wash
+  // and mixes), then the wet suspended pigment on top. So gouache over dry
+  // paint covers it, while gouache mixed into wet paint makes a tint.
   let g = G[i];
   let dep = D[i];
-  var Kx = dep.stainK.rgb * r.thickness;
-  var Sx = dep.stainS.rgb * r.thickness;
-  var total = dep.stainK.w;
+  var col = Rg;
+  col = overLayer(col, dep.stainK.rgb * r.thickness, dep.stainS.rgb * r.thickness, dep.stainK.w);
+
+  // Deposited components, oldest first.
+  var done = vec4<bool>(false);
+  for (var n = 0; n < 4; n++) {
+    var first = -1;
+    for (var k = 0; k < 4; k++) {
+      if (!done[k] && dep.amt[k] > 0.0 && (first < 0 || dep.stamp[k] < dep.stamp[first])) { first = k; }
+    }
+    if (first < 0) { break; }
+    var Kx = vec3f(0.0); var Sx = vec3f(0.0); var total = 0.0;
+    for (var k = 0; k < 4; k++) {
+      if (!done[k] && dep.amt[k] > 0.0 && dep.stamp[k] - dep.stamp[first] <= LAYER_GAP) {
+        done[k] = true;
+        let ad = dep.amt[k] * r.thickness;
+        Kx += pig[dep.id[k]].K.rgb * ad; Sx += pig[dep.id[k]].S.rgb * ad; total += dep.amt[k];
+      }
+    }
+    col = overLayer(col, Kx, Sx, total);
+  }
+
+  // Wet pigment on top.
+  var Kw = vec3f(0.0); var Sw = vec3f(0.0); var tw = 0.0;
   for (var k = 0; k < 4; k++) {
     let ag = max(g.amt[k], 0.0) * r.suspendedWeight;
-    let ad = max(dep.amt[k], 0.0);
-    if (ag > 0.0) { Kx += pig[g.id[k]].K.rgb * ag * r.thickness; Sx += pig[g.id[k]].S.rgb * ag * r.thickness; total += ag; }
-    if (ad > 0.0) { Kx += pig[dep.id[k]].K.rgb * ad * r.thickness; Sx += pig[dep.id[k]].S.rgb * ad * r.thickness; total += ad; }
+    if (ag > 0.0) { Kw += pig[g.id[k]].K.rgb * ag * r.thickness; Sw += pig[g.id[k]].S.rgb * ag * r.thickness; tw += ag; }
   }
-  var col = Rg;
-  if (total > 1e-6) {
-    let Sx1 = max(Sx, vec3f(1e-5));
-    let aa = 1.0 + Kx / Sx1;
-    // b -> 0 for a non-absorbing layer; keep it off zero so c stays finite.
-    let b = max(sqrt(aa * aa - 1.0), vec3f(1e-4));
-    let bsx = min(b * Sx1, vec3f(20.0));
-    let sh = sinh(bsx);
-    let ch = cosh(bsx);
-    let c = aa * sh + b * ch;
-    let Rl = sh / c;
-    let T = b / c;
-    col = Rl + T * T * Rg / (1.0 - Rl * Rg);
-  }
+  col = overLayer(col, Kw, Sw, tw);
 
   col *= 1.0 - clamp(a.x * r.wetDarken, 0.0, 0.3);
   return vec4f(clamp(col, vec3f(0.0), vec3f(1.0)), 1.0);

@@ -21,6 +21,7 @@
   async function fresh(paper) {
     h.begin();
     h.setPaper(paper);
+    h.setTone('natural');
     h.setBrush('French Ultramarine');
     Object.assign(S.values, active);
     S.clear();
@@ -54,6 +55,58 @@
   }
 
   const probes = {
+    // Pigment chart: every pan as a heavy and a light stroke, on the current
+    // paper tone. For screenshots (run with --set and h.setTone via 'tone').
+    async chart(paper = 'coldPress', tone = 'natural') {
+      await fresh(paper);
+      h.setTone(tone);
+      const names = h.pigmentNames();
+      await withValues({ brushRadius: 12 }, async () => {
+        for (let k = 0; k < names.length; k++) {
+          const col = k % 6, row = Math.floor(k / 6);
+          const x = 90 + col * 150, y = 90 + row * 170;
+          h.setBrush(names[k]);
+          S.values.brushPigment = 1.2;
+          h.lift(); await h.paint(x, y, x + 110, y, 8);
+          h.lift(); await h.paint(x, y + 22, x + 110, y + 22, 8);
+          S.values.brushPigment = 0.2;
+          h.lift(); await h.paint(x, y + 60, x + 110, y + 60, 8);
+        }
+        await h.wait(20); await h.wait(10, { dry: true }); await h.wait(2);
+      });
+      h.end();
+      return names.length;
+    },
+
+    async chartBlack(paper = 'coldPress') { return probes.chart(paper, 'black'); },
+
+    // Gouache over dry paint: dark stripes dried first, then white gouache
+    // and titanium buff crossing them; plus white dropped into wet dark
+    // paint for comparison. For screenshots.
+    async cover(paper = 'coldPress') {
+      await fresh(paper);
+      await withValues({ brushRadius: 22, brushPigment: 1 }, async () => {
+        for (const [k, name] of ['Perylene Green', 'Quinacridone Magenta', 'Phthalo Blue (GS)'].entries()) {
+          h.setBrush(name);
+          for (let y = 120 + k * 150; y <= 170 + k * 150; y += 20) { h.lift(); await h.paint(120, y, 600, y, 20); }
+        }
+        await h.wait(20); await h.wait(10, { dry: true }); await h.wait(2);
+        h.setBrush('White Gouache');
+        for (let x = 200; x <= 240; x += 20) { h.lift(); await h.paint(x, 90, x, 560, 25); }
+        h.setBrush('Titanium Buff');
+        for (let x = 420; x <= 460; x += 20) { h.lift(); await h.paint(x, 90, x, 560, 25); }
+        await h.wait(20); await h.wait(10, { dry: true }); await h.wait(2);
+        // Wet-in-wet: white into wet perylene green.
+        h.setBrush('Perylene Green');
+        for (let y = 200; y <= 400; y += 20) { h.lift(); await h.paint(700, y, 900, y, 20); }
+        h.setBrush('White Gouache');
+        h.lift(); await h.paint(800, 300, 802, 302, 20);
+        await h.wait(20); await h.wait(10, { dry: true }); await h.wait(2);
+      });
+      h.end();
+      return 'painted';
+    },
+
     // Dark ground: a scattering pigment and a transparent one on black
     // paper, alone and mixed. For screenshots.
     async dark(paper = 'coldPress', opaque = 'White Gouache', clear = 'French Ultramarine') {

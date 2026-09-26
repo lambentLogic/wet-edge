@@ -46,28 +46,35 @@ function kmReflect(K, S, x, Rg) {
   return R + T * T * Rg / (1 - R * Rg);
 }
 
-// Fit per-channel K and S so a heavy application reproduces the masstone
-// and a light wash the tint, with the transparency rating as a weak prior on
-// S. A coarse grid search over log K and log S is plenty for 23 pigments.
+// Fit K per channel and a single S so a heavy application reproduces the
+// masstone and a light wash the tint. Scattering comes from particle size and
+// refractive index and is close to flat across the visible range; colour is
+// carried by absorption. A per-channel S is unconstrained by colours seen
+// only over white paper, and produced nonsense on dark grounds (a green
+// bismuth vanadate). The transparency rating is a weak prior on S.
 function fitKM(masstone, tint, opacity) {
   const Rm = hexToRGB(masstone), Rt = tint ? hexToRGB(tint) : null;
   const prior = Math.log(OPACITY_S[opacity]);
   const grid = [];
-  for (let v = Math.log(1e-3); v <= Math.log(40); v += 0.08) grid.push(v);
-  const K = [], S = [];
-  for (let ch = 0; ch < 3; ch++) {
-    let best = Infinity, bk = 0, bs = 0;
-    for (const lk of grid) for (const ls of grid) {
-      const k = Math.exp(lk), s = Math.exp(ls);
-      let err = (kmReflect(k, s, MASS_X, PAPER_WHITE) - Rm[ch]) ** 2;
-      if (Rt) err += (kmReflect(k, s, TINT_X, PAPER_WHITE) - Rt[ch]) ** 2;
-      err += 2e-4 * (ls - prior) ** 2;
-      if (err < best) { best = err; bk = k; bs = s; }
+  for (let v = Math.log(1e-3); v <= Math.log(40); v += 0.05) grid.push(v);
+  let best = Infinity, bestK = null, bestS = 0;
+  for (const ls of grid) {
+    const s = Math.exp(ls);
+    let total = 1e-3 * (ls - prior) ** 2;
+    const K = [];
+    for (let ch = 0; ch < 3; ch++) {
+      let e = Infinity, kb = 0;
+      for (const lk of grid) {
+        const k = Math.exp(lk);
+        let err = (kmReflect(k, s, MASS_X, PAPER_WHITE) - Rm[ch]) ** 2;
+        if (Rt) err += (kmReflect(k, s, TINT_X, PAPER_WHITE) - Rt[ch]) ** 2;
+        if (err < e) { e = err; kb = k; }
+      }
+      total += e; K.push(kb);
     }
-    K.push(+bk.toFixed(5));
-    S.push(+bs.toFixed(5));
+    if (total < best) { best = total; bestK = K; bestS = s; }
   }
-  return { K, S };
+  return { K: bestK.map(v => +v.toFixed(5)), S: [bestS, bestS, bestS].map(v => +v.toFixed(5)) };
 }
 
 const organic = { kind: 'organic', density: 0.3, granulation: 0, flocculation: 0, mobility: 1.5, wick: 0.5 };
