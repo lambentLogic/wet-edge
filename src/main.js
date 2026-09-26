@@ -89,6 +89,9 @@ async function init() {
   const clear = () => {
     const z = new Float32Array(N * 4);
     for (const b of [...A, ...B]) device.queue.writeBuffer(b, 0, z);
+    // A cleared sheet starts its clock again (deposit timestamps and
+    // flocculation fields are relative), so identical sessions reproduce.
+    state.simTime = 0;
     for (const b of G) device.queue.writeBuffer(b, 0, new Float32Array(N * 8));
     device.queue.writeBuffer(Dbuf, 0, new Float32Array(N * 20));
     device.queue.writeBuffer(tilesBuf, 32, new Uint32Array(TX * TY));
