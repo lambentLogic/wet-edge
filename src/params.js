@@ -92,6 +92,7 @@ export const PARAMS = [
   { key: 'thickness',       v: 8,    min: 0, max: 40, group: 'Render', target: 'render', label: 'pigment thickness' },
   { key: 'wetDarken',       v: 0.5,  min: 0, max: 3,  group: 'Render', target: 'render', label: 'wet sheen' },
   { key: 'paperShade',      v: 0.12, min: 0, max: 1,  group: 'Render', target: 'render', label: 'paper texture' },
+  { key: 'spectral',        v: 0,    min: 0, max: 1,  group: 'Render', target: 'render', label: 'spectral colour (0/1)' },
   { key: 'suspendedWeight', v: 1,    min: 0, max: 2,  group: 'Render', target: 'render', label: 'show suspended' },
 ];
 

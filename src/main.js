@@ -4,10 +4,13 @@ import { SHAPES, buildCharges, drawMagnet, hitMagnet } from './magnets.js';
 import { BRUSHES, DEFAULT_BRUSH } from './brushes.js';
 import { makeMinds } from './minds.js';
 import { makePaper, PAPERS, DEFAULT_PAPER, TONES } from './paper.js';
-import { PIGMENTS } from './pigments.js';
+import { PIGMENTS, STAIN_MAP } from './pigments.js';
+import { NB, upsample, srgbToLinear, TO_RGB } from './spectral.js';
 
 const W = 1024, H = 768, N = W * H;
 const WG = 16;
+// Spectral table floats: pigments (16 K + 16 S each), ground, stain maps.
+const SPEC_FLOATS = MAX_PIGMENTS * 32 + NB + 6 * NB;
 
 const values = Object.fromEntries(PARAMS.map(p => [p.key, p.v]));
 const state = {
@@ -70,6 +73,7 @@ async function init() {
   const frameBuf = buf(112, U | CD);
   const renderBuf = buf(48, U | CD);
   const pigBuf = buf(MAX_PIGMENTS * 64, U | CD);
+  const specBuf = buf(SPEC_FLOATS * 4, S | CD);
   const magBuf = buf(16 + MAX_CHARGES * 32, U | CD);
   const magData = new ArrayBuffer(16 + MAX_CHARGES * 32);
   const magU32 = new Uint32Array(magData), magF32 = new Float32Array(magData);
@@ -146,6 +150,7 @@ async function init() {
       { binding: 3, visibility: F, buffer: { type: 'read-only-storage' } },
       { binding: 4, visibility: F, buffer: { type: 'read-only-storage' } },
       { binding: 5, visibility: F, buffer: { type: 'uniform' } },
+      { binding: 6, visibility: F, buffer: { type: 'read-only-storage' } },
     ],
   });
   const renderPipe = device.createRenderPipeline({
@@ -156,7 +161,7 @@ async function init() {
   });
   const renderBG = [0, 1].map(k => device.createBindGroup({
     layout: renderLayout,
-    entries: [renderBuf, A[k], auxBuf, G[k], Dbuf, pigBuf].map((buffer, binding) => ({ binding, resource: { buffer } })),
+    entries: [renderBuf, A[k], auxBuf, G[k], Dbuf, pigBuf, specBuf].map((buffer, binding) => ({ binding, resource: { buffer } })),
   }));
 
   let parity = 0;
@@ -175,6 +180,21 @@ async function init() {
       pg.mobility, pg.wick, pg.load ?? 1, pg.magnetic ?? 0], k * 16);
   });
   device.queue.writeBuffer(pigBuf, 0, pigData);
+  // Spectral table (render only): per pigment 16 K then 16 S bands; then
+  // the ground (paper) spectrum; then maps from the stain layer's RGB K and
+  // S totals to spectra (the stain layer keeps only RGB sums, see stainDep).
+  const specData = new Float32Array(SPEC_FLOATS);
+  PIGMENTS.slice(0, MAX_PIGMENTS).forEach((pg, k) => specData.set([...pg.Kspec, ...pg.Sspec], k * 32));
+  specData.set(STAIN_MAP.K.flat(), MAX_PIGMENTS * 32 + NB);
+  specData.set(STAIN_MAP.S.flat(), MAX_PIGMENTS * 32 + NB + 3 * NB);
+  let groundKey = '';
+  const writeGround = rgb => {
+    const key = rgb.join(',');
+    if (key === groundKey) return;
+    groundKey = key;
+    specData.set(upsample(rgb.map(srgbToLinear)), MAX_PIGMENTS * 32);
+    device.queue.writeBuffer(specBuf, 0, specData);
+  };
   const renderU32 = new Uint32Array(renderData), renderF32 = new Float32Array(renderData);
 
   const pointerBrush = () => {
@@ -248,7 +268,8 @@ async function init() {
     renderF32[2] = values.thickness; renderF32[3] = values.wetDarken;
     renderF32.set([...(state.ground ?? TONES[state.tone].color ?? PAPERS[state.paper].color), 1], 4);
     renderF32[8] = state.ground ? 0 : values.paperShade; renderF32[9] = values.suspendedWeight;
-    renderF32[10] = values.fixDeepen;
+    renderF32[10] = values.fixDeepen; renderF32[11] = values.spectral;
+    if (values.spectral > 0.5) writeGround(state.ground ?? TONES[state.tone].color ?? PAPERS[state.paper].color);
     device.queue.writeBuffer(renderBuf, 0, renderData);
   }
 

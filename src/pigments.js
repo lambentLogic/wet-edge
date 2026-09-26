@@ -27,6 +27,8 @@
 //   magnetic     magnetic susceptibility relative to Mars black (magnetite);
 //                0 for everything else. Not used by the physics yet.
 
+import { upsample, hexToLinear, NB } from './spectral.js';
+
 const PAPER_WHITE = 0.97;
 const MASS_X = 2.0;
 const TINT_X = 0.35;
@@ -67,7 +69,11 @@ function kmReflect(K, S, x, Rg) {
 // High-index pigments (titanium dioxide, bismuth vanadate, opaque iron
 // oxides) fit S, with the transparency rating as a weak prior.
 function fitKM(masstone, tint, opacity, scatter) {
-  const Rm = hexToRGB(masstone), Rt = tint ? hexToRGB(tint) : null;
+  return fitChannels(hexToRGB(masstone), tint ? hexToRGB(tint) : null, opacity, scatter);
+}
+
+// The same fit for any set of channels (RGB above; spectral bands below).
+function fitChannels(Rm, Rt, opacity, scatter) {
   const prior = Math.log(scatter ?? OPACITY_S[opacity]);
   const kGrid = [], sGrid = [];
   for (let v = Math.log(1e-3); v <= Math.log(40); v += 0.05) kGrid.push(v);
@@ -79,7 +85,7 @@ function fitKM(masstone, tint, opacity, scatter) {
     const s = Math.exp(ls);
     let total = 1e-3 * (ls - prior) ** 2;
     const K = [];
-    for (let ch = 0; ch < 3; ch++) {
+    for (let ch = 0; ch < Rm.length; ch++) {
       let e = Infinity, kb = 0;
       for (const lk of kGrid) {
         const k = Math.exp(lk);
@@ -91,7 +97,7 @@ function fitKM(masstone, tint, opacity, scatter) {
     }
     if (total < best) { best = total; bestK = K; bestS = s; }
   }
-  return { K: bestK.map(v => +v.toFixed(5)), S: [bestS, bestS, bestS].map(v => +v.toFixed(5)) };
+  return { K: bestK.map(v => +v.toFixed(5)), S: Rm.map(() => +bestS.toFixed(5)) };
 }
 
 // Organic pigments have low refractive indices: little scattering.
@@ -169,4 +175,38 @@ const PANS = [
     ...mineral, density: 1.6, staining: STAIN.low, granulation: GRAN.slight, flocculation: 0, mobility: 0.7 },
 ];
 
-export const PIGMENTS = PANS.map(p => ({ ...p, ...fitKM(p.masstone, p.tint, p.opacity, p.scatter) }));
+// Spectral K and S (16 bands, see spectral.js), fitted the same way to
+// masstone and tint spectra. Until measured spectra are in, those spectra
+// are the smoothest ones with the swatch colours (in linear light, as
+// physics wants; the RGB fit works on the sRGB-coded numbers directly).
+function fitSpectral(p) {
+  const Rm = upsample(hexToLinear(p.masstone)), Rt = p.tint ? upsample(hexToLinear(p.tint)) : null;
+  const { K, S } = fitChannels(Rm, Rt, p.opacity, p.scatter);
+  return { Kspec: K, Sspec: S };
+}
+
+export const PIGMENTS = PANS.map(p => ({ ...p, ...fitKM(p.masstone, p.tint, p.opacity, p.scatter), ...fitSpectral(p) }));
+
+// The stain layer keeps only RGB sums of its pigments' K and S. For the
+// spectral render, map those to spectra: least squares over the palette,
+// per band, K_band ~ sum_c map[c][band] * K_c (and the same for S).
+function fitMap(rgbOf, specOf) {
+  const map = [[], [], []];
+  for (let band = 0; band < NB; band++) {
+    const A = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], b = [0, 0, 0];
+    for (const pg of PIGMENTS) {
+      const x = rgbOf(pg), y = specOf(pg)[band];
+      for (let i = 0; i < 3; i++) { b[i] += x[i] * y; for (let j = 0; j < 3; j++) A[i][j] += x[i] * x[j]; }
+    }
+    for (let i = 0; i < 3; i++) A[i][i] += 1e-6;
+    const m = solve3(A, b);
+    for (let c = 0; c < 3; c++) map[c][band] = m[c];
+  }
+  return map;
+}
+function solve3(A, b) {
+  const det = M => M[0][0] * (M[1][1] * M[2][2] - M[1][2] * M[2][1]) - M[0][1] * (M[1][0] * M[2][2] - M[1][2] * M[2][0]) + M[0][2] * (M[1][0] * M[2][1] - M[1][1] * M[2][0]);
+  const d = det(A);
+  return [0, 1, 2].map(c => det(A.map((row, r) => row.map((v, k) => (k === c ? b[r] : v)))) / d);
+}
+export const STAIN_MAP = { K: fitMap(pg => pg.K, pg => pg.Kspec), S: fitMap(pg => pg.S, pg => pg.Sspec) };

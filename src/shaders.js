@@ -1,4 +1,5 @@
 import { paramStructWGSL } from './params.js';
+import { TO_RGB } from './spectral.js';
 
 // Cell state, ping-pong buffers:
 //   A = (w, gSum, dSum, s)  surface water depth, total suspended pigment,
@@ -859,11 +860,13 @@ fn mixPigments(x: i32, y: i32, a: vec4f, gi: Comp4,
 }
 `;
 
+const chunks = row => [0, 1, 2, 3].map(j => `vec4f(${row.slice(4 * j, 4 * j + 4).map(v => v.toFixed(7)).join(', ')})`).join(', ');
+
 export const renderWGSL = (MAXP = MAX_PIGMENTS) => /* wgsl */ `
 struct R {
   W: u32, H: u32, thickness: f32, wetDarken: f32,
   paperColor: vec4f,
-  paperShade: f32, suspendedWeight: f32, fixDeepen: f32, _b: f32,
+  paperShade: f32, suspendedWeight: f32, fixDeepen: f32, spectral: f32,
 };
 struct Pigment { K: vec4f, S: vec4f, phys: vec4f, phys2: vec4f };
 struct Comp4 { id: vec4u, amt: vec4f };
@@ -874,6 +877,16 @@ struct Dep { id: vec4u, amt: vec4f, stainK: vec4f, stainS: vec4f, stamp: vec4f }
 @group(0) @binding(3) var<storage, read> G: array<Comp4>;
 @group(0) @binding(4) var<storage, read> D: array<Dep>;
 @group(0) @binding(5) var<uniform> pig: array<Pigment, ${MAXP}>;
+// Spectral table, in vec4 chunks of 4 bands (16 bands, 400-700 nm):
+// pigment k's K at [k*8 .. k*8+3], S at [k*8+4 .. k*8+7]; then the ground
+// spectrum (4 chunks), then the stain K map and stain S map (3 x 4 chunks
+// each: RGB channel c's band weights).
+@group(0) @binding(6) var<storage, read> spec: array<vec4f>;
+const SPEC_BASE: u32 = ${MAXP * 8}u;
+// Reflectance spectrum to linear sRGB (CIE 1931 2-degree, D65).
+const TO_R = array<vec4f, 4>(${chunks(TO_RGB[0])});
+const TO_G = array<vec4f, 4>(${chunks(TO_RGB[1])});
+const TO_B = array<vec4f, 4>(${chunks(TO_RGB[2])});
 
 const LAYER_GAP: f32 = 2.0;
 
@@ -893,6 +906,93 @@ fn overLayer(Rg: vec3f, Kx: vec3f, Sx: vec3f, amount: f32) -> vec3f {
   return Rl + T * T * Rg / (1.0 - Rl * Rg);
 }
 
+fn overLayer4(Rg: vec4f, Kx: vec4f, Sx: vec4f, amount: f32) -> vec4f {
+  if (amount <= 1e-6) { return Rg; }
+  let Sx1 = max(Sx, vec4f(1e-5));
+  let aa = 1.0 + Kx / Sx1;
+  let b = max(sqrt(aa * aa - 1.0), vec4f(1e-4));
+  let bsx = min(b * Sx1, vec4f(20.0));
+  let sh = sinh(bsx);
+  let c = aa * sh + b * cosh(bsx);
+  let Rl = sh / c;
+  let T = b / c;
+  return Rl + T * T * Rg / (1.0 - Rl * Rg);
+}
+
+fn srgbEncode(v: vec3f) -> vec3f {
+  let c = clamp(v, vec3f(0.0), vec3f(1.0));
+  return select(1.055 * pow(c, vec3f(1.0 / 2.4)) - 0.055, 12.92 * c, c <= vec3f(0.0031308));
+}
+
+// The same layering as fs, per wavelength band: the ground spectrum, the
+// stain layer, deposited washes oldest first, then wet pigment; then to
+// colour. Pigments mix like paint (each absorbs its own part of the
+// spectrum) rather than per RGB channel.
+fn spectralColour(i: u32, wet: f32, h: f32) -> vec4f {
+  let g = G[i];
+  let dep = D[i];
+  let fixT = aux[i].z;
+  let deepK = 1.0 + 0.5 * r.fixDeepen;
+  let deepS = 1.0 - r.fixDeepen;
+  var R: array<vec4f, 4>;
+  for (var j = 0u; j < 4u; j++) { R[j] = spec[SPEC_BASE + j] * (1.0 - r.paperShade * (1.0 - h)); }
+
+  if (dep.stainK.w > 0.0) {
+    let fk = select(1.0, deepK, fixT > 0.0);
+    let fs = select(1.0, deepS, fixT > 0.0);
+    for (var j = 0u; j < 4u; j++) {
+      var Ks = vec4f(0.0); var Ss = vec4f(0.0);
+      for (var c = 0u; c < 3u; c++) {
+        Ks += spec[SPEC_BASE + 4u + c * 4u + j] * dep.stainK[c];
+        Ss += spec[SPEC_BASE + 16u + c * 4u + j] * dep.stainS[c];
+      }
+      R[j] = overLayer4(R[j], max(Ks, vec4f(0.0)) * r.thickness * fk, max(Ss, vec4f(0.0)) * r.thickness * fs, dep.stainK.w);
+    }
+  }
+
+  let st = vec4f(select(dep.stamp, -dep.stamp - vec4f(1.0), dep.stamp < vec4f(0.0)));
+  var done = vec4<bool>(false);
+  for (var n = 0; n < 4; n++) {
+    var first = -1;
+    for (var k = 0; k < 4; k++) {
+      if (!done[k] && dep.amt[k] > 0.0 && (first < 0 || st[k] < st[first])) { first = k; }
+    }
+    if (first < 0) { break; }
+    var Kx: array<vec4f, 4>; var Sx: array<vec4f, 4>; var total = 0.0;
+    for (var k = 0; k < 4; k++) {
+      if (!done[k] && dep.amt[k] > 0.0 && st[k] - st[first] <= LAYER_GAP) {
+        done[k] = true;
+        let fx = fixT > 0.0 && dep.stamp[k] < 0.0 && st[k] < fixT;
+        let ad = dep.amt[k] * r.thickness;
+        let pk = dep.id[k] * 8u;
+        for (var j = 0u; j < 4u; j++) {
+          Kx[j] += spec[pk + j] * ad * select(1.0, deepK, fx);
+          Sx[j] += spec[pk + 4u + j] * ad * select(1.0, deepS, fx);
+        }
+        total += dep.amt[k];
+      }
+    }
+    for (var j = 0u; j < 4u; j++) { R[j] = overLayer4(R[j], Kx[j], Sx[j], total); }
+  }
+
+  var Kw: array<vec4f, 4>; var Sw: array<vec4f, 4>; var tw = 0.0;
+  for (var k = 0; k < 4; k++) {
+    let ag = max(g.amt[k], 0.0) * r.suspendedWeight;
+    if (ag > 0.0) {
+      let pk = g.id[k] * 8u;
+      for (var j = 0u; j < 4u; j++) { Kw[j] += spec[pk + j] * ag * r.thickness; Sw[j] += spec[pk + 4u + j] * ag * r.thickness; }
+      tw += ag;
+    }
+  }
+  var lin = vec3f(0.0);
+  let darken = 1.0 - clamp(wet * r.wetDarken, 0.0, 0.3);
+  for (var j = 0u; j < 4u; j++) {
+    let Rj = overLayer4(R[j], Kw[j], Sw[j], tw) * darken;
+    lin += vec3f(dot(TO_R[j], Rj), dot(TO_G[j], Rj), dot(TO_B[j], Rj));
+  }
+  return vec4f(srgbEncode(lin), 1.0);
+}
+
 @vertex
 fn vs(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4f {
   let pos = array(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));
@@ -906,6 +1006,7 @@ fn fs(@builtin(position) fc: vec4f) -> @location(0) vec4f {
   let i = y * r.W + x;
   let a = A[i];
   let h = aux[i].x;
+  if (r.spectral > 0.5) { return spectralColour(i, a.x, h); }
 
   let Rg = r.paperColor.rgb * (1.0 - r.paperShade * (1.0 - h));
 
