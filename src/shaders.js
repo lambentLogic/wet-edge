@@ -34,6 +34,8 @@ struct Frame {
   concMul: f32,       // paint concentration relative to the recipe (brush's pigment : water)
   brushId: vec4u,     // the brush's load: up to 4 pigments ...
   brushFrac: vec4f,   // ... and their fractions of the load (sum 1)
+  touch: f32,         // how lightly the brush skims (0 = full contact), from the CPU
+  _t1: f32, _t2: f32, _t3: f32,
 };
 
 // Per-pigment physical properties, each relative to French ultramarine (1).
@@ -379,9 +381,9 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     // Dry-brush is technique: a light, fast touch with a fairly dry brush
     // only kisses the peaks of the paper's tooth. It needs dry paper; on
     // damp or wet paper the surface pulls the paint in and contact is full.
-    // (Speed enters through the touch: a quick mouse flick reads as a light
-    // touch, and pens and scripts give their pressure directly.)
-    let touch = (1.0 - clamp(fr.pressure, 0.0, 1.0)) * (1.0 - 0.6 * clamp(fr.load, 0.0, 1.0));
+    // fr.touch comes from the CPU: a light touch (pressure, or mouse speed)
+    // and, on the side of the brush, a drying belly.
+    let touch = fr.touch;
     let dryPaper = a.x <= p.wEps && a.w < p.dampThreshold;
     if (fr.mode != 2u && dryPaper && touch > 0.0) {
       let cut = p.skipAmount * touch;

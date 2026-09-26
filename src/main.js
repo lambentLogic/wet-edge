@@ -63,7 +63,7 @@ async function init() {
   const G = [buf(N * 32, S | CD), buf(N * 32, S | CD)];  // suspended components
   const Dbuf = buf(N * 80, S | CD);                      // deposited components + stain + stamps
   const paramBuf = buf(simParamBufferSize(), U | CD);
-  const frameBuf = buf(96, U | CD);
+  const frameBuf = buf(112, U | CD);
   const renderBuf = buf(48, U | CD);
   const pigBuf = buf(MAX_PIGMENTS * 64, U | CD);
   const magBuf = buf(16 + MAX_CHARGES * 32, U | CD);
@@ -156,7 +156,7 @@ async function init() {
 
   // ---- uniforms
   const paramData = new Float32Array(simParamBufferSize() / 4);
-  const frameData = new ArrayBuffer(96);
+  const frameData = new ArrayBuffer(112);
   const frameU32 = new Uint32Array(frameData), frameF32 = new Float32Array(frameData);
   const renderData = new ArrayBuffer(48);
   // The pigment table: colour and physical properties of every pigment in
@@ -193,12 +193,14 @@ async function init() {
     frameU32[0] = W; frameU32[1] = H; frameU32[2] = state.mode; frameU32[3] = brush ? 1 : 0;
     if (brush) {
       frameF32[4] = brush.x0; frameF32[5] = brush.y0; frameF32[6] = brush.x1; frameF32[7] = brush.y1;
-      // Side of the brush (Shift, or a tilted pen): a wider, lighter touch,
-      // the classic dry-brush drag of a round's belly.
+      // Side of the brush (Shift, or a tilted pen): a wider stroke. Loaded,
+      // the belly lays a broad wet stroke; as it runs dry, it skims (the
+      // classic dry-brush drag).
       const side = Math.min(Math.max(brush.side ?? 0, 0), 1);
       const pr = Math.min(Math.max(brush.pressure ?? 1, 0), 1);
-      // Contact: lighter on the side of the brush (drives skipping and load).
-      frameF32[8] = pr * (1 - 0.65 * side);
+      const load = values.brushCapacity > 0 ? state.reservoir : 1;
+      frameF32[8] = pr;
+      frameF32[24] = Math.max((1 - pr) * (1 - 0.6 * load), side * 0.8 * (1 - load));
       // Taper: width follows pressure; the side of the brush is wider.
       frameF32[13] = values.brushRadius * (values.taperMin + (1 - values.taperMin) * pr) * (1 + 0.8 * side);
       // Wet-in-wet charge: strongest at touchdown, then the reservoir is spent.
@@ -220,7 +222,7 @@ async function init() {
     frameF32[12] = state.simTime;
     frameF32[14] = values.brushCapacity > 0 ? state.reservoir : 1;
     frameF32[15] = concMul();
-    if (!brush) frameF32[13] = values.brushRadius;
+    if (!brush) { frameF32[13] = values.brushRadius; frameF32[24] = 0; }
     state.brushActive = !!brush;
     // Brush load: pigment ids at u32 16..19, fractions at f32 20..23.
     const total = state.brush.reduce((t, b) => t + b.frac, 0) || 1;
