@@ -101,6 +101,18 @@ does not measure physical memory bandwidth.
   state hashes identical, but `speed` stayed at 0.67x; reverted.
 - Caching the flocculation noise per cell (bit-identical): no measurable
   change. Kept, harmless.
+- Looking up each pigment's amount in the neighbouring cell once per face
+  in mixPigments (Sol's suggestion; amtOf results in a vec4 table,
+  accumulation order kept): bit-identical, but 0.61-0.64x against
+  0.64-0.66x in alternating runs. Reverted.
+
+So far every bit-identical restructuring of transport (workgroup size, G
+packing, candidate bit mask, early return, noise caching, amtOf table) has
+been within a few percent, and the fixed-index attempt was slower. The
+shader compiler seems to handle the obvious cases already. What remains
+would change results, which is the painter's call: settling and
+absorption every few steps (multi-rate), a larger timestep with
+recalibration, or cheaper mixing or flocculation.
 
 ## Ideas not yet tried
 
