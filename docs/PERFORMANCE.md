@@ -24,8 +24,10 @@ anyone (human or model) looking for speedups.
 
 ## Where the time goes (M3 Pro, 18 GB)
 
-With the whole sheet wet (`speed` probe): about 2.4 ms per step, i.e.
-0.33x real time.
+With the whole sheet wet (`speed` probe), on an idle GPU: 0.68x real
+time (about 2.4 ms per step). Part of the sheet wet (`speedPartial`):
+3.55x. (Earlier figures of 0.33x were taken while a painting tab and a
+local LLM shared the GPU.)
 
 | Measurement | Time |
 | --- | --- |
@@ -56,8 +58,9 @@ estimate, not profiled.
   three runs each, the whole sheet ran at 0.37-0.41x real time versus
   0.38-0.39x, and part of the sheet at 1.24-1.37x versus 1.41-1.68x. So
   occupancy doesn't look like the limit, which leaves bandwidth. Reverted.
-  Unconfirmed: the painter was painting in Chrome during the runs, on the
-  same GPU. Rerun on an idle machine.
+  Rerun on an idle GPU (2026-09-26), three runs each: 16 x 16 at 0.68x
+  whole sheet and 3.53-3.55x partial; 8 x 8 at 0.67x and 3.56-3.57x.
+  Identical state hashes. No difference either way.
 
 ## Ideas not yet tried
 
