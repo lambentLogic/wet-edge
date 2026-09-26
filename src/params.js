@@ -62,6 +62,7 @@ export const PARAMS = [
   { key: 'fixTooth',    v: 0.25,  min: 0, max: 1,   group: 'Fixative', target: 'js',  label: 'fills the tooth' },
   { key: 'fixDeepen',   v: 0.25, min: 0, max: 1,   group: 'Fixative', target: 'render', label: 'deepens fixed paint' },
   { key: 'flocculation', v: 1,   min: 0, max: 3,   group: 'Pigment', target: 'sim', label: 'flocculation' },
+  { key: 'flocTogether', v: 0.85, min: 0, max: 1, group: 'Pigment', target: 'sim', label: 'mixed pigments floc together' },
   { key: 'flocDrift',   v: 0.5,    min: 0, max: 20,  group: 'Pigment', target: 'sim', label: 'floc clumping speed' },
   { key: 'flocScale',   v: 1.2,  min: 0.2, max: 5, group: 'Pigment', target: 'sim', label: 'floc size (mm)' },
   { key: 'magnetism',   v: 4,    min: -10, max: 10,  group: 'Magnets', target: 'sim', label: 'magnet pull' },

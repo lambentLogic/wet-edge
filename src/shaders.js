@@ -803,9 +803,12 @@ fn magField(@builtin(global_invocation_id) id: vec3u) {
 // Flocculating pigments (ultramarine above all) clump in suspension: their
 // particles attract and gather into flocs. On the grid this is a drift of
 // each flocculating pigment up a smooth random clumping field at mm scale,
-// so while the paint stays wet it gathers into mottles. The field differs
-// per pigment (in a mix, ultramarine mottles on its own pattern while a
-// non-flocculating pigment stays smooth) and is re-rolled per wetting,
+// so while the paint stays wet it gathers into mottles. Flocs form from
+// whatever particles meet, so mixed flocculating pigments clump together
+// (ultramarine and a red earth into grey flocs, not blue and orange
+// specks): the field is mostly shared between pigments (flocTogether),
+// with a little of each pigment's own. A non-flocculating pigment in the
+// mix still stays smooth while ultramarine mottles. Re-rolled per wetting,
 // bucketed by wetting time so a whole wash shares one field.
 fn hash2(x: i32, y: i32, seed: u32) -> f32 {
   var h = bitcast<u32>(x) * 374761393u + bitcast<u32>(y) * 668265263u + seed * 2246822519u;
@@ -824,11 +827,15 @@ fn valueNoise(x: f32, y: f32, seed: u32) -> f32 {
 }
 
 // Clumping field for pigment id at cell (x, y), in [0, 1].
+fn flocNoise(fx: f32, fy: f32, seed: u32) -> f32 {
+  return 0.65 * valueNoise(fx, fy, seed) + 0.35 * valueNoise(fx * 2.3 + 11.0, fy * 2.3 + 5.0, seed + 1u);
+}
 fn flocField(x: i32, y: i32, id: u32, bucket: u32) -> f32 {
-  let seed = id * 7919u + bucket * 104729u + 17u;
   let sc = max(p.flocScale / 0.2, 1.0);   // mm -> cells
   let fx = f32(x) / sc; let fy = f32(y) / sc;
-  return 0.65 * valueNoise(fx, fy, seed) + 0.35 * valueNoise(fx * 2.3 + 11.0, fy * 2.3 + 5.0, seed + 1u);
+  let own = flocNoise(fx, fy, id * 7919u + bucket * 104729u + 17u);
+  let joint = flocNoise(fx, fy, bucket * 104729u + 5003u);
+  return mix(own, joint, clamp(p.flocTogether, 0.0, 1.0));
 }
 
 // ---------------------------------------------------------------- pigment mixing
