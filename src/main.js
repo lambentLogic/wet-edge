@@ -243,6 +243,20 @@ async function init() {
     step.end();
   }
 
+  // Draw the current state immediately (for exporting the canvas).
+  function renderNow() {
+    writeUniforms(1, null, false);
+    const enc = device.createCommandEncoder();
+    const rp = enc.beginRenderPass({
+      colorAttachments: [{ view: ctx.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: [1, 1, 1, 1] }],
+    });
+    rp.setPipeline(renderPipe);
+    rp.setBindGroup(0, renderBG[parity]);
+    rp.draw(3);
+    rp.end();
+    device.queue.submit([enc.finish()]);
+  }
+
   function frame() {
     const t = performance.now();
     const elapsed = Math.min((t - lastFrame) / 1000, 0.1);
@@ -371,8 +385,118 @@ async function init() {
   });
   window.__sim.clear = clear;
 
+  // Real-time painting helpers (for scripted painting you can watch): a
+  // continuous stroke through points [x, y, pressure?], and the blow-dryer.
+  window.__sim.path = (points, framesPerSeg = 4) => new Promise(done => {
+    const ptr = state.pointer;
+    const [x0, y0, p0 = 1] = points[0];
+    ptr.x = ptr.px = x0; ptr.y = ptr.py = y0; ptr.pressure = p0; ptr.downAt = performance.now(); ptr.down = true;
+    let seg = 1, f = 0;
+    const step = () => {
+      if (seg >= points.length) { ptr.down = false; done(); return; }
+      f++;
+      const [ax, ay, ap = 1] = points[seg - 1], [bx, by, bp = 1] = points[seg];
+      const t = f / framesPerSeg;
+      ptr.x = ax + (bx - ax) * t; ptr.y = ay + (by - ay) * t; ptr.pressure = ap + (bp - ap) * t;
+      if (f >= framesPerSeg) { f = 0; seg++; }
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  });
+  window.__sim.setDrying = on => { state.drying = on; document.getElementById('dry').classList.toggle('on', on); };
+
+  // ---- save / open
+  async function readBuffer(src, size) {
+    const rb = device.createBuffer({ size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    const enc = device.createCommandEncoder();
+    enc.copyBufferToBuffer(src, 0, rb, 0, size);
+    device.queue.submit([enc.finish()]);
+    await rb.mapAsync(GPUMapMode.READ);
+    const out = rb.getMappedRange().slice(0);
+    rb.destroy();
+    return out;
+  }
+  const download = (blob, name) => {
+    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name });
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  };
+  const stamp = () => new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+
+  // PNG of the painting as it looks now (without the magnet overlay).
+  async function savePNG() {
+    const blob = await new Promise(resolve => { renderNow(); canvas.toBlob(resolve, 'image/png'); });
+    download(blob, `watercolor-${stamp()}.png`);
+  }
+
+  // The full paint state: water, paper dampness, every pigment component,
+  // deposit timestamps, the paper itself, magnets and knobs, so a painting can
+  // be reopened (and rewetted) later. Gzipped; mostly zeros compress well.
+  const STATE_VERSION = 1;
+  async function savePainting() {
+    const parts = {
+      A: await readBuffer(A[parity], N * 16),
+      G: await readBuffer(G[parity], N * 32),
+      D: await readBuffer(Dbuf, N * 80),
+      aux: await readBuffer(auxBuf, N * 16),
+    };
+    const meta = {
+      version: STATE_VERSION, W, H, simTime: state.simTime, paper: state.paper, tone: state.tone,
+      magnets: state.magnets, values, pigments: PIGMENTS.map(pg => pg.name),
+      sizes: Object.fromEntries(Object.entries(parts).map(([k, v]) => [k, v.byteLength])),
+    };
+    const head = new TextEncoder().encode(JSON.stringify(meta));
+    const len = new Uint32Array([head.byteLength]);
+    const blob = new Blob([len, head, parts.A, parts.G, parts.D, parts.aux]);
+    const gz = await new Response(blob.stream().pipeThrough(new CompressionStream('gzip'))).blob();
+    download(gz, `painting-${stamp()}.wcpaint`);
+  }
+
+  async function openPainting(file) {
+    const raw = await new Response(file.stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+    const len = new Uint32Array(raw, 0, 1)[0];
+    const meta = JSON.parse(new TextDecoder().decode(new Uint8Array(raw, 4, len)));
+    if (meta.W !== W || meta.H !== H) throw new Error(`painting is ${meta.W}x${meta.H}, canvas is ${W}x${H}`);
+    let off = 4 + len;
+    const take = n => { const b = raw.slice(off, off + n); off += n; return b; };
+    const a = take(meta.sizes.A), g = take(meta.sizes.G), d = take(meta.sizes.D), ax = take(meta.sizes.aux);
+    // Pigment ids refer to the library at save time; remap by name.
+    const remap = meta.pigments.map(name => Math.max(PIGMENTS.findIndex(pg => pg.name === name), 0));
+    const remapIds = (buf, stride, idOffset) => {
+      const u = new Uint32Array(buf), f = new Float32Array(buf);
+      for (let c = 0; c < N; c++) for (let k = 0; k < 4; k++) {
+        const i = c * stride + idOffset + k;
+        if (f[i + 4] > 0) u[i] = remap[u[i]] ?? 0;
+      }
+    };
+    remapIds(g, 8, 0);
+    remapIds(d, 20, 0);
+    for (const b of A) device.queue.writeBuffer(b, 0, a);
+    for (const b of G) device.queue.writeBuffer(b, 0, g);
+    for (const b of B) device.queue.writeBuffer(b, 0, new Float32Array(N * 4));
+    device.queue.writeBuffer(Dbuf, 0, d);
+    device.queue.writeBuffer(auxBuf, 0, ax);
+    device.queue.writeBuffer(tilesBuf, 16, new Uint32Array(TX * TY).fill(4));
+    state.simTime = meta.simTime;
+    state.paper = meta.paper; state.tone = meta.tone;
+    state.magnets = meta.magnets ?? [];
+    Object.assign(values, meta.values);
+    uiSync();
+    drawMagnets();
+  }
+  window.__sim.savePNG = savePNG;
+  window.__sim.savePainting = savePainting;
+
   bindPointer(canvas);
   buildUI({ clear, newPaper });
+  document.getElementById('savePNG').addEventListener('click', () => savePNG().catch(e => fail(e.message)));
+  document.getElementById('savePainting').addEventListener('click', () => savePainting().catch(e => fail(e.message)));
+  const openInput = document.getElementById('openInput');
+  document.getElementById('openPainting').addEventListener('click', () => openInput.click());
+  openInput.addEventListener('change', () => {
+    if (openInput.files[0]) openPainting(openInput.files[0]).catch(e => fail(`Couldn't open painting: ${e.message}`));
+    openInput.value = '';
+  });
   requestAnimationFrame(frame);
 }
 
@@ -458,6 +582,10 @@ function bindPointer(canvas) {
   canvas.addEventListener('pointerup', up);
   canvas.addEventListener('pointercancel', up);
 }
+
+// Set by buildUI: refresh knob inputs and menus from the current state
+// (after opening a saved painting).
+let uiSync = () => {};
 
 function buildUI({ clear, newPaper }) {
   const panel = document.getElementById('knobs');
@@ -632,6 +760,11 @@ function buildUI({ clear, newPaper }) {
   // A paper preset sets its surface and its physics knobs together.
   const applyPaperKnobs = () => {
     for (const [k, v] of Object.entries(PAPERS[state.paper].knobs)) inputs[k](v);
+  };
+  uiSync = () => {
+    for (const p of PARAMS) inputs[p.key](values[p.key]);
+    document.getElementById('paperType').value = state.paper;
+    document.getElementById('tone').value = state.tone;
   };
   const toneSel = document.getElementById('tone');
   for (const [key, t] of Object.entries(TONES)) toneSel.add(new Option(t.name, key));

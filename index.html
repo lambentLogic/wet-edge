@@ -77,6 +77,12 @@
     <button id="paper">New paper</button>
     <button id="reset">Reset knobs</button>
   </div>
+  <div class="row">
+    <button id="savePNG" title="Download the painting as a PNG">Save PNG</button>
+    <button id="savePainting" title="Download the full paint state, to reopen and keep working (even rewet) later">Save painting</button>
+    <button id="openPainting" title="Open a saved painting">Open…</button>
+    <input id="openInput" type="file" accept=".wcpaint" hidden>
+  </div>
   <div id="knobs"></div>
   <p class="hint">Keys: 1 paint · 2 water · 3 lift · 4 magnet (R / scroll to rotate; double-click or drag off to remove) · F flip poles · [ ] pigment · hold D to dry · space pause · C clear.
     Number boxes are unclamped.</p>
