@@ -55,6 +55,70 @@
   }
 
   const probes = {
+    // Debug: water depth (w) and deposited pigment (d) along x at the wash's
+    // middle row, sampled every 1 mm from outside the right edge inward,
+    // at several times while it dries.
+    async tideTime(paper = 'coldPress') {
+      await fresh(paper);
+      const out = {};
+      await withValues({ granulation: 0, brushRadius: 18 }, async () => {
+        for (let y = 250; y <= 520; y += 18) { h.lift(); await h.paint(250, y, 780, y, 24); }
+        let t = 0;
+        for (const tt of [1, 8, 16, 24, 32, 40]) {
+          await h.wait(tt - t); t = tt;
+          const a = await S.read();
+          const row = x => { let w = 0, d = 0; for (let y = 370; y < 400; y++) { const i = (y * W + x) * 4; w += a[i]; d += a[i + 2]; } return [w / 30, d / 30]; };
+          const ws = [], ds = [];
+          for (let x = 805; x >= 700; x -= 5) { const [w, d] = row(x); ws.push(+(w * 100).toFixed(1)); ds.push(+(d * 100).toFixed(1)); }
+          out['t' + tt] = { w: ws.join(' '), d: ds.join(' ') };
+        }
+      });
+      h.end();
+      return out;
+    },
+
+    // Tide line: deposited-pigment profile across a plain wash, from its
+    // edge inward (mm steps). A real wash rises to a dark rim at the edge and
+    // is flat inside; the artifact is a pale band a couple of mm in.
+    async tide(paper = 'coldPress') {
+      await fresh(paper);
+      await withValues({ granulation: 0, brushRadius: 18 }, async () => {
+        for (let y = 250; y <= 520; y += 18) { h.lift(); await h.paint(250, y, 780, y, 24); }
+        await h.wait(30); await h.wait(10, { dry: true }); await h.wait(2);
+      });
+      h.end();
+      const a = await S.read();
+      let edgeX = 0;
+      for (let x = 900; x > 600; x--) {
+        let acc = 0;
+        for (let y = 340; y < 440; y++) acc += a[(y * W + x) * 4 + 2];
+        if (acc / 100 > 1e-3) { edgeX = x; break; }
+      }
+      const prof = [];
+      for (let mm = 0; mm <= 8; mm++) {
+        let acc = 0;
+        for (let dx = 0; dx < 5; dx++) for (let y = 340; y < 440; y++) acc += a[(y * W + edgeX - mm * 5 - dx) * 4 + 2];
+        prof.push(+(acc / 500 * 100).toFixed(2));
+      }
+      return prof;
+    },
+
+    // Mixed purple: a 1:1 ultramarine + quinacridone rose mix as a dense
+    // square and a pale wash, like a real test card. For screenshots.
+    async purple(paper = 'coldPress') {
+      await fresh(paper);
+      h.setBrush([['French Ultramarine', 1], ['Quinacridone Rose', 1]]);
+      await withValues({ brushRadius: 20 }, async () => {
+        S.values.brushPigment = 1.2;
+        for (let y = 200; y <= 320; y += 16) { h.lift(); await h.paint(250, y, 400, y, 12); }
+        S.values.brushPigment = 0.25;
+        for (let y = 200; y <= 320; y += 16) { h.lift(); await h.paint(480, y, 800, y, 16); }
+        await h.wait(25); await h.wait(10, { dry: true }); await h.wait(2);
+      });
+      h.end();
+      return 'painted';
+    },
+
     // Pigment chart: every pan as a heavy and a light stroke, on the current
     // paper tone. For screenshots (run with --set and h.setTone via 'tone').
     async chart(paper = 'coldPress', tone = 'natural') {
