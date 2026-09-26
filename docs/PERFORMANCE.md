@@ -17,7 +17,7 @@ anyone (human or model) looking for speedups.
 - Storage buffers (at the 10-per-stage limit):
   - A (w, gSum, dSum, s), 16 B, ping-pong
   - B (u, v, scratch, -), 16 B, ping-pong
-  - G: 4 pigment ids + amounts, 32 B, ping-pong
+  - G: 4 pigment ids (packed bytes) + amounts, 20 B, ping-pong
   - D: deposits (ids, amounts, stain K/S, timestamps), 80 B, in place
   - aux (paper height, wet mask, fix time, wet start), 16 B
   - tiles, magnet field, pigments, magnets, params
@@ -62,13 +62,19 @@ estimate, not profiled.
   whole sheet and 3.53-3.55x partial; 8 x 8 at 0.67x and 3.56-3.57x.
   Identical state hashes. No difference either way.
 
+- G's four pigment ids packed as bytes into one u32, amounts kept f32
+  (32 B down to 20 B a cell; Sol's second suggestion, 2026-09-26). Bit
+  identical (A, D and aux hashes unchanged). Alternating runs: 0.67-0.68x
+  vs 0.63-0.67x whole sheet, partial within noise. Kept (a few percent,
+  smaller saves), but G traffic clearly isn't the main cost either: the
+  big transport shader may be limited more by arithmetic or latency than
+  by raw bandwidth. Profiling with timestamp queries would tell.
+
 ## Ideas not yet tried
 
 - Settle and absorb every few steps (multi-rate), so D is touched less.
   This changes results slightly.
 - Load neighbour A and G tiles into workgroup shared memory.
-- Pack G's four pigment ids into one u32, keeping f32 amounts: 32 B down
-  to 20 B per read, bit-exact (Sol's second suggestion; next to try).
 - f16 amounts: conservation over thousands of steps worries me.
 - Split transport into lighter passes, or cut register pressure: it's
   a big shader with small arrays, so occupancy may be the real limit.

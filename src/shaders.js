@@ -56,11 +56,23 @@ struct Pigment { K: vec4f, S: vec4f, phys: vec4f, phys2: vec4f };
 @group(0) @binding(5) var<storage, read> Bin: array<vec4f>;
 @group(0) @binding(6) var<storage, read_write> Bout: array<vec4f>;
 struct Comp4 { id: vec4u, amt: vec4f };
+// Stored form of Comp4 (20 bytes, not 32): the four pigment ids packed as
+// bytes into one u32. Memory traffic is what limits speed when much of the
+// sheet is wet, and every cell reads five of these per step.
+struct GP { ids: u32, amt: array<f32, 4> };
+fn unpackG(g: GP) -> Comp4 {
+  return Comp4(vec4u(g.ids & 255u, (g.ids >> 8u) & 255u, (g.ids >> 16u) & 255u, g.ids >> 24u),
+               vec4f(g.amt[0], g.amt[1], g.amt[2], g.amt[3]));
+}
 // stainK.w = stained amount; stamp = when each component last received (negative: bound, see stampMix)
 // pigment, so the renderer can stack washes in the order they dried.
 struct Dep { id: vec4u, amt: vec4f, stainK: vec4f, stainS: vec4f, stamp: vec4f };
-@group(0) @binding(9) var<storage, read> Gin: array<Comp4>;
-@group(0) @binding(10) var<storage, read_write> Gout: array<Comp4>;
+@group(0) @binding(9) var<storage, read> Gin: array<GP>;
+@group(0) @binding(10) var<storage, read_write> Gout: array<GP>;
+fn packG(c: Comp4) -> GP {
+  return GP((c.id.x & 255u) | ((c.id.y & 255u) << 8u) | ((c.id.z & 255u) << 16u) | ((c.id.w & 255u) << 24u),
+            array<f32, 4>(c.amt.x, c.amt.y, c.amt.z, c.amt.w));
+}
 @group(0) @binding(11) var<storage, read_write> D: array<Dep>;
 @group(0) @binding(12) var<uniform> pig: array<Pigment, ${MAXP}>;
 // Magnets under the paper, as magnetic charges (the pole model): each magnet
@@ -348,7 +360,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   if (!inb(x, y)) { return; }
   let i = ix(x, y);
   let a = Ain[i];
-  let gi = Gin[i];
+  let gi = unpackG(Gin[i]);
   cn = 0u; stK = vec3f(0.0); stS = vec3f(0.0); stA = 0.0; stL = 0.0;
 
   // Upwind finite-volume flux of water and suspended pigment together,
@@ -358,10 +370,10 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   var uL = 0.0; var vU = 0.0;
   var aL = a; var aR = a; var aU = a; var aD = a;
   var gL = gi; var gR = gi; var gU = gi; var gD = gi;
-  if (x > 0)       { let j = ix(x - 1, y); uL = Bout[j].x; aL = Ain[j]; gL = Gin[j]; }
-  if (x < W() - 1) { let j = ix(x + 1, y); aR = Ain[j]; gR = Gin[j]; }
-  if (y > 0)       { let j = ix(x, y - 1); vU = Bout[j].y; aU = Ain[j]; gU = Gin[j]; }
-  if (y < H() - 1) { let j = ix(x, y + 1); aD = Ain[j]; gD = Gin[j]; }
+  if (x > 0)       { let j = ix(x - 1, y); uL = Bout[j].x; aL = Ain[j]; gL = unpackG(Gin[j]); }
+  if (x < W() - 1) { let j = ix(x + 1, y); aR = Ain[j]; gR = unpackG(Gin[j]); }
+  if (y > 0)       { let j = ix(x, y - 1); vU = Bout[j].y; aU = Ain[j]; gU = unpackG(Gin[j]); }
+  if (y < H() - 1) { let j = ix(x, y + 1); aD = Ain[j]; gD = unpackG(Gin[j]); }
 
   let fwR = uR * select(aR.x, a.x, uR > 0.0);
   let fwL = uL * select(a.x, aL.x, uL > 0.0);
@@ -665,7 +677,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   }
   dep.stainK += vec4f(stK, stA);
   dep.stainS += vec4f(stS, stL);
-  Gout[i] = gOut;
+  Gout[i] = packG(gOut);
   // Write back only what changed (memory traffic is the bottleneck when
   // much of the sheet is wet; amounts change every step, the rest rarely).
   if (any(dep.amt != depIn.amt)) { D[i].amt = dep.amt; }
@@ -955,11 +967,16 @@ struct R {
 };
 struct Pigment { K: vec4f, S: vec4f, phys: vec4f, phys2: vec4f };
 struct Comp4 { id: vec4u, amt: vec4f };
+struct GP { ids: u32, amt: array<f32, 4> };   // stored form, see the sim
+fn unpackG(g: GP) -> Comp4 {
+  return Comp4(vec4u(g.ids & 255u, (g.ids >> 8u) & 255u, (g.ids >> 16u) & 255u, g.ids >> 24u),
+               vec4f(g.amt[0], g.amt[1], g.amt[2], g.amt[3]));
+}
 struct Dep { id: vec4u, amt: vec4f, stainK: vec4f, stainS: vec4f, stamp: vec4f };
 @group(0) @binding(0) var<uniform> r: R;
 @group(0) @binding(1) var<storage, read> A: array<vec4f>;
 @group(0) @binding(2) var<storage, read> aux: array<vec4f>;
-@group(0) @binding(3) var<storage, read> G: array<Comp4>;
+@group(0) @binding(3) var<storage, read> G: array<GP>;
 @group(0) @binding(4) var<storage, read> D: array<Dep>;
 @group(0) @binding(5) var<uniform> pig: array<Pigment, ${MAXP}>;
 // Spectral table, in vec4 chunks of 4 bands (16 bands, 400-700 nm):
@@ -1014,7 +1031,7 @@ fn srgbEncode(v: vec3f) -> vec3f {
 // colour. Pigments mix like paint (each absorbs its own part of the
 // spectrum) rather than per RGB channel.
 fn spectralColour(i: u32, wet: f32, h: f32) -> vec4f {
-  let g = G[i];
+  let g = unpackG(G[i]);
   let dep = D[i];
   let fixT = aux[i].z;
   let deepK = 1.0 + 0.5 * r.fixDeepen;
@@ -1100,7 +1117,7 @@ fn fs(@builtin(position) fc: vec4f) -> @location(0) vec4f {
   // settled (pigment settling within LAYER_GAP seconds counts as one wash
   // and mixes), then the wet suspended pigment on top. So gouache over dry
   // paint covers it, while gouache mixed into wet paint makes a tint.
-  let g = G[i];
+  let g = unpackG(G[i]);
   let dep = D[i];
   var col = Rg;
   // Fixative soaks into dried paint and cuts the scattering at its surface
