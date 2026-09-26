@@ -503,20 +503,21 @@ async function init() {
   };
 
   // Real-time painting helpers (for scripted painting you can watch): a
-  // continuous stroke through points [x, y, pressure?], and the blow-dryer.
+  // continuous stroke through points [x, y, pressure?, side?], and the
+  // blow-dryer.
   window.__sim.path = (points, framesPerSeg = 4) => new Promise(done => {
     const ptr = state.pointer;
-    const [x0, y0, p0 = 1] = points[0];
+    const [x0, y0, p0 = 1, s0 = 0] = points[0];
     ptr.x = ptr.px = x0; ptr.y = ptr.py = y0; ptr.pressure = p0; ptr.downAt = performance.now(); ptr.down = true;
-    ptr.pen = true; ptr.side = 0; ptr.scripted = true;   // scripted strokes use their exact pressure and path
+    ptr.pen = true; ptr.side = s0; ptr.scripted = true;   // scripted strokes use their exact pressure and path
     if (state.brushType === 'dip') state.reservoir = 1;
     let seg = 1, f = 0;
     const step = () => {
       if (seg >= points.length) { ptr.down = false; done(); return; }
       f++;
-      const [ax, ay, ap = 1] = points[seg - 1], [bx, by, bp = 1] = points[seg];
+      const [ax, ay, ap = 1, as = 0] = points[seg - 1], [bx, by, bp = 1, bs = 0] = points[seg];
       const t = f / framesPerSeg;
-      ptr.x = ax + (bx - ax) * t; ptr.y = ay + (by - ay) * t; ptr.pressure = ap + (bp - ap) * t;
+      ptr.x = ax + (bx - ax) * t; ptr.y = ay + (by - ay) * t; ptr.pressure = ap + (bp - ap) * t; ptr.side = as + (bs - as) * t;
       if (f >= framesPerSeg) { f = 0; seg++; }
       requestAnimationFrame(step);
     };
