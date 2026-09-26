@@ -51,23 +51,32 @@ function kmReflect(K, S, x, Rg) {
 // refractive index and is close to flat across the visible range; colour is
 // carried by absorption. A per-channel S is unconstrained by colours seen
 // only over white paper, and produced nonsense on dark grounds (a green
-// bismuth vanadate). The transparency rating is a weak prior on S.
+// bismuth vanadate).
+//
+// Transparent pigments get their physically low scattering fixed (so they
+// all but vanish on black, as real ones do), and instead the fit finds their
+// tinting strength: how much thinner their light wash is than their
+// masstone. Other pigments fit S, with the transparency rating as a weak
+// prior, at a standard tint thickness.
 function fitKM(masstone, tint, opacity) {
   const Rm = hexToRGB(masstone), Rt = tint ? hexToRGB(tint) : null;
   const prior = Math.log(OPACITY_S[opacity]);
-  const grid = [];
-  for (let v = Math.log(1e-3); v <= Math.log(40); v += 0.05) grid.push(v);
+  const kGrid = [], sGrid = [];
+  for (let v = Math.log(1e-3); v <= Math.log(40); v += 0.05) kGrid.push(v);
+  if (opacity === 'transparent') sGrid.push(prior);
+  else for (let v = Math.log(1e-3); v <= Math.log(40); v += 0.05) sGrid.push(v);
+  const tintXs = opacity === 'transparent' && Rt ? [0.08, 0.12, 0.18, 0.25, 0.35, 0.5, 0.7, 1.0] : [TINT_X];
   let best = Infinity, bestK = null, bestS = 0;
-  for (const ls of grid) {
+  for (const tx of tintXs) for (const ls of sGrid) {
     const s = Math.exp(ls);
     let total = 1e-3 * (ls - prior) ** 2;
     const K = [];
     for (let ch = 0; ch < 3; ch++) {
       let e = Infinity, kb = 0;
-      for (const lk of grid) {
+      for (const lk of kGrid) {
         const k = Math.exp(lk);
         let err = (kmReflect(k, s, MASS_X, PAPER_WHITE) - Rm[ch]) ** 2;
-        if (Rt) err += (kmReflect(k, s, TINT_X, PAPER_WHITE) - Rt[ch]) ** 2;
+        if (Rt) err += (kmReflect(k, s, tx, PAPER_WHITE) - Rt[ch]) ** 2;
         if (err < e) { e = err; kb = k; }
       }
       total += e; K.push(kb);
