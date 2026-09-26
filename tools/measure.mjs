@@ -62,8 +62,8 @@ try {
     // Canvas at native resolution (1 px = 1 cell = 0.2 mm), after a frame
     // has rendered the final state.
     await new Promise(r => setTimeout(r, 300));
-    const el = await page.$('#canvas');
-    await page.evaluate(() => { const c = document.getElementById('canvas'); c.style.width = c.width + 'px'; c.style.maxWidth = 'none'; c.style.maxHeight = 'none'; });
+    const el = await page.$('#stage');
+    await page.evaluate(() => { const st = document.getElementById('stage'); const c = document.getElementById('canvas'); st.style.width = c.width + 'px'; });
     await new Promise(r => setTimeout(r, 300));
     await el.screenshot({ path: shot });
     console.error(`saved ${shot}`);

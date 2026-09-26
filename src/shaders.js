@@ -35,7 +35,8 @@ struct Frame {
 
 // Per-pigment physical properties, each relative to French ultramarine (1).
 //   phys  = (density, staining, granulation, flocculation)
-//   phys2 = (mobility, wick, load, -)  load: pigment per brushful (gouache ~3)
+//   phys2 = (mobility, wick, load, magnetic)  load: pigment per brushful (gouache ~3);
+//           magnetic: susceptibility (Mars black 1, negative = diamagnetic)
 struct Pigment { K: vec4f, S: vec4f, phys: vec4f, phys2: vec4f };
 
 @group(0) @binding(0) var<uniform> p: Params;
@@ -55,6 +56,11 @@ struct Dep { id: vec4u, amt: vec4f, stainK: vec4f, stainS: vec4f, stamp: vec4f }
 @group(0) @binding(10) var<storage, read_write> Gout: array<Comp4>;
 @group(0) @binding(11) var<storage, read_write> D: array<Dep>;
 @group(0) @binding(12) var<uniform> pig: array<Pigment, ${MAXP}>;
+// Magnets under the paper: vertical dipoles at (x, y) in cells with signed
+// moment (sign = which pole faces up), MAX_MAGNETS at most.
+struct Magnets { count: u32, _a: u32, _b: u32, _c: u32, m: array<vec4f, 8> };
+@group(0) @binding(13) var<uniform> mag: Magnets;
+
 struct Tiles {
   args: array<atomic<u32>, 4>,        // indirect dispatch (x, y, z) + pad
   state: array<u32, ${NTILES}>,       // frames left active
@@ -341,7 +347,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     if (vU > 0.0 && gU.amt[k] > 0.0) { addCand(gU.id[k],  p.dt * vU * gU.amt[k]); }
   }
 
-  if (p.mixing > 0.5) { mixPigments(x, y, a, gi, aL, aR, aU, aD, gL, gR, gU, gD); }
+  if (p.mixing > 0.5 || mag.count > 0u) { mixPigments(x, y, a, gi, aL, aR, aU, aD, gL, gR, gU, gD); }
 
   var s = a.w;
 
@@ -537,6 +543,35 @@ fn depositInto(dep: ptr<function, Dep>, occ: ptr<function, vec4<bool>>, id: u32,
   (*dep).stainS += vec4f(pig[id].S.rgb * a, 0.0);
 }
 
+// ---------------------------------------------------------------- magnets
+// Field of vertical dipoles magnetDepth mm below the paper, summed as
+// vectors (so like and opposite poles interact), evaluated at the paper
+// surface. The force on a small magnetic particle goes as its susceptibility
+// times grad |B|^2, so aux.z holds |B|^2 (normalised so a unit magnet gives
+// 1 directly above it) for the drift in mixPigments. Written once per frame,
+// after the wet-mask blur has finished with aux.z.
+@compute @workgroup_size(16, 16)
+fn magField(@builtin(global_invocation_id) id: vec3u) {
+  let x = i32(id.x); let y = i32(id.y);
+  if (!inb(x, y)) { return; }
+  var phi = 0.0;
+  if (mag.count > 0u) {
+    let d = max(p.magnetDepth / 0.2, 1.0);   // mm -> cells
+    var B = vec3f(0.0);
+    for (var k = 0u; k < min(mag.count, 8u); k++) {
+      let mk = mag.m[k];
+      let r = vec3f(f32(x) + 0.5 - mk.x, f32(y) + 0.5 - mk.y, d);
+      let R2 = dot(r, r);
+      let R5 = R2 * R2 * sqrt(R2);
+      // Dipole along z with moment mk.z: B = (3 (m.r) r / R^2 - m) / R^3
+      B += mk.z * (3.0 * d * r / R5 - vec3f(0.0, 0.0, 1.0) / (R2 * sqrt(R2)));
+    }
+    let d3 = d * d * d;
+    phi = dot(B, B) * d3 * d3 / 4.0;
+  }
+  aux[ix(x, y)].z = phi;
+}
+
 // ---------------------------------------------------------------- flocculation
 // Flocculating pigments (ultramarine above all) clump in suspension: their
 // particles attract and gather into flocs. On the grid this is a drift of
@@ -589,42 +624,50 @@ fn mixPigments(x: i32, y: i32, a: vec4f, gi: Comp4,
   let i = ix(x, y);
   let cT = a.y / a.x;
   let wi = smoothstep(p.mixEdgeLo, p.mixEdgeHi, aux[i].y);
-  // Mixing and flocculation drift share the explicit-scheme stability budget
-  // (4 neighbours), half each, so together they can't overdraw a cell.
+  let mixOn = p.mixing > 0.5;
+  let magOn = mag.count > 0u;
+  // Mixing and drift (flocculation + magnetism) share the explicit-scheme
+  // stability budget (4 neighbours), half each, so together they can't
+  // overdraw a cell.
   let cap = 0.12 / max(p.dt, 1e-6);
   for (var k = 0; k < 4; k++) {
     var nx = x; var ny = y; var n = a; var gn = gi;
     if (k == 0) { nx = x - 1; n = aL; gn = gL; } else if (k == 1) { nx = x + 1; n = aR; gn = gR; }
     else if (k == 2) { ny = y - 1; n = aU; gn = gU; } else { ny = y + 1; n = aD; gn = gD; }
     if (!inb(nx, ny) || n.x <= p.wEps) { continue; }
-    let face = min(wi, smoothstep(p.mixEdgeLo, p.mixEdgeHi, aux[ix(nx, ny)].y));
-    if (face <= 0.0) { continue; }
-    // The Marangoni term acts most where paint meets much cleaner water
-    // (high contrast), less across the gentle gradients inside one body of
-    // paint.
-    let cnT = n.y / n.x;
-    let hi = max(cT, cnT);
-    let contrast = (hi - min(cT, cnT)) / (hi + 1e-4);
-    let base = p.pigmentDiffusion + p.marangoni * hi * pow(contrast, p.marangoniContrast);
+    let j = ix(nx, ny);
+    let face = select(0.0, min(wi, smoothstep(p.mixEdgeLo, p.mixEdgeHi, aux[j].y)), mixOn);
     let wmin = min(a.x, n.x);
-    // Pigments present in the neighbour (and possibly here too).
-    for (var m = 0; m < 4; m++) {
-      if (gn.amt[m] <= 0.0) { continue; }
-      let id = gn.id[m];
-      let rate = min(base * pig[id].phys2.x, cap);
-      addCand(id, p.dt * face * rate * wmin * (gn.amt[m] / n.x - amtOf(gi, id) / a.x));
+    if (face > 0.0) {
+      // The Marangoni term acts most where paint meets much cleaner water
+      // (high contrast), less across the gentle gradients inside one body
+      // of paint.
+      let cnT = n.y / n.x;
+      let hi = max(cT, cnT);
+      let contrast = (hi - min(cT, cnT)) / (hi + 1e-4);
+      let base = p.pigmentDiffusion + p.marangoni * hi * pow(contrast, p.marangoniContrast);
+      // Pigments present in the neighbour (and possibly here too).
+      for (var m = 0; m < 4; m++) {
+        if (gn.amt[m] <= 0.0) { continue; }
+        let id = gn.id[m];
+        let rate = min(base * pig[id].phys2.x, cap);
+        addCand(id, p.dt * face * rate * wmin * (gn.amt[m] / n.x - amtOf(gi, id) / a.x));
+      }
+      // Pigments present here but not in the neighbour.
+      for (var m = 0; m < 4; m++) {
+        if (gi.amt[m] <= 0.0 || amtOf(gn, gi.id[m]) > 0.0) { continue; }
+        let id = gi.id[m];
+        let rate = min(base * pig[id].phys2.x, cap);
+        addCand(id, -p.dt * face * rate * wmin * gi.amt[m] / a.x);
+      }
     }
-    // Pigments present here but not in the neighbour.
-    for (var m = 0; m < 4; m++) {
-      if (gi.amt[m] <= 0.0 || amtOf(gn, gi.id[m]) > 0.0) { continue; }
-      let id = gi.id[m];
-      let rate = min(base * pig[id].phys2.x, cap);
-      addCand(id, -p.dt * face * rate * wmin * gi.amt[m] / a.x);
-    }
-    // Flocculation drift up each pigment's clumping field, upwind in
-    // concentration. Both cells compute the same flux (same bucket, same
-    // field values), so it conserves pigment.
-    let bucket = u32(max(floor(max(aux[i].w, aux[ix(nx, ny)].w) / 10.0), 0.0));
+    if (face <= 0.0 && !magOn) { continue; }
+    // Drift: flocculation (up each pigment's clumping field, interior only)
+    // plus magnetism (up the gradient of |B|^2, scaled by susceptibility,
+    // right up to the wet edge). Upwind in concentration. Both cells compute
+    // the same flux, so it conserves pigment.
+    let bucket = u32(max(floor(max(aux[i].w, aux[j].w) / 10.0), 0.0));
+    let dPhi = aux[i].z - aux[j].z;   // magnetic potential |B|^2, from magField
     for (var m = 0; m < 8; m++) {
       var id = 0u; var here = 0.0; var there = 0.0;
       if (m < 4) {
@@ -634,12 +677,15 @@ fn mixPigments(x: i32, y: i32, a: vec4f, gi: Comp4,
         if (gn.amt[m - 4] <= 0.0 || amtOf(gi, gn.id[m - 4]) > 0.0) { continue; }
         id = gn.id[m - 4]; here = 0.0; there = gn.amt[m - 4];
       }
-      let chi = p.flocculation * pig[id].phys.w * p.flocDrift;
-      if (chi <= 0.0) { continue; }
-      let dn = flocField(x, y, id, bucket) - flocField(nx, ny, id, bucket);
-      let cUp = select(here / a.x, there / n.x, dn > 0.0);
-      let drift = min(chi * abs(dn), cap);
-      addCand(id, p.dt * face * drift * sign(dn) * wmin * cUp);
+      var v = 0.0;   // drift velocity from the neighbour into this cell
+      let chiF = p.flocculation * pig[id].phys.w * p.flocDrift;
+      if (face > 0.0 && chiF > 0.0) {
+        v += face * chiF * (flocField(x, y, id, bucket) - flocField(nx, ny, id, bucket));
+      }
+      if (magOn) { v += p.magnetism * pig[id].phys2.w * dPhi; }
+      if (v == 0.0) { continue; }
+      let cUp = select(here / a.x, there / n.x, v > 0.0);
+      addCand(id, p.dt * clamp(v, -cap, cap) * wmin * cUp);
     }
   }
 }

@@ -11,8 +11,10 @@
     font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; }
   body { display: flex; }
   main { flex: 1; display: flex; align-items: center; justify-content: center; padding: 16px; min-width: 0; }
-  canvas { max-width: 100%; max-height: calc(100vh - 32px); aspect-ratio: 4 / 3;
+  #stage { position: relative; width: min(100%, calc((100vh - 32px) * 4 / 3)); aspect-ratio: 4 / 3; }
+  #canvas { display: block; width: 100%; height: 100%;
     box-shadow: 0 4px 30px rgba(0,0,0,.5); touch-action: none; cursor: crosshair; }
+  #overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
   aside { width: 320px; flex-shrink: 0; background: var(--panel); padding: 14px; overflow-y: auto; height: 100vh; }
   h1 { font-size: 15px; font-weight: 600; margin: 0 0 10px; display: flex; justify-content: space-between; }
   #fps { color: var(--dim); font-weight: 400; font-variant-numeric: tabular-nums; }
@@ -46,7 +48,7 @@
 </style>
 </head>
 <body>
-<main><canvas id="canvas"></canvas></main>
+<main><div id="stage"><canvas id="canvas"></canvas><canvas id="overlay"></canvas></div></main>
 <aside>
   <h1>Hyperreal Watercolor <span id="fps"></span></h1>
   <div id="error"></div>
@@ -54,6 +56,7 @@
     <button data-mode="0">Paint</button>
     <button data-mode="1">Water</button>
     <button data-mode="2">Lift</button>
+    <button data-mode="3" title="Click to place a magnet under the paper, drag to move, Alt-click to remove">Magnet</button>
   </div>
   <div id="palette" title="Paint box: click a pan to load the brush ( [ and ] cycle )"></div>
   <div class="row" style="align-items:center; margin-bottom:4px">
@@ -68,11 +71,13 @@
     <button id="dry">Blow-dry (hold)</button>
     <button id="pause">Pause</button>
     <button id="clear">Clear</button>
+    <button id="flipMagnets" title="Flip every magnet's pole (F)">Flip poles</button>
+    <button id="clearMagnets">Remove magnets</button>
     <button id="paper">New paper</button>
     <button id="reset">Reset knobs</button>
   </div>
   <div id="knobs"></div>
-  <p class="hint">Keys: 1 paint · 2 water · 3 lift · [ ] pigment · hold D to dry · space pause · C clear.
+  <p class="hint">Keys: 1 paint · 2 water · 3 lift · 4 magnet · F flip poles · [ ] pigment · hold D to dry · space pause · C clear.
     Number boxes are unclamped.</p>
 </aside>
 <script type="module" src="src/main.js"></script>

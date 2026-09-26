@@ -52,6 +52,8 @@ export const PARAMS = [
   { key: 'flocculation', v: 1,   min: 0, max: 3,   group: 'Pigment', target: 'sim', label: 'flocculation' },
   { key: 'flocDrift',   v: 0.5,    min: 0, max: 20,  group: 'Pigment', target: 'sim', label: 'floc clumping speed' },
   { key: 'flocScale',   v: 1.2,  min: 0.2, max: 5, group: 'Pigment', target: 'sim', label: 'floc size (mm)' },
+  { key: 'magnetism',   v: 4,    min: -10, max: 10,  group: 'Magnets', target: 'sim', label: 'magnet pull' },
+  { key: 'magnetDepth', v: 5,    min: 0.5, max: 20, group: 'Magnets', target: 'sim', label: 'magnet depth (mm)' },
   { key: 'valleyFill',  v: 3,    min: 0, max: 20,  group: 'Pigment', target: 'sim', label: 'valleys fill up' },
   { key: 'settleDepth', v: 0.05, min: 0, max: 0.5, group: 'Pigment', target: 'sim', label: 'settles below depth' },
 

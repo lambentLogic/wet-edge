@@ -55,6 +55,35 @@
   }
 
   const probes = {
+    // Magnet: a Mars black wash with a magnet under its centre. Fraction of
+    // the wash's pigment within 3 mm of the magnet, with the magnet vs a
+    // control without one. Also leaves the magnet in place for screenshots.
+    async magnet(paper = 'coldPress') {
+      const run = async (mags) => {
+        await fresh(paper);
+        h.setMagnets([]);
+        h.setBrush('Mars Black');
+        await withValues({ brushRadius: 20, brushPigment: 0.12 }, async () => {
+          for (let y = 280; y <= 490; y += 18) { h.lift(); await h.paint(360, y, 660, y, 16); }
+          h.setMagnets(mags);
+          await h.wait(30); await h.wait(10, { dry: true }); await h.wait(2);
+        });
+        const a = await S.read();
+        let near = 0, total = 0;
+        for (let y = 250; y < 520; y++) for (let x = 330; x < 700; x++) {
+          const v = a[(y * W + x) * 4 + 2];
+          total += v;
+          if (Math.hypot(x - 510, y - 385) < 15) near += v;
+        }
+        return +(near / total * 100).toFixed(2);
+      };
+      const out = { none: await run([]), magnet: await run([{ x: 510, y: 385, moment: 1 }]) };
+      // Leave two opposite poles in place for a screenshot.
+      out.pair = await run([{ x: 450, y: 385, moment: 1 }, { x: 570, y: 385, moment: -1 }]);
+      h.end();
+      return out;
+    },
+
     // Flocculation: mm-scale mottling of a pale wash on hot press with paper
     // granulation off. Coefficient of variation of 1 mm block averages of
     // deposited pigment in the interior, for a flocculating pigment

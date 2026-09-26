@@ -18,6 +18,7 @@ const state = {
   paused: false,
   headless: false,
   simTime: 0,       // simulated seconds (deposit timestamps)
+  magnets: [],      // { x, y, moment } in grid cells; moment sign = pole facing up
   pointer: { down: false, x: 0, y: 0, px: 0, py: 0, pressure: 1 },
 };
 
@@ -34,6 +35,8 @@ async function init() {
   device.addEventListener('uncapturederror', e => console.error('[wgpu]', e.error.message));
 
   canvas.width = W; canvas.height = H;
+  const overlay = document.getElementById('overlay');
+  overlay.width = W; overlay.height = H;
   const ctx = canvas.getContext('webgpu');
   const format = navigator.gpu.getPreferredCanvasFormat();
   ctx.configure({ device, format, alphaMode: 'opaque' });
@@ -50,6 +53,10 @@ async function init() {
   const frameBuf = buf(96, U | CD);
   const renderBuf = buf(48, U | CD);
   const pigBuf = buf(MAX_PIGMENTS * 64, U | CD);
+  const MAX_MAGNETS = 8;
+  const magBuf = buf(16 + MAX_MAGNETS * 16, U | CD);
+  const magData = new ArrayBuffer(16 + MAX_MAGNETS * 16);
+  const magU32 = new Uint32Array(magData), magF32 = new Float32Array(magData);
   const TILE = 16, TX = Math.ceil(W / TILE), TY = Math.ceil(H / TILE);
   // Tiles struct: indirect args (16 bytes), then per-tile state, then list.
   const tilesBuf = buf(16 + TX * TY * 8, S | CD);
@@ -85,7 +92,7 @@ async function init() {
     entries: [
       [0, 'uniform'], [1, 'uniform'], [2, 'storage'],
       [3, 'read-only-storage'], [4, 'storage'], [5, 'read-only-storage'], [6, 'storage'],
-      [7, 'storage'], [9, 'read-only-storage'], [10, 'storage'], [11, 'storage'], [12, 'uniform'],
+      [7, 'storage'], [9, 'read-only-storage'], [10, 'storage'], [11, 'storage'], [12, 'uniform'], [13, 'uniform'],
     ].map(([binding, type]) => ({ binding, visibility: C, buffer: { type } })),
   });
   const simPL = device.createPipelineLayout({ bindGroupLayouts: [simLayout] });
@@ -96,13 +103,14 @@ async function init() {
     blurH: compute('blurH'), blurV: compute('blurV'),
     velocity: compute('velocity'), transport: compute('transport'),
     markTiles: compute('markTiles'), compactTiles: compute('compactTiles'),
+    magField: compute('magField'),
   };
 
   // Parity k reads A[k], B[k], G[k] and writes A[1-k], B[1-k], G[1-k].
   const simBG = [0, 1].map(k => device.createBindGroup({
     layout: simLayout,
     entries: [[0, paramBuf], [1, frameBuf], [2, auxBuf], [3, A[k]], [4, A[1 - k]], [5, B[k]], [6, B[1 - k]],
-              [7, tilesBuf], [9, G[k]], [10, G[1 - k]], [11, Dbuf], [12, pigBuf]]
+              [7, tilesBuf], [9, G[k]], [10, G[1 - k]], [11, Dbuf], [12, pigBuf], [13, magBuf]]
       .map(([binding, buffer]) => ({ binding, resource: { buffer } })),
   }));
 
@@ -141,7 +149,7 @@ async function init() {
   PIGMENTS.slice(0, MAX_PIGMENTS).forEach((pg, k) => {
     pigData.set([...pg.K, 0, ...pg.S, 0,
       pg.density, pg.staining, pg.granulation, pg.flocculation,
-      pg.mobility, pg.wick, pg.load ?? 1, 0], k * 16);
+      pg.mobility, pg.wick, pg.load ?? 1, pg.magnetic ?? 0], k * 16);
   });
   device.queue.writeBuffer(pigBuf, 0, pigData);
   const renderU32 = new Uint32Array(renderData), renderF32 = new Float32Array(renderData);
@@ -176,6 +184,12 @@ async function init() {
     }
     device.queue.writeBuffer(frameBuf, 0, frameData);
 
+    // Magnets
+    const mags = state.magnets.slice(0, MAX_MAGNETS);
+    magU32[0] = mags.length;
+    mags.forEach((mg, k) => magF32.set([mg.x, mg.y, mg.moment, 0], 4 + k * 4));
+    device.queue.writeBuffer(magBuf, 0, magData);
+
     renderU32[0] = W; renderU32[1] = H;
     renderF32[2] = values.thickness; renderF32[3] = values.wetDarken;
     renderF32.set([...(TONES[state.tone].color ?? PAPERS[state.paper].color), 1], 4);
@@ -206,6 +220,7 @@ async function init() {
     pass.setBindGroup(0, simBG[parity]);
     pass.setPipeline(pipes.blurH); pass.dispatchWorkgroups(gx, gy);
     pass.setPipeline(pipes.blurV); pass.dispatchWorkgroups(gx, gy);
+    pass.setPipeline(pipes.magField); pass.dispatchWorkgroups(gx, gy);
     pass.setPipeline(pipes.markTiles); pass.dispatchWorkgroups(gx, gy);
     pass.setPipeline(pipes.compactTiles); pass.dispatchWorkgroups(Math.ceil(TX * TY / 64));
     pass.end();
@@ -311,6 +326,8 @@ async function init() {
     wait(seconds, { dry = false } = {}) { strokeFrame = 0; return simFrames(Math.round(seconds * HZ), () => null, dry); },
     setMode(m) { state.mode = m; },
     setTone(key) { state.tone = key; },
+    // Magnets under the paper: [{ x, y, moment }] in grid cells.
+    setMagnets(list) { state.magnets = list.map(mg => ({ moment: 1, ...mg })); drawMagnets(); },
     pigmentNames() { return PIGMENTS.map(pg => pg.name); },
     // Load the brush: setBrush('French Ultramarine') or a mix,
     // setBrush([['French Ultramarine', 2], ['Burnt Umber', 1]]).
@@ -357,7 +374,26 @@ function bindPointer(canvas) {
     return [(e.clientX - r.left) / r.width * W, (e.clientY - r.top) / r.height * H];
   };
   const pressureOf = e => (e.pointerType === 'pen' ? Math.max(e.pressure, 0.05) * 1.5 : 1);
+  // Magnet mode: click to place, drag to move, Alt/right-click to remove.
+  let dragMagnet = null;
+  const magnetAt = (x, y) => state.magnets.find(mg => Math.hypot(mg.x - x, mg.y - y) < 18);
+  canvas.addEventListener('contextmenu', e => { if (state.mode === 3) e.preventDefault(); });
   canvas.addEventListener('pointerdown', e => {
+    if (state.mode === 3) {
+      const [x, y] = toGrid(e);
+      const hit = magnetAt(x, y);
+      if (e.altKey || e.button === 2) {
+        if (hit) state.magnets = state.magnets.filter(mg => mg !== hit);
+      } else if (hit) {
+        dragMagnet = hit;
+      } else if (state.magnets.length < 8) {
+        dragMagnet = { x, y, moment: 1 };
+        state.magnets.push(dragMagnet);
+      }
+      try { canvas.setPointerCapture(e.pointerId); } catch {}
+      drawMagnets();
+      return;
+    }
     try { canvas.setPointerCapture(e.pointerId); } catch {}
     [ptr.x, ptr.y] = toGrid(e);
     ptr.px = ptr.x; ptr.py = ptr.y;
@@ -366,10 +402,11 @@ function bindPointer(canvas) {
     ptr.down = true;
   });
   canvas.addEventListener('pointermove', e => {
+    if (dragMagnet) { [dragMagnet.x, dragMagnet.y] = toGrid(e); drawMagnets(); return; }
     [ptr.x, ptr.y] = toGrid(e);
     ptr.pressure = pressureOf(e);
   });
-  const up = () => { ptr.down = false; };
+  const up = () => { ptr.down = false; dragMagnet = null; };
   canvas.addEventListener('pointerup', up);
   canvas.addEventListener('pointercancel', up);
 }
@@ -538,6 +575,8 @@ function buildUI({ clear, newPaper }) {
   pauseBtn.addEventListener('click', togglePause);
 
   document.getElementById('clear').addEventListener('click', clear);
+  document.getElementById('flipMagnets').addEventListener('click', flipMagnets);
+  document.getElementById('clearMagnets').addEventListener('click', () => { state.magnets = []; drawMagnets(); });
   document.getElementById('paper').addEventListener('click', () => newPaper());
   // A paper preset sets its surface and its physics knobs together.
   const applyPaperKnobs = () => {
@@ -564,7 +603,8 @@ function buildUI({ clear, newPaper }) {
 
   window.addEventListener('keydown', e => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-    if (e.key >= '1' && e.key <= '3') setMode(+e.key - 1);
+    if (e.key >= '1' && e.key <= '4') setMode(+e.key - 1);
+    else if (e.key === 'f') flipMagnets();
     else if (e.key === '[' || e.key === ']') {
       const n = PIGMENTS.length;
       setPigment((state.brush[0].pigment + (e.key === ']' ? 1 : n - 1)) % n);
@@ -595,6 +635,35 @@ function mixColor(parts, thickness = 2) {
     return Math.round(255 * Math.min(1, R + T * T * Rg / (1 - R * Rg)));
   });
   return `rgb(${c.join(',')})`;
+}
+
+// Flip every magnet's pole (spec: flipping during drying lays down bands).
+function flipMagnets() {
+  state.magnets.forEach(mg => { mg.moment = -mg.moment; });
+  drawMagnets();
+}
+
+// Magnets are drawn on a 2D canvas laid over the paper.
+function drawMagnets() {
+  const ov = document.getElementById('overlay');
+  if (!ov) return;
+  const g = ov.getContext('2d');
+  g.clearRect(0, 0, ov.width, ov.height);
+  for (const mg of state.magnets) {
+    const north = mg.moment > 0;
+    const col = north ? 'rgba(210, 70, 60, 0.9)' : 'rgba(60, 100, 210, 0.9)';
+    g.beginPath();
+    g.arc(mg.x, mg.y, 16, 0, Math.PI * 2);
+    g.lineWidth = 2;
+    g.strokeStyle = col;
+    g.setLineDash([4, 3]);
+    g.stroke();
+    g.setLineDash([]);
+    g.fillStyle = col;
+    g.font = 'bold 13px system-ui, sans-serif';
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(north ? 'N' : 'S', mg.x + 22, mg.y - 18);
+  }
 }
 
 function fail(msg) {
