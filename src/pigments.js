@@ -150,10 +150,18 @@ const PANS = [
   // Yellow Deep and an Indian yellow, both PY110; scans read a little light).
   { name: 'Isoindolinone Yellow', code: 'PY110', masstone: '#F0A00A', tint: '#FCD440', opacity: 'transparent',
     ...organic, staining: STAIN.medium, mobility: 0.8 },
-  { name: 'Azo Condensation Yellow', code: 'PY128', masstone: '#E8D400', tint: '#F2E24A', opacity: 'transparent',
+  // Painter (2026-09-26): about as bright as bismuth vanadate in glazes,
+  // but a middle yellow leaning lemon (bismuth is lemon leaning middle;
+  // both a little warmer than PY3). Was #E8D400 / #F2E24A, dull and green.
+  { name: 'Azo Condensation Yellow', code: 'PY128', masstone: '#F5CF0C', tint: '#FAE356', opacity: 'transparent',
     ...organic, staining: STAIN.high, mobility: 1.4 },
   // Inorganic but fine; "very inert with water" (handprint).
-  { name: 'Bismuth Vanadate Yellow', code: 'PY184', masstone: '#F4D020', tint: '#F8E27A', opacity: 'semiopaque',
+  // Painter (2026-09-26): lemon, a mite neon (as neon as it gets without a
+  // fluorescent; like PY3 but not as cold), a very bright mixer; it
+  // rendered dark and golden from #F4D020 / #F8E27A. Colours sampled from
+  // references they shared: a watercolour chart (#F5E640 strong, #F5E856
+  // lighter) and Golden's acrylic masstone (#FAF215).
+  { name: 'Bismuth Vanadate Yellow', code: 'PY184', masstone: '#FAE81A', tint: '#F7EE70', opacity: 'semiopaque',
     ...mineral, staining: STAIN.medium, granulation: GRAN.none, flocculation: 0, mobility: 0.5 },
   { name: 'Indian Red', code: 'PR101', masstone: '#7A2E24', tint: '#C08070', opacity: 'semiopaque',
     ...mineral, density: 1.5, staining: STAIN.lowmed, granulation: GRAN.moderate },
