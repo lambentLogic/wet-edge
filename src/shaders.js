@@ -575,7 +575,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
       if (!gOcc[k]) { continue; }
       let id = gId[k];
       // Matching deposited component (allocate, or evict the most staining).
-      let j = depSlot(&dep, &dOcc, id);
+      let j = depSlot(&dep, &dOcc, id, true);
       let rho = p.density * pig[id].phys.x;
       let omega = max(p.staining * pig[id].phys.y, 1e-4);
       let gam = p.granulation * pig[id].phys.z;
@@ -711,7 +711,7 @@ fn isFixed(stamp: f32, fixT: f32) -> bool { return fixT > 0.0 && stamp < 0.0 && 
 // empty component, else the permanent stain layer.
 fn depositInto(dep: ptr<function, Dep>, occ: ptr<function, vec4<bool>>, id: u32, a: f32) {
   if (!(a > 0.0)) { return; }
-  let j = depSlot(dep, occ, id);
+  let j = depSlot(dep, occ, id, false);
   if (j < 0) { stainDep(dep, id, a); return; }
   (*dep).stamp[j] = stampMix((*dep).stamp[j], (*dep).amt[j], a);
   (*dep).amt[j] += a;
@@ -728,21 +728,24 @@ fn stainDep(dep: ptr<function, Dep>, id: u32, a: f32) {
 
 // The deposited component for fresh pigment id: the matching unbound one,
 // else an empty one (so fresh paint settling over a bound layer of the same
-// pigment stays free while this wetting lasts), else the matching bound one
-// (it joins that layer bound). With all four taken, the most staining pigment present is the one
-// fixed into the stain layer (it behaves like stain anyway): if that is an
-// existing component it is evicted and the slot reused; if it is the
-// newcomer, returns -1 and the caller stains the newcomer. Non-staining
-// pigments like Mars black keep their identity and stay liftable.
-fn depSlot(dep: ptr<function, Dep>, occ: ptr<function, vec4<bool>>, id: u32) -> i32 {
+// pigment stays free while this wetting lasts), else room made by merging a
+// pigment's set and unset twins, else by reclaiming a slot that holds only
+// a trace (into the stain layer), else by pushing the most staining pigment
+// present into the stain layer if it's more staining than the newcomer
+// (non-staining pigments like Mars black keep their identity and stay
+// liftable). Otherwise returns -1: while the paper is wet (wet = true) the
+// caller leaves the pigment in suspension; when drying down it's stained.
+// Only when drying may a pigment join its own bound layer: while wet,
+// joining a bound layer (or staining the newcomer) was a one-way sink,
+// piling pigment into dark lines and patches wherever the four slots
+// happened to be full.
+fn depSlot(dep: ptr<function, Dep>, occ: ptr<function, vec4<bool>>, id: u32, wet: bool) -> i32 {
   for (var m = 0; m < 4; m++) { if ((*occ)[m] && (*dep).id[m] == id && (*dep).stamp[m] >= 0.0) { return m; } }
   for (var m = 0; m < 4; m++) {
     if (!(*occ)[m]) { (*occ)[m] = true; (*dep).id[m] = id; (*dep).amt[m] = 0.0; (*dep).stamp[m] = fr.time; return m; }
   }
-  for (var m = 0; m < 4; m++) { if ((*occ)[m] && (*dep).id[m] == id) { return m; } }
-  // Full: before pushing any pigment out, make room by merging a pigment's
-  // set and unset parts (they're one pigment; the merged part keeps the
-  // state of the larger).
+  // Full. Merge a pigment's set and unset parts (they're one pigment; the
+  // merged part keeps the state of the larger).
   for (var m = 0; m < 4; m++) {
     for (var n = m + 1; n < 4; n++) {
       if ((*dep).id[m] == (*dep).id[n]) {
@@ -750,11 +753,28 @@ fn depSlot(dep: ptr<function, Dep>, occ: ptr<function, vec4<bool>>, id: u32) -> 
         let t = (stampTime((*dep).stamp[m]) * am + stampTime((*dep).stamp[n]) * an) / max(am + an, 1e-12);
         let bound = select((*dep).stamp[n] < 0.0, (*dep).stamp[m] < 0.0, am >= an);
         (*dep).amt[m] = am + an; (*dep).stamp[m] = select(t, -t - 1.0, bound);
+        if ((*dep).id[m] == id && !bound) { (*dep).amt[n] = 0.0; (*occ)[n] = false; return m; }
         (*dep).id[n] = id; (*dep).amt[n] = 0.0; (*dep).stamp[n] = fr.time;
         return n;
       }
     }
   }
+  // Reclaim a slot that holds only a trace of an old layer (not one just
+  // started this wetting, which would be stolen back and forth).
+  var s = -1;
+  for (var m = 0; m < 4; m++) {
+    let old = (*dep).stamp[m] < 0.0 || stampTime((*dep).stamp[m]) < fr.time - 1.0;
+    if (old && (*dep).id[m] != id && (*dep).amt[m] < 1e-3 && (s < 0 || (*dep).amt[m] < (*dep).amt[s])) { s = m; }
+  }
+  if (s >= 0) {
+    stainDep(dep, (*dep).id[s], (*dep).amt[s]);
+    (*dep).id[s] = id; (*dep).amt[s] = 0.0; (*dep).stamp[s] = fr.time;
+    return s;
+  }
+  // When dry: join its own bound layer. (While wet that's a sink: skip.)
+  if (!wet) { for (var m = 0; m < 4; m++) { if ((*occ)[m] && (*dep).id[m] == id) { return m; } } }
+  // Push the most staining pigment present into the stain layer, once, to
+  // make room for a less staining newcomer.
   var e = 0;
   for (var m = 1; m < 4; m++) { if (stainOmega((*dep).id[m]) > stainOmega((*dep).id[e])) { e = m; } }
   if (stainOmega((*dep).id[e]) <= stainOmega(id)) { return -1; }
