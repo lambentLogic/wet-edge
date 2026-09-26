@@ -63,7 +63,11 @@ export function makeMinds(sim) {
     return out;
   };
 
-  async function fill(poly, { mode = 0, wetEdge = 0.05, framesPerSeg = 2, spacing = 1.4, grade = null, log = () => {} } = {}) {
+  async function fill(poly, { mode = null, wetEdge = 0.05, framesPerSeg = 2, spacing = 1.4, grade = null, log = () => {} } = {}) {
+    // Paint in the mode it was called in (a water fill stays water after a
+    // rewet; restoring a fixed paint mode laid the brush's pigment instead).
+    if (mode === null) mode = h.mode();
+    h.setMode(mode);
     // Effective width: a soft brush wets fully only near its core, so rows
     // overlap more (spacing is in core widths).
     const r = V.brushRadius, core = r * (1 - 0.5 * V.brushSoftness);
