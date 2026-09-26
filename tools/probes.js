@@ -55,6 +55,48 @@
   }
 
   const probes = {
+    // Overflow lift: four pigments dried in layers, then Mars black across
+    // them (a fifth pigment in those cells), then the Lift brush. Fraction of
+    // the Mars black band's extra pigment removed where the lift passed,
+    // compared with Mars black alone on clean paper.
+    async overflowLift(paper = 'coldPress') {
+      const run = async (under) => {
+        await fresh(paper);
+        await withValues({ brushRadius: 30, brushPigment: 0.3 }, async () => {
+          for (const name of under) {
+            h.setBrush(name);
+            for (let y = 250; y <= 520; y += 25) { h.lift(); await h.paint(300, y, 720, y, 20); }
+            await h.wait(15); await h.wait(8, { dry: true }); await h.wait(2);
+          }
+        });
+        // Identifiable Mars black in the lifted band (not the stain layer).
+        const band = async () => { const a = await S.readPigment('Mars Black'); let v = 0; for (let y = 360; y < 410; y++) for (let x = 480; x < 540; x++) v += a[y * W + x]; return v; };
+        await withValues({ brushRadius: 22, brushPigment: 0.5 }, async () => {
+          h.setBrush('Mars Black');
+          for (let y = 360; y <= 410; y += 20) { h.lift(); await h.paint(250, y, 770, y, 20); }
+          await h.wait(15); await h.wait(8, { dry: true }); await h.wait(2);
+        });
+        const withBlack = await band();
+        // Reference: Mars black laid on clean paper the same way (deposited
+        // amount), to see how much ended up fixed in the stain layer.
+        const identifiable = withBlack;
+        h.setMode(2);
+        await withValues({ brushRadius: 25 }, async () => {
+          for (let pass = 0; pass < 3; pass++) { h.lift(); await h.paint(510, 300, 510, 470, 30); }
+          await h.wait(5);
+        });
+        h.setMode(0);
+        const after = await band();
+        return { identifiable: +identifiable.toFixed(1), lifted: +((withBlack - after) / Math.max(withBlack, 1e-6)).toFixed(2) };
+      };
+      const out = {
+        onClean: await run([]),
+        overFour: await run(['Transparent Yellow Oxide', 'Perylene Green', 'Transparent Red Oxide', 'Quinacridone Rose']),
+      };
+      h.end();
+      return out;
+    },
+
     // Lift: dried stripes of a non-staining and a staining pigment, then the
     // Lift brush scrubbed across both. Fraction of each stripe's pigment
     // removed where the lift passed.

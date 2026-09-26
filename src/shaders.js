@@ -293,10 +293,14 @@ var<private> cn: u32;
 var<private> stK: vec3f;
 var<private> stS: vec3f;
 var<private> stA: f32;
+var<private> stL: f32;   // liftability-weighted amount (sum a / staining^2)
+
+fn stainOmega(id: u32) -> f32 { return max(p.staining * pig[id].phys.y, 1e-4); }
 
 fn stainAdd(id: u32, a: f32) {
   if (!(a > 0.0)) { return; }
-  stK += pig[id].K.rgb * a; stS += pig[id].S.rgb * a; stA += a;
+  let om = stainOmega(id);
+  stK += pig[id].K.rgb * a; stS += pig[id].S.rgb * a; stA += a; stL += a / (om * om);
 }
 
 fn candIndex(id: u32) -> i32 {
@@ -322,7 +326,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   let i = ix(x, y);
   let a = Ain[i];
   let gi = Gin[i];
-  cn = 0u; stK = vec3f(0.0); stS = vec3f(0.0); stA = 0.0;
+  cn = 0u; stK = vec3f(0.0); stS = vec3f(0.0); stA = 0.0; stL = 0.0;
 
   // Upwind finite-volume flux of water and suspended pigment together,
   // so each pigment rides the water at its local concentration.
@@ -436,6 +440,12 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
       let omega = max(p.staining * pig[dep.id[j]].phys.y, 1e-4);
       dep.amt[j] *= 1.0 - clamp(liftK * p.liftDry / (omega * omega), 0.0, 1.0);
     }
+    // The stain layer lifts by its average liftability (its colour mix is
+    // kept; an approximation, since what's in it has lost its identity).
+    if (dep.stainK.w > 0.0) {
+      let f = 1.0 - clamp(liftK * p.liftDry * dep.stainS.w / dep.stainK.w, 0.0, 1.0);
+      dep.stainK *= f; dep.stainS *= f;
+    }
   }
   for (var j = 0u; j < cn; j++) {
     if (!taken[j] && camt[j] > 0.0) { depositInto(&dep, &dOcc, cid[j], camt[j]); }
@@ -466,19 +476,15 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     for (var k = 0; k < 4; k++) {
       if (!gOcc[k]) { continue; }
       let id = gId[k];
-      // Matching deposited component (allocate one if there's room).
-      var j = -1;
-      for (var m = 0; m < 4; m++) { if (dOcc[m] && dep.id[m] == id) { j = m; } }
-      if (j < 0) {
-        for (var m = 0; m < 4; m++) { if (!dOcc[m]) { j = m; dOcc[m] = true; dep.id[m] = id; dep.amt[m] = 0.0; dep.stamp[m] = fr.time; break; } }
-      }
+      // Matching deposited component (allocate, or evict the most staining).
+      let j = depSlot(&dep, &dOcc, id);
       let rho = p.density * pig[id].phys.x;
       let omega = max(p.staining * pig[id].phys.y, 1e-4);
       let gam = p.granulation * pig[id].phys.z;
       let down = min(max(gAmt[k] * (1.0 - h * gam), 0.0) * rho * thin * p.dt, gAmt[k]);
       if (j < 0) {
-        // Nowhere to put it as a liftable deposit: it stains.
-        gAmt[k] -= down; stainAdd(id, down);
+        // The most staining pigment here: it goes into the stain layer.
+        gAmt[k] -= down; stainDep(&dep, id, down);
         continue;
       }
       // Pigment that dried before this wetting began is bound by its gum
@@ -540,7 +546,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     dep.amt[k] = finite(select(0.0, dep.amt[k], dOcc[k] && dep.amt[k] > 1e-12));
   }
   dep.stainK += vec4f(stK, stA);
-  dep.stainS += vec4f(stS, 0.0);
+  dep.stainS += vec4f(stS, stL);
   Gout[i] = gOut;
   D[i] = dep;
   Aout[i] = vec4f(finite(w), sum4(gOut.amt), sum4(dep.amt) + dep.stainK.w, finite(s));
@@ -558,12 +564,38 @@ fn stampMix(stamp: f32, amt: f32, added: f32) -> f32 {
 // empty component, else the permanent stain layer.
 fn depositInto(dep: ptr<function, Dep>, occ: ptr<function, vec4<bool>>, id: u32, a: f32) {
   if (!(a > 0.0)) { return; }
-  for (var m = 0; m < 4; m++) { if ((*occ)[m] && (*dep).id[m] == id) { (*dep).stamp[m] = stampMix((*dep).stamp[m], (*dep).amt[m], a); (*dep).amt[m] += a; return; } }
-  for (var m = 0; m < 4; m++) {
-    if (!(*occ)[m]) { (*occ)[m] = true; (*dep).id[m] = id; (*dep).amt[m] = a; (*dep).stamp[m] = fr.time; return; }
-  }
+  let j = depSlot(dep, occ, id);
+  if (j < 0) { stainDep(dep, id, a); return; }
+  (*dep).stamp[j] = stampMix((*dep).stamp[j], (*dep).amt[j], a);
+  (*dep).amt[j] += a;
+}
+
+// Fix pigment into the permanent stain layer (KM totals, amount, and a
+// liftability-weighted amount so scrubbing can still bring some up).
+fn stainDep(dep: ptr<function, Dep>, id: u32, a: f32) {
+  if (!(a > 0.0)) { return; }
+  let om = stainOmega(id);
   (*dep).stainK += vec4f(pig[id].K.rgb * a, a);
-  (*dep).stainS += vec4f(pig[id].S.rgb * a, 0.0);
+  (*dep).stainS += vec4f(pig[id].S.rgb * a, a / (om * om));
+}
+
+// The deposited component for pigment id: the matching one, else an empty
+// one. With all four taken, the most staining pigment present is the one
+// fixed into the stain layer (it behaves like stain anyway): if that is an
+// existing component it is evicted and the slot reused; if it is the
+// newcomer, returns -1 and the caller stains the newcomer. Non-staining
+// pigments like Mars black keep their identity and stay liftable.
+fn depSlot(dep: ptr<function, Dep>, occ: ptr<function, vec4<bool>>, id: u32) -> i32 {
+  for (var m = 0; m < 4; m++) { if ((*occ)[m] && (*dep).id[m] == id) { return m; } }
+  for (var m = 0; m < 4; m++) {
+    if (!(*occ)[m]) { (*occ)[m] = true; (*dep).id[m] = id; (*dep).amt[m] = 0.0; (*dep).stamp[m] = fr.time; return m; }
+  }
+  var e = 0;
+  for (var m = 1; m < 4; m++) { if (stainOmega((*dep).id[m]) > stainOmega((*dep).id[e])) { e = m; } }
+  if (stainOmega((*dep).id[e]) <= stainOmega(id)) { return -1; }
+  stainDep(dep, (*dep).id[e], (*dep).amt[e]);
+  (*dep).id[e] = id; (*dep).amt[e] = 0.0; (*dep).stamp[e] = fr.time;
+  return e;
 }
 
 // ---------------------------------------------------------------- magnets

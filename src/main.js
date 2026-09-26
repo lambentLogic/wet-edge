@@ -387,6 +387,20 @@ async function init() {
   });
   window.__sim.clear = clear;
 
+  // Debug hook: per-cell amount of one pigment (suspended + deposited
+  // components; pigment fixed in the anonymous stain layer isn't counted).
+  window.__sim.readPigment = async name => {
+    const id = PIGMENTS.findIndex(pg => pg.name === name);
+    const g = await readBuffer(G[parity], N * 32), d = await readBuffer(Dbuf, N * 80);
+    const gu = new Uint32Array(g), gf = new Float32Array(g), du = new Uint32Array(d), df = new Float32Array(d);
+    const out = new Float32Array(N);
+    for (let c = 0; c < N; c++) for (let k = 0; k < 4; k++) {
+      if (gf[c * 8 + 4 + k] > 0 && gu[c * 8 + k] === id) out[c] += gf[c * 8 + 4 + k];
+      if (df[c * 20 + 4 + k] > 0 && du[c * 20 + k] === id) out[c] += df[c * 20 + 4 + k];
+    }
+    return out;
+  };
+
   // Real-time painting helpers (for scripted painting you can watch): a
   // continuous stroke through points [x, y, pressure?], and the blow-dryer.
   window.__sim.path = (points, framesPerSeg = 4) => new Promise(done => {
