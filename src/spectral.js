@@ -79,6 +79,67 @@ export function upsample(rgb, { smooth = 1e-3 } = {}) {
   return R.map(v => Math.min(1, Math.max(1e-3, v)));
 }
 
+// A spectrum with the given linear sRGB colour, shaped like a measured one:
+// R = prior * c, with c as smooth as possible (squared second differences),
+// so the prior's absorption bands and edges survive while level and tilt
+// adjust to hit the colour. Used to fit measured acrylic spectra to the
+// painter's watercolour swatches.
+export function upsampleNear(rgb, prior, { smooth = 0.03 } = {}) {
+  const p = prior.map(v => Math.max(v, 1e-3));
+  const fixed = new Array(NB).fill(null);
+  let c = new Array(NB).fill(1);
+  for (let pass = 0; pass < 12; pass++) {
+    const A = Array.from({ length: NB }, () => new Array(NB).fill(0)), b = new Array(NB).fill(0);
+    const W = 1e3;
+    for (let ch = 0; ch < 3; ch++) for (let i = 0; i < NB; i++) {
+      const mi = TO_RGB[ch][i] * p[i];
+      b[i] += W * mi * rgb[ch];
+      for (let j = 0; j < NB; j++) A[i][j] += W * mi * TO_RGB[ch][j] * p[j];
+    }
+    for (let k = 1; k < NB - 1; k++) {
+      const d = [[k - 1, 1], [k, -2], [k + 1, 1]];
+      for (const [i, di] of d) for (const [j, dj] of d) A[i][j] += smooth * di * dj;
+    }
+    for (let k = 0; k < NB; k++) A[k][k] += 1e-7;
+    for (let k = 0; k < NB; k++) if (fixed[k] !== null) {
+      for (let j = 0; j < NB; j++) { b[j] -= A[j][k] * fixed[k]; A[j][k] = 0; A[k][j] = 0; }
+      A[k][k] = 1; b[k] = fixed[k];
+    }
+    c = solve(A, b);
+    let changed = false;
+    for (let k = 0; k < NB; k++) {
+      if (fixed[k] === null && c[k] * p[k] < 1e-3) { fixed[k] = 1e-3 / p[k]; changed = true; }
+      if (fixed[k] === null && c[k] * p[k] > 1) { fixed[k] = 1 / p[k]; changed = true; }
+    }
+    if (!changed) break;
+  }
+  return c.map((v, k) => Math.min(1, Math.max(1e-3, v * p[k])));
+}
+
+// A pigment-like spectrum with the given linear sRGB colour: a sigmoid of
+// a quadratic in wavelength (Jakob & Hanika 2019), R = s(c0 t^2 + c1 t + c2),
+// t = wavelength scaled to -1..1. Saturated colours get the step-like
+// absorption edges real pigments have (a yellow absorbs blue and is clear
+// from about 520 nm); pale ones stay gently curved. Three unknowns for
+// three channels, solved by damped Newton steps.
+export function upsampleSigmoid(rgb) {
+  const t = BANDS.map(nm => (nm - 550) / 150);
+  const spec = c => t.map(x => { const z = c[0] * x * x + c[1] * x + c[2]; return 1 / (1 + Math.exp(-z)); });
+  const target = rgb.map(v => Math.min(Math.max(v, 1e-4), 0.9999));
+  let c = [0, 0, 0];
+  for (let it = 0; it < 200; it++) {
+    const f = spectrumToLinear(spec(c)).map((v, k) => v - target[k]);
+    if (Math.hypot(...f) < 1e-7) break;
+    const J = [0, 1, 2].map(j => { const d = c.slice(); d[j] += 1e-4; return spectrumToLinear(spec(d)).map((v, k) => (v - target[k] - f[k]) / 1e-4); });
+    // Solve J^T-layout (J[j][k] = df_k/dc_j) with a little damping.
+    const A = [0, 1, 2].map(k => [0, 1, 2].map(j => J[j][k] + (j === k ? 1e-6 : 0)));
+    const step = solve(A, f.map(v => -v));
+    const len = Math.hypot(...step), scale = len > 5 ? 5 / len : 1;
+    c = c.map((v, j) => v + step[j] * scale);
+  }
+  return spec(c).map(v => Math.min(1, Math.max(1e-3, v)));
+}
+
 // Gaussian elimination with partial pivoting.
 function solve(A, b) {
   const n = b.length, M = A.map((r, i) => [...r, b[i]]);

@@ -39,6 +39,7 @@ try {
     if (t.startsWith('[paint]')) console.error(t.slice(8));
     else if (m.type() === 'error' && !t.includes('404')) console.error('[page]', t);
   });
+  if (process.env.PRE_JS) await page.evaluateOnNewDocument(process.env.PRE_JS);
   await page.goto(APP_URL);
   await page.waitForFunction(() => window.__sim?.open, { timeout: 20_000 });
   if (open) {
