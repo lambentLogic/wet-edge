@@ -153,7 +153,8 @@ const PANS = [
   // Painter (2026-09-26): about as bright as bismuth vanadate in glazes,
   // but a middle yellow leaning lemon (bismuth is lemon leaning middle;
   // both a little warmer than PY3). Was #E8D400 / #F2E24A, dull and green.
-  { name: 'Azo Condensation Yellow', code: 'PY128', masstone: '#F5CF0C', tint: '#FAE356', opacity: 'transparent',
+  // Van Gogh Transparent Yellow Medium chart reads #F3DC38 at strength.
+  { name: 'Azo Condensation Yellow', code: 'PY128', masstone: '#F4D81C', tint: '#F9E654', opacity: 'transparent',
     ...organic, staining: STAIN.high, mobility: 1.4 },
   // Inorganic but fine; "very inert with water" (handprint).
   // Painter (2026-09-26): lemon, a mite neon (as neon as it gets without a
