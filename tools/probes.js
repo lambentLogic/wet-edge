@@ -94,6 +94,38 @@
       return { fresh: region(20, 220), overBase: region(400, 624), rewets: r.rewets };
     },
 
+    // Workable fixative: an ultramarine wash and a Mars black stroke, dried;
+    // half the sheet is fixed (the whole sheet is sprayed, then the right
+    // half painted fresh after). Then a clean wet brush scrubs across both,
+    // and the lift brush works over both. How much came up, fixed vs not,
+    // and how long a new wash takes to soak in on each.
+    async fixative(paper = 'coldPress') {
+      const band = async (name, x0, x1) => { const a = await S.readPigment(name); let v = 0; for (let y = 300; y < 460; y++) for (let x = x0; x < x1; x++) v += a[y * W + x]; return v; };
+      await fresh(paper);
+      const paintLeftRight = async x0 => {
+        h.setBrush('French Ultramarine');
+        for (let y = 300; y <= 460; y += 20) { h.lift(); await h.paint(x0, y, x0 + 300, y, 20); }
+        h.setBrush('Mars Black');
+        h.lift(); await h.paint(x0, 380, x0 + 300, 380, 20);
+      };
+      await paintLeftRight(100);
+      await h.wait(20); await h.wait(20, { dry: true }); await h.wait(3);
+      S.fix(); await h.wait(0.1);
+      await paintLeftRight(600);
+      await h.wait(20); await h.wait(20, { dry: true }); await h.wait(3);
+      const before = { fixed: await band('Mars Black', 100, 400), free: await band('Mars Black', 600, 900) };
+      // Scrub with clean water, then lift.
+      h.setMode(1);
+      for (let y = 330; y <= 430; y += 25) { h.lift(); await h.paint(80, y, 920, y, 60); }
+      await h.wait(15); await h.wait(20, { dry: true }); await h.wait(3);
+      h.setMode(2);
+      for (let y = 360; y <= 400; y += 10) { h.lift(); await h.paint(80, y, 920, y, 60); }
+      await h.wait(3);
+      h.setMode(0);
+      const after = { fixed: await band('Mars Black', 100, 400), free: await band('Mars Black', 600, 900) };
+      return { blackLeft: { fixed: +(after.fixed / before.fixed).toFixed(2), free: +(after.free / before.free).toFixed(2) } };
+    },
+
     // Water brush: one dab of pigment, five strokes without reloading, a
     // squeeze before the fourth. Mean paint in each stroke and the brush's
     // stores after it: strokes should pale as pigment runs out, the squeeze

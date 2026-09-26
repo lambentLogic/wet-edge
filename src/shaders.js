@@ -35,7 +35,8 @@ struct Frame {
   brushId: vec4u,     // the brush's load: up to 4 pigments ...
   brushFrac: vec4f,   // ... and their fractions of the load (sum 1)
   touch: f32,         // how lightly the brush skims (0 = full contact), from the CPU
-  _t1: f32, _t2: f32, _t3: f32,
+  fixTooth: f32,      // how much a fixative spray fills the paper's tooth
+  _t2: f32, _t3: f32,
 };
 
 // Per-pigment physical properties, each relative to French ultramarine (1).
@@ -150,6 +151,22 @@ fn compactTiles(@builtin(global_invocation_id) gid: vec3u) {
 // ---------------------------------------------------------------- wet mask blur
 const BR: i32 = 8;
 
+// ---------------------------------------------------------------- fixative
+// Spraying workable fixative over the whole sheet: records when (aux.z;
+// paint that dried before then is fixed), binds whatever has settled, and
+// fills some of the paper's tooth (heights pulled toward the middle).
+@compute @workgroup_size(16, 16)
+fn fixSheet(@builtin(global_invocation_id) id: vec3u) {
+  let x = i32(id.x); let y = i32(id.y);
+  if (!inb(x, y)) { return; }
+  let i = ix(x, y);
+  aux[i].z = max(fr.time, 1e-3);
+  aux[i].x = mix(aux[i].x, 0.5, clamp(fr.fixTooth, 0.0, 1.0));
+  var st = D[i].stamp;
+  for (var k = 0; k < 4; k++) { if (st[k] >= 0.0) { st[k] = -st[k] - 1.0; } }
+  D[i].stamp = st;
+}
+
 fn wetInd(i: i32) -> f32 { return select(0.0, 1.0, Ain[i].x > p.wEps); }
 
 @compute @workgroup_size(16, 16)
@@ -158,7 +175,7 @@ fn blurH(@builtin(global_invocation_id) id: vec3u) {
   if (!inb(x, y)) { return; }
   var acc = 0.0;
   for (var k = -BR; k <= BR; k++) { acc += wetInd(ix(clamp(x + k, 0, W() - 1), y)); }
-  aux[ix(x, y)].z = acc / f32(2 * BR + 1);
+  Bout[ix(x, y)].z = acc / f32(2 * BR + 1);   // scratch (velocity leaves z unused)
 }
 
 @compute @workgroup_size(16, 16)
@@ -166,7 +183,7 @@ fn blurV(@builtin(global_invocation_id) id: vec3u) {
   let x = i32(id.x); let y = i32(id.y);
   if (!inb(x, y)) { return; }
   var acc = 0.0;
-  for (var k = -BR; k <= BR; k++) { acc += aux[ix(x, clamp(y + k, 0, H() - 1))].z; }
+  for (var k = -BR; k <= BR; k++) { acc += Bout[ix(x, clamp(y + k, 0, H() - 1))].z; }
   aux[ix(x, y)].y = acc / f32(2 * BR + 1);
 }
 
@@ -491,16 +508,19 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   // brush takes it away, in proportion to how liftable each pigment is
   // (inverse staining): Mars black and ultramarine come up readily, phthalos
   // and quinacridones barely. Pigment fixed in the stain layer stays.
+  let fixT = aux[i].z;
   if (liftK > 0.0) {
     for (var j = 0; j < 4; j++) {
       if (!dOcc[j]) { continue; }
       let omega = max(p.staining * pig[dep.id[j]].phys.y, 1e-4);
-      dep.amt[j] *= 1.0 - clamp(liftK * p.liftDry / (omega * omega), 0.0, 1.0);
+      let fixed = select(1.0, p.fixLift, isFixed(dep.stamp[j], fixT));
+      dep.amt[j] *= 1.0 - clamp(liftK * p.liftDry * fixed / (omega * omega), 0.0, 1.0);
     }
     // The stain layer lifts by its average liftability (its colour mix is
     // kept; an approximation, since what's in it has lost its identity).
     if (dep.stainK.w > 0.0) {
-      let f = 1.0 - clamp(liftK * p.liftDry * dep.stainS.w / dep.stainK.w, 0.0, 1.0);
+      let fixedS = select(1.0, p.fixLift, fixT > 0.0);
+      let f = 1.0 - clamp(liftK * p.liftDry * fixedS * dep.stainS.w / dep.stainK.w, 0.0, 1.0);
       dep.stainK *= f; dep.stainS *= f;
     }
   }
@@ -547,7 +567,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
       // Pigment that dried before this wetting began is bound by its gum
       // arabic and rewets slowly: only a fraction goes back into suspension.
       let lift = max(1.0 + (h - 1.0) * gam, 0.0) * rho / omega * p.dt;
-      let bound = select(1.0, p.rewetLift, dep.stamp[j] < 0.0);
+      let bound = select(select(1.0, p.rewetLift, dep.stamp[j] < 0.0), p.rewetLift * p.fixRewet, isFixed(dep.stamp[j], fixT));
       let up = min(dep.amt[j] * lift * bound, dep.amt[j]);
       gAmt[k] += up - down;
       dep.stamp[j] = stampMix(dep.stamp[j], dep.amt[j], down);
@@ -556,7 +576,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
       // fresh deposit, rewets slowly too.
       for (var m = 0; m < 4; m++) {
         if (m != j && dOcc[m] && dep.id[m] == id && dep.stamp[m] < 0.0) {
-          let upB = min(dep.amt[m] * lift * p.rewetLift, dep.amt[m]);
+          let upB = min(dep.amt[m] * lift * p.rewetLift * select(1.0, p.fixRewet, isFixed(dep.stamp[m], fixT)), dep.amt[m]);
           gAmt[k] += upB; dep.amt[m] -= upB;
         }
       }
@@ -573,7 +593,9 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   // paper absorbs fast and blotchily. Past 1, sized paper pushes water back up.
   let texture = mix(1.0 - aux[i].x, 0.5, clamp(p.sizing, 0.0, 1.0));
   let capI = mix(p.capacityMin, p.capacityMax, texture);
-  let drink = clamp(p.absorption * (1.0 - p.sizing) * p.dt * max(capI - s, 0.0), -s, w);
+  // Fixative seals the paper: washes over it soak in (and wick) more slowly.
+  let seal = select(1.0, 1.0 - clamp(p.fixSeal, 0.0, 1.0), fixT > 0.0);
+  let drink = clamp(p.absorption * (1.0 - p.sizing) * seal * p.dt * max(capI - s, 0.0), -s, w);
   w -= drink;
   s += drink;
 
@@ -583,7 +605,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   // much wicking out from under a wash's edge drew water (and pigment)
   // edgeward all through drying, leaving a dark frame and a crisp inner
   // tide line.
-  let wickRate = p.capillarySpread * (1.0 - clamp(p.sizing, 0.0, 1.0));
+  let wickRate = p.capillarySpread * (1.0 - clamp(p.sizing, 0.0, 1.0)) * seal;
   var ds = 0.0;
   let sMin = p.capillaryMin;
   if (aL.w > sMin || a.w > sMin) { ds += aL.w - a.w; }
@@ -636,6 +658,10 @@ fn stampMix(stamp: f32, amt: f32, added: f32) -> f32 {
 }
 
 fn stampTime(stamp: f32) -> f32 { return select(stamp, -stamp - 1.0, stamp < 0.0); }
+
+// Is a deposited component under fixative (bound, and dried before the
+// cell was last fixed at time fixT; 0 = never fixed)?
+fn isFixed(stamp: f32, fixT: f32) -> bool { return fixT > 0.0 && stamp < 0.0 && stampTime(stamp) < fixT; }
 
 // Put pigment into a cell's deposited components: same pigment, else an
 // empty component, else the permanent stain layer.
@@ -837,7 +863,7 @@ export const renderWGSL = (MAXP = MAX_PIGMENTS) => /* wgsl */ `
 struct R {
   W: u32, H: u32, thickness: f32, wetDarken: f32,
   paperColor: vec4f,
-  paperShade: f32, suspendedWeight: f32, _a: f32, _b: f32,
+  paperShade: f32, suspendedWeight: f32, fixDeepen: f32, _b: f32,
 };
 struct Pigment { K: vec4f, S: vec4f, phys: vec4f, phys2: vec4f };
 struct Comp4 { id: vec4u, amt: vec4f };
@@ -891,7 +917,13 @@ fn fs(@builtin(position) fc: vec4f) -> @location(0) vec4f {
   let g = G[i];
   let dep = D[i];
   var col = Rg;
-  col = overLayer(col, dep.stainK.rgb * r.thickness, dep.stainS.rgb * r.thickness, dep.stainK.w);
+  // Fixative soaks into dried paint and cuts the scattering at its surface
+  // (what makes watercolour dry lighter): fixed layers look deeper.
+  let fixT = aux[i].z;
+  let deepK = 1.0 + 0.5 * r.fixDeepen;
+  let deepS = 1.0 - r.fixDeepen;
+  let stainFix = select(1.0, 0.0, fixT > 0.0);
+  col = overLayer(col, dep.stainK.rgb * r.thickness * mix(deepK, 1.0, stainFix), dep.stainS.rgb * r.thickness * mix(deepS, 1.0, stainFix), dep.stainK.w);
 
   // Deposited components, oldest first (a stamp's sign marks bound paint;
   // the time is its magnitude, see stampTime in the sim).
@@ -908,7 +940,8 @@ fn fs(@builtin(position) fc: vec4f) -> @location(0) vec4f {
       if (!done[k] && dep.amt[k] > 0.0 && st[k] - st[first] <= LAYER_GAP) {
         done[k] = true;
         let ad = dep.amt[k] * r.thickness;
-        Kx += pig[dep.id[k]].K.rgb * ad; Sx += pig[dep.id[k]].S.rgb * ad; total += dep.amt[k];
+        let fx = fixT > 0.0 && dep.stamp[k] < 0.0 && st[k] < fixT;
+        Kx += pig[dep.id[k]].K.rgb * ad * select(1.0, deepK, fx); Sx += pig[dep.id[k]].S.rgb * ad * select(1.0, deepS, fx); total += dep.amt[k];
       }
     }
     col = overLayer(col, Kx, Sx, total);

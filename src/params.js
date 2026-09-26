@@ -50,6 +50,15 @@ export const PARAMS = [
   { key: 'granulation', v: 0.6,  min: 0, max: 2,   group: 'Pigment', target: 'sim' },
   { key: 'rewetLift',   v: 0.002, min: 0, max: 1,   group: 'Pigment', target: 'sim', label: 'dried paint rewets' },
   { key: 'bindTime',    v: 1,     min: 0, max: 10,  group: 'Pigment', target: 'sim', label: 'gum sets (s)' },
+  // Workable fixative (like SpectraFix: casein in alcohol). Sprayed over
+  // dry paint, it commits it (it won't rewet or lift much), partly reverses
+  // the lightening paint shows as it dries, fills some of the paper's tooth
+  // and seals it so later washes soak in more slowly.
+  { key: 'fixRewet',    v: 0,    min: 0, max: 1,   group: 'Fixative', target: 'sim', label: 'fixed paint rewets (x dried)' },
+  { key: 'fixLift',     v: 0.1,  min: 0, max: 1,   group: 'Fixative', target: 'sim', label: 'fixed paint lifts (x unfixed)' },
+  { key: 'fixSeal',     v: 0.6,  min: 0, max: 1,   group: 'Fixative', target: 'sim', label: 'seals the paper' },
+  { key: 'fixTooth',    v: 0.25,  min: 0, max: 1,   group: 'Fixative', target: 'js',  label: 'fills the tooth' },
+  { key: 'fixDeepen',   v: 0.25, min: 0, max: 1,   group: 'Fixative', target: 'render', label: 'deepens fixed paint' },
   { key: 'flocculation', v: 1,   min: 0, max: 3,   group: 'Pigment', target: 'sim', label: 'flocculation' },
   { key: 'flocDrift',   v: 0.5,    min: 0, max: 20,  group: 'Pigment', target: 'sim', label: 'floc clumping speed' },
   { key: 'flocScale',   v: 1.2,  min: 0.2, max: 5, group: 'Pigment', target: 'sim', label: 'floc size (mm)' },

@@ -23,6 +23,7 @@ const state = {
   simTime: 0,       // simulated seconds (deposit timestamps)
   lastEdit: -Infinity, // when the painting was last touched (for autosave)
   ground: null,     // render over this colour instead of the paper (layer export)
+  fixPending: false, // spray fixative over the sheet on the next step
   magnets: [],      // { shape, x, y, angle, moment } in grid cells (see magnets.js)
   magnetShape: 'disc',
   magDirty: true,   // magnet field needs recomputing
@@ -125,7 +126,7 @@ async function init() {
     blurH: compute('blurH'), blurV: compute('blurV'),
     velocity: compute('velocity'), transport: compute('transport'),
     markTiles: compute('markTiles'), compactTiles: compute('compactTiles'),
-    magField: compute('magField'),
+    magField: compute('magField'), fixSheet: compute('fixSheet'),
   };
 
   // Parity k reads A[k], B[k], G[k] and writes A[1-k], B[1-k], G[1-k].
@@ -232,6 +233,7 @@ async function init() {
     frameF32[14] = values.brushCapacity > 0 ? state.reservoir : 1;
     frameF32[15] = concMul();
     if (!brush) { frameF32[13] = values.brushRadius; frameF32[24] = 0; }
+    frameF32[25] = values.fixTooth;
     state.brushActive = !!brush;
     // Brush load: pigment ids at u32 16..19, fractions at f32 20..23.
     const total = state.brush.reduce((t, b) => t + b.frac, 0) || 1;
@@ -246,6 +248,7 @@ async function init() {
     renderF32[2] = values.thickness; renderF32[3] = values.wetDarken;
     renderF32.set([...(state.ground ?? TONES[state.tone].color ?? PAPERS[state.paper].color), 1], 4);
     renderF32[8] = state.ground ? 0 : values.paperShade; renderF32[9] = values.suspendedWeight;
+    renderF32[10] = values.fixDeepen;
     device.queue.writeBuffer(renderBuf, 0, renderData);
   }
 
@@ -322,6 +325,7 @@ async function init() {
       pass.setPipeline(pipes.magField); pass.dispatchWorkgroups(gx, gy);
       state.magDirty = false;
     }
+    if (state.fixPending) { pass.setPipeline(pipes.fixSheet); pass.dispatchWorkgroups(gx, gy); state.fixPending = false; }
     pass.setPipeline(pipes.markTiles); pass.dispatchWorkgroups(gx, gy);
     pass.setPipeline(pipes.compactTiles); pass.dispatchWorkgroups(Math.ceil(TX * TY / 64));
     pass.end();
@@ -533,6 +537,8 @@ async function init() {
     requestAnimationFrame(step);
   });
   window.__sim.setDrying = on => { state.drying = on; document.getElementById('dry').classList.toggle('on', on); };
+  // Spray workable fixative over the whole sheet (applied on the next step).
+  window.__sim.fix = () => { state.fixPending = true; state.lastEdit = performance.now(); };
 
   // ---- save / open
   async function readBuffer(src, size, offset = 0) {
@@ -595,7 +601,8 @@ async function init() {
   // The full paint state: water, paper dampness, every pigment component,
   // deposit timestamps, the paper itself, magnets and knobs, so a painting can
   // be reopened (and rewetted) later. Gzipped; mostly zeros compress well.
-  const STATE_VERSION = 1;
+  // Version 2: aux.z holds when each cell was last fixed (it was scratch).
+  const STATE_VERSION = 2;
   async function paintingBlob() {
     const parts = {
       A: await readBuffer(A[parity], N * 16),
@@ -659,6 +666,7 @@ async function init() {
     let off = 4 + len;
     const take = n => { const b = raw.slice(off, off + n); off += n; return b; };
     const a = take(meta.sizes.A), g = take(meta.sizes.G), d = take(meta.sizes.D), ax = take(meta.sizes.aux);
+    if ((meta.version ?? 1) < 2) { const f = new Float32Array(ax); for (let c = 0; c < N; c++) f[c * 4 + 2] = 0; }
     // Pigment ids refer to the library at save time; remap by name.
     const remap = meta.pigments.map(name => Math.max(PIGMENTS.findIndex(pg => pg.name === name), 0));
     const remapIds = (buf, stride, idOffset) => {
@@ -1057,6 +1065,7 @@ function buildUI({ clear, newPaper }) {
   modeBtns.forEach(b => b.addEventListener('click', () => setMode(+b.dataset.mode)));
   setMode(0);
 
+  document.getElementById('fix').addEventListener('click', () => window.__sim.fix());
   const dryBtn = document.getElementById('dry');
   const setDry = on => { state.drying = on; dryBtn.classList.toggle('on', on); };
   dryBtn.addEventListener('pointerdown', () => setDry(true));
