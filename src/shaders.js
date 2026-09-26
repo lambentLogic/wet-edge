@@ -70,16 +70,35 @@ fn unpackG(g: GP) -> Comp4 {
   return Comp4(vec4u(g.ids & 255u, (g.ids >> 8u) & 255u, (g.ids >> 16u) & 255u, g.ids >> 24u),
                vec4f(g.amt[0], g.amt[1], g.amt[2], g.amt[3]));
 }
-// stainK.w = stained amount; stamp = when each component last received (negative: bound, see stampMix)
-// pigment, so the renderer can stack washes in the order they dried.
-struct Dep { id: vec4u, amt: vec4f, stainK: vec4f, stainS: vec4f, stamp: vec4f };
+// A cell's deposited (settled) components, up to ND of them, plus the
+// anonymous stain layer. stainK.w = stained amount; stamp = when each
+// component last received pigment, so the renderer can stack washes in the
+// order they dried (negative: bound, see stampMix). Eight components, so a
+// passage worked with many pigments rarely runs out of room (with four,
+// overflow went into the stain layer every step and built dark lines).
+const ND: i32 = 8;
+struct Dep { id: array<u32, 8>, amt: array<f32, 8>, stamp: array<f32, 8>, stainK: vec4f, stainS: vec4f };
+// Stored form (112 bytes): the ids packed as bytes into two u32.
+struct DS { stainK: vec4f, stainS: vec4f, ids: vec2u, amt: array<f32, 8>, stamp: array<f32, 8> };
+fn unpackD(d: DS) -> Dep {
+  var o: Dep;
+  o.stainK = d.stainK; o.stainS = d.stainS; o.amt = d.amt; o.stamp = d.stamp;
+  for (var k = 0; k < 8; k++) { o.id[k] = (d.ids[k / 4] >> (8u * u32(k % 4))) & 255u; }
+  return o;
+}
+fn packIds(d: Dep) -> vec2u {
+  var w = vec2u(0u);
+  for (var k = 0; k < 8; k++) { w[k / 4] |= (d.id[k] & 255u) << (8u * u32(k % 4)); }
+  return w;
+}
+fn sumD(a: array<f32, 8>) -> f32 { var t = 0.0; for (var k = 0; k < 8; k++) { t += a[k]; } return t; }
 @group(0) @binding(9) var<storage, read> Gin: array<GP>;
 @group(0) @binding(10) var<storage, read_write> Gout: array<GP>;
 fn packG(c: Comp4) -> GP {
   return GP((c.id.x & 255u) | ((c.id.y & 255u) << 8u) | ((c.id.z & 255u) << 16u) | ((c.id.w & 255u) << 24u),
             array<f32, 4>(c.amt.x, c.amt.y, c.amt.z, c.amt.w));
 }
-@group(0) @binding(11) var<storage, read_write> D: array<Dep>;
+@group(0) @binding(11) var<storage, read_write> D: array<DS>;
 @group(0) @binding(12) var<uniform> pig: array<Pigment, ${MAXP}>;
 // Magnets under the paper, as magnetic charges (the pole model): each magnet
 // shape is built on the CPU from horizontal line-segment charges (a point
@@ -182,7 +201,7 @@ fn fixSheet(@builtin(global_invocation_id) id: vec3u) {
   aux[i].z = max(fr.time, 1e-3);
   aux[i].x = mix(aux[i].x, 0.5, clamp(fr.fixTooth, 0.0, 1.0));
   var st = D[i].stamp;
-  for (var k = 0; k < 4; k++) { if (st[k] >= 0.0) { st[k] = -st[k] - 1.0; } }
+  for (var k = 0; k < ND; k++) { if (st[k] >= 0.0) { st[k] = -st[k] - 1.0; } }
   D[i].stamp = st;
 }
 
@@ -394,7 +413,8 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     let nb = (aL + aR + aU + aD) * 1e-9 + vec4f(uR + uL + vD + vU) * 1e-9 + vec4f(au.w * 1e-12);
     let ga = gi.amt + (gL.amt + gR.amt + gU.amt + gD.amt) * 1e-9;
     Gout[i] = packG(Comp4(gi.id ^ ((gL.id ^ gR.id ^ gU.id ^ gD.id) & vec4u(0u)), ga));
-    D[i].amt = dep0.amt + vec4f(dep0.stainK.w * 1e-12);
+    var am = dep0.amt; am[0] += dep0.stainK.w * 1e-12;
+    D[i].amt = am;
     D[i].stamp = dep0.stamp;
     Aout[i] = a + nb;
     return;
@@ -522,34 +542,47 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   }
   if (wetStart != aux[i].w) { aux[i].w = wetStart; }
 
-  // Keep the 4 largest candidates in suspension; the rest settle out.
+  var dep = unpackD(D[i]);
+  let depIn = dep;
+
+  // Keep 4 candidates in suspension; the rest settle out. With more than
+  // four, rank each by all of it that's free here: suspended plus its unset
+  // deposit. Ranked by suspended amount alone, a pigment arriving as the
+  // fifth settled on arrival and could never be lifted again (the four
+  // slots stayed taken), so neighbours kept feeding it in and it piled up
+  // into dark lines. This way a growing pile wins a slot and lifts.
+  var rank: array<f32, 8>;
+  for (var j = 0u; j < cn; j++) {
+    var r = camt[j];
+    if (cn > 4u) { for (var k = 0; k < ND; k++) { if (dep.id[k] == cid[j] && dep.amt[k] > 0.0 && dep.stamp[k] >= 0.0) { r += dep.amt[k]; } } }
+    rank[j] = r;
+  }
   var gId = vec4u(0u); var gAmt = vec4f(0.0); var gOcc = vec4<bool>(false);
   var taken: array<bool, 8>;
   for (var slot = 0; slot < 4; slot++) {
-    var best = -1; var bestA = 0.0;
+    var best = -1; var bestR = 0.0;
     for (var j = 0u; j < cn; j++) {
-      if (!taken[j] && camt[j] > bestA) { best = i32(j); bestA = camt[j]; }
+      if (!taken[j] && camt[j] > 0.0 && rank[j] > bestR) { best = i32(j); bestR = rank[j]; }
     }
     if (best < 0) { break; }
     taken[best] = true;
-    gId[slot] = cid[best]; gAmt[slot] = bestA; gOcc[slot] = true;
+    gId[slot] = cid[best]; gAmt[slot] = camt[best]; gOcc[slot] = true;
   }
 
-  var dep = D[i];
-  let depIn = dep;
-  var dOcc = vec4<bool>(dep.amt.x > 0.0, dep.amt.y > 0.0, dep.amt.z > 0.0, dep.amt.w > 0.0);
+  var dOcc: array<bool, 8>;
+  for (var k = 0; k < ND; k++) { dOcc[k] = dep.amt[k] > 0.0; }
   if (bindNow) {
     // The set fraction of each free deposit becomes bound, split off into
     // a spare component (if none is free, the whole deposit goes whichever
     // way most of it would). Then bound layers of the same pigment merge,
     // so the next wash has free components to settle into.
-    for (var k = 0; k < 4; k++) {
+    for (var k = 0; k < ND; k++) {
       if (!dOcc[k] || dep.stamp[k] < 0.0) { continue; }
       let boundStamp = -dep.stamp[k] - 1.0;
       if (setFrac >= 0.999 || dep.amt[k] * (1.0 - setFrac) < 1e-5) { dep.stamp[k] = boundStamp; continue; }
       if (dep.amt[k] * setFrac < 1e-5) { continue; }
       var spare = -1;
-      for (var m = 0; m < 4; m++) { if (!dOcc[m] && spare < 0) { spare = m; } }
+      for (var m = 0; m < ND; m++) { if (!dOcc[m] && spare < 0) { spare = m; } }
       if (spare >= 0) {
         dOcc[spare] = true; dep.id[spare] = dep.id[k]; dep.stamp[spare] = boundStamp;
         dep.amt[spare] = dep.amt[k] * setFrac; dep.amt[k] *= 1.0 - setFrac;
@@ -557,8 +590,8 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
         dep.stamp[k] = boundStamp;
       }
     }
-    for (var k = 0; k < 4; k++) {
-      for (var m = k + 1; m < 4; m++) {
+    for (var k = 0; k < ND; k++) {
+      for (var m = k + 1; m < ND; m++) {
         if (dOcc[k] && dOcc[m] && dep.id[m] == dep.id[k] && dep.stamp[k] < 0.0 && dep.stamp[m] < 0.0) {
           let t = (stampTime(dep.stamp[k]) * dep.amt[k] + stampTime(dep.stamp[m]) * dep.amt[m]) / max(dep.amt[k] + dep.amt[m], 1e-12);
           dep.amt[k] += dep.amt[m]; dep.stamp[k] = -t - 1.0;
@@ -574,7 +607,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   // and quinacridones barely. Pigment fixed in the stain layer stays.
   let fixT = aux[i].z;
   if (liftK > 0.0) {
-    for (var j = 0; j < 4; j++) {
+    for (var j = 0; j < ND; j++) {
       if (!dOcc[j]) { continue; }
       let omega = max(p.staining * pig[dep.id[j]].phys.y, 1e-4);
       let fixed = select(1.0, p.fixLift, isFixed(dep.stamp[j], fixT));
@@ -594,7 +627,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
 
   // Settled pigment fills the paper's valleys, so granulation fades as a
   // wash gets dense: pale washes speckle, masstone goes flat.
-  let h = min(aux[i].x + (sum4(dep.amt) + dep.stainK.w) * p.valleyFill, 1.0);
+  let h = min(aux[i].x + (sumD(dep.amt) + dep.stainK.w) * p.valleyFill, 1.0);
 
   // Pigment adsorption / desorption (Curtis §4.5), per pigment. Valleys
   // (low h) catch more pigment when granulation is high. Unlike Curtis,
@@ -603,7 +636,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   // drying edges. Global knobs multiply each pigment's own properties.
   if (VARIANT != 3u && VARIANT != 4u && w > p.wEps) {
     // Deposited pigment can go back into suspension when there's room.
-    for (var j = 0; j < 4; j++) {
+    for (var j = 0; j < ND; j++) {
       if (!dOcc[j]) { continue; }
       var found = false;
       for (var k = 0; k < 4; k++) { if (gOcc[k] && gId[k] == dep.id[j]) { found = true; } }
@@ -645,7 +678,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
       dep.amt[j] += down - up;
       // A bound layer of the same pigment underneath, kept apart from the
       // fresh deposit, rewets slowly too.
-      for (var m = 0; m < 4; m++) {
+      for (var m = 0; m < ND; m++) {
         if (m != j && dOcc[m] && dep.id[m] == id && dep.stamp[m] < 0.0) {
           let upB = min(rewetUp(dep.amt[m], dep.stamp[m], fixT, lift, liftFree), dep.amt[m]);
           gAmt[k] += upB; dep.amt[m] -= upB;
@@ -701,7 +734,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     let am = finite(select(0.0, gAmt[k], gOcc[k] && gAmt[k] > 1e-12));
     gOut.id[k] = gId[k]; gOut.amt[k] = am;
   }
-  for (var k = 0; k < 4; k++) {
+  for (var k = 0; k < ND; k++) {
     // Components down to a trace free their slot (a near-empty one held
     // a slot and helped push other pigments out).
     dep.amt[k] = finite(select(0.0, dep.amt[k], dOcc[k] && dep.amt[k] > 1e-7));
@@ -711,11 +744,17 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   Gout[i] = packG(gOut);
   // Write back only what changed (memory traffic is the bottleneck when
   // much of the sheet is wet; amounts change every step, the rest rarely).
-  if (any(dep.amt != depIn.amt)) { D[i].amt = dep.amt; }
-  if (any(dep.stamp != depIn.stamp)) { D[i].stamp = dep.stamp; }
-  if (any(dep.id != depIn.id)) { D[i].id = dep.id; }
+  var chA = false; var chS = false; var chI = false;
+  for (var k = 0; k < ND; k++) {
+    chA = chA || dep.amt[k] != depIn.amt[k];
+    chS = chS || dep.stamp[k] != depIn.stamp[k];
+    chI = chI || dep.id[k] != depIn.id[k];
+  }
+  if (chA) { D[i].amt = dep.amt; }
+  if (chS) { D[i].stamp = dep.stamp; }
+  if (chI) { D[i].ids = packIds(dep); }
   if (any(dep.stainK != depIn.stainK) || any(dep.stainS != depIn.stainS)) { D[i].stainK = dep.stainK; D[i].stainS = dep.stainS; }
-  Aout[i] = vec4f(finite(w), sum4(gOut.amt), sum4(dep.amt) + dep.stainK.w, finite(s));
+  Aout[i] = vec4f(finite(w), sum4(gOut.amt), sumD(dep.amt) + dep.stainK.w, finite(s));
 }
 
 // A deposited component's timestamp is the amount-weighted mean time its
@@ -752,7 +791,7 @@ fn isFixed(stamp: f32, fixT: f32) -> bool { return fixT > 0.0 && stamp < 0.0 && 
 
 // Put pigment into a cell's deposited components: same pigment, else an
 // empty component, else the permanent stain layer.
-fn depositInto(dep: ptr<function, Dep>, occ: ptr<function, vec4<bool>>, id: u32, a: f32) {
+fn depositInto(dep: ptr<function, Dep>, occ: ptr<function, array<bool, 8>>, id: u32, a: f32) {
   if (!(a > 0.0)) { return; }
   let j = depSlot(dep, occ, id, false);
   if (j < 0) { stainDep(dep, id, a); return; }
@@ -780,17 +819,17 @@ fn stainDep(dep: ptr<function, Dep>, id: u32, a: f32) {
 // caller leaves the pigment in suspension; when drying down it's stained.
 // Only when drying may a pigment join its own bound layer: while wet,
 // joining a bound layer (or staining the newcomer) was a one-way sink,
-// piling pigment into dark lines and patches wherever the four slots
+// piling pigment into dark lines and patches wherever the slots
 // happened to be full.
-fn depSlot(dep: ptr<function, Dep>, occ: ptr<function, vec4<bool>>, id: u32, wet: bool) -> i32 {
-  for (var m = 0; m < 4; m++) { if ((*occ)[m] && (*dep).id[m] == id && (*dep).stamp[m] >= 0.0) { return m; } }
-  for (var m = 0; m < 4; m++) {
+fn depSlot(dep: ptr<function, Dep>, occ: ptr<function, array<bool, 8>>, id: u32, wet: bool) -> i32 {
+  for (var m = 0; m < ND; m++) { if ((*occ)[m] && (*dep).id[m] == id && (*dep).stamp[m] >= 0.0) { return m; } }
+  for (var m = 0; m < ND; m++) {
     if (!(*occ)[m]) { (*occ)[m] = true; (*dep).id[m] = id; (*dep).amt[m] = 0.0; (*dep).stamp[m] = fr.time; return m; }
   }
   // Full. Merge a pigment's set and unset parts (they're one pigment; the
   // merged part keeps the state of the larger).
-  for (var m = 0; m < 4; m++) {
-    for (var n = m + 1; n < 4; n++) {
+  for (var m = 0; m < ND; m++) {
+    for (var n = m + 1; n < ND; n++) {
       if ((*dep).id[m] == (*dep).id[n]) {
         let am = (*dep).amt[m]; let an = (*dep).amt[n];
         let t = (stampTime((*dep).stamp[m]) * am + stampTime((*dep).stamp[n]) * an) / max(am + an, 1e-12);
@@ -805,7 +844,7 @@ fn depSlot(dep: ptr<function, Dep>, occ: ptr<function, vec4<bool>>, id: u32, wet
   // Reclaim a slot that holds only a trace of an old layer (not one just
   // started this wetting, which would be stolen back and forth).
   var s = -1;
-  for (var m = 0; m < 4; m++) {
+  for (var m = 0; m < ND; m++) {
     let old = (*dep).stamp[m] < 0.0 || stampTime((*dep).stamp[m]) < fr.time - 1.0;
     if (old && (*dep).id[m] != id && (*dep).amt[m] < 1e-3 && (s < 0 || (*dep).amt[m] < (*dep).amt[s])) { s = m; }
   }
@@ -815,11 +854,11 @@ fn depSlot(dep: ptr<function, Dep>, occ: ptr<function, vec4<bool>>, id: u32, wet
     return s;
   }
   // When dry: join its own bound layer. (While wet that's a sink: skip.)
-  if (!wet) { for (var m = 0; m < 4; m++) { if ((*occ)[m] && (*dep).id[m] == id) { return m; } } }
+  if (!wet) { for (var m = 0; m < ND; m++) { if ((*occ)[m] && (*dep).id[m] == id) { return m; } } }
   // Push the most staining pigment present into the stain layer, once, to
   // make room for a less staining newcomer.
   var e = 0;
-  for (var m = 1; m < 4; m++) { if (stainOmega((*dep).id[m]) > stainOmega((*dep).id[e])) { e = m; } }
+  for (var m = 1; m < ND; m++) { if (stainOmega((*dep).id[m]) > stainOmega((*dep).id[e])) { e = m; } }
   if (stainOmega((*dep).id[e]) <= stainOmega(id)) { return -1; }
   stainDep(dep, (*dep).id[e], (*dep).amt[e]);
   (*dep).id[e] = id; (*dep).amt[e] = 0.0; (*dep).stamp[e] = fr.time;
@@ -1029,12 +1068,27 @@ fn unpackG(g: GP) -> Comp4 {
   return Comp4(vec4u(g.ids & 255u, (g.ids >> 8u) & 255u, (g.ids >> 16u) & 255u, g.ids >> 24u),
                vec4f(g.amt[0], g.amt[1], g.amt[2], g.amt[3]));
 }
-struct Dep { id: vec4u, amt: vec4f, stainK: vec4f, stainS: vec4f, stamp: vec4f };
+// A cell's deposited (settled) components, up to ND of them, plus the
+// anonymous stain layer. stainK.w = stained amount; stamp = when each
+// component last received pigment, so the renderer can stack washes in the
+// order they dried (negative: bound, see stampMix). Eight components, so a
+// passage worked with many pigments rarely runs out of room (with four,
+// overflow went into the stain layer every step and built dark lines).
+const ND: i32 = 8;
+struct Dep { id: array<u32, 8>, amt: array<f32, 8>, stamp: array<f32, 8>, stainK: vec4f, stainS: vec4f };
+// Stored form (112 bytes, see the sim): the ids packed as bytes into two u32.
+struct DS { stainK: vec4f, stainS: vec4f, ids: vec2u, amt: array<f32, 8>, stamp: array<f32, 8> };
+fn unpackD(d: DS) -> Dep {
+  var o: Dep;
+  o.stainK = d.stainK; o.stainS = d.stainS; o.amt = d.amt; o.stamp = d.stamp;
+  for (var k = 0; k < 8; k++) { o.id[k] = (d.ids[k / 4] >> (8u * u32(k % 4))) & 255u; }
+  return o;
+}
 @group(0) @binding(0) var<uniform> r: R;
 @group(0) @binding(1) var<storage, read> A: array<vec4f>;
 @group(0) @binding(2) var<storage, read> aux: array<vec4f>;
 @group(0) @binding(3) var<storage, read> G: array<GP>;
-@group(0) @binding(4) var<storage, read> D: array<Dep>;
+@group(0) @binding(4) var<storage, read> D: array<DS>;
 @group(0) @binding(5) var<uniform> pig: array<Pigment, ${MAXP}>;
 // Spectral table, in vec4 chunks of 4 bands (16 bands, 400-700 nm):
 // pigment k's K at [k*8 .. k*8+3], S at [k*8+4 .. k*8+7]; then the ground
@@ -1089,7 +1143,7 @@ fn srgbEncode(v: vec3f) -> vec3f {
 // spectrum) rather than per RGB channel.
 fn spectralColour(i: u32, wet: f32, h: f32) -> vec4f {
   let g = unpackG(G[i]);
-  let dep = D[i];
+  let dep = unpackD(D[i]);
   let fixT = aux[i].z;
   let deepK = 1.0 + 0.5 * r.fixDeepen;
   let deepS = 1.0 - r.fixDeepen;
@@ -1109,16 +1163,17 @@ fn spectralColour(i: u32, wet: f32, h: f32) -> vec4f {
     }
   }
 
-  let st = vec4f(select(dep.stamp, -dep.stamp - vec4f(1.0), dep.stamp < vec4f(0.0)));
-  var done = vec4<bool>(false);
-  for (var n = 0; n < 4; n++) {
+  var st: array<f32, 8>;
+  for (var k = 0; k < ND; k++) { st[k] = select(dep.stamp[k], -dep.stamp[k] - 1.0, dep.stamp[k] < 0.0); }
+  var done: array<bool, 8>;
+  for (var n = 0; n < ND; n++) {
     var first = -1;
-    for (var k = 0; k < 4; k++) {
+    for (var k = 0; k < ND; k++) {
       if (!done[k] && dep.amt[k] > 0.0 && (first < 0 || st[k] < st[first])) { first = k; }
     }
     if (first < 0) { break; }
     var Kx: array<vec4f, 4>; var Sx: array<vec4f, 4>; var total = 0.0;
-    for (var k = 0; k < 4; k++) {
+    for (var k = 0; k < ND; k++) {
       if (!done[k] && dep.amt[k] > 0.0 && st[k] - st[first] <= LAYER_GAP) {
         done[k] = true;
         let fx = fixT > 0.0 && dep.stamp[k] < 0.0 && st[k] < fixT;
@@ -1175,7 +1230,7 @@ fn fs(@builtin(position) fc: vec4f) -> @location(0) vec4f {
   // and mixes), then the wet suspended pigment on top. So gouache over dry
   // paint covers it, while gouache mixed into wet paint makes a tint.
   let g = unpackG(G[i]);
-  let dep = D[i];
+  let dep = unpackD(D[i]);
   var col = Rg;
   // Fixative soaks into dried paint and cuts the scattering at its surface
   // (what makes watercolour dry lighter): fixed layers look deeper.
@@ -1187,16 +1242,17 @@ fn fs(@builtin(position) fc: vec4f) -> @location(0) vec4f {
 
   // Deposited components, oldest first (a stamp's sign marks bound paint;
   // the time is its magnitude, see stampTime in the sim).
-  let st = vec4f(select(dep.stamp, -dep.stamp - vec4f(1.0), dep.stamp < vec4f(0.0)));
-  var done = vec4<bool>(false);
-  for (var n = 0; n < 4; n++) {
+  var st: array<f32, 8>;
+  for (var k = 0; k < ND; k++) { st[k] = select(dep.stamp[k], -dep.stamp[k] - 1.0, dep.stamp[k] < 0.0); }
+  var done: array<bool, 8>;
+  for (var n = 0; n < ND; n++) {
     var first = -1;
-    for (var k = 0; k < 4; k++) {
+    for (var k = 0; k < ND; k++) {
       if (!done[k] && dep.amt[k] > 0.0 && (first < 0 || st[k] < st[first])) { first = k; }
     }
     if (first < 0) { break; }
     var Kx = vec3f(0.0); var Sx = vec3f(0.0); var total = 0.0;
-    for (var k = 0; k < 4; k++) {
+    for (var k = 0; k < ND; k++) {
       if (!done[k] && dep.amt[k] > 0.0 && st[k] - st[first] <= LAYER_GAP) {
         done[k] = true;
         let ad = dep.amt[k] * r.thickness;

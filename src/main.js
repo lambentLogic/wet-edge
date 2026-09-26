@@ -15,6 +15,25 @@ const SPEC_FLOATS = MAX_PIGMENTS * 32 + NB + 6 * NB;
 // shaders.js): four 8-bit pigment ids in one u32, then four f32 amounts.
 const GB = 20;
 const gId = (gu, c, k) => (gu[c * 5] >>> (8 * k)) & 255;
+// Deposits (D): bytes per cell, stored packed (DS in shaders.js): stainK,
+// stainS (4 f32 each), 8 pigment ids as bytes in 2 u32, 8 f32 amounts,
+// 8 f32 stamps, padding. As floats: 0-3, 4-7, 8-9, 10-17, 18-25.
+const ND = 8, DB = 112;
+const dId = (du, c, k) => (du[c * 28 + 8 + (k >> 2)] >>> (8 * (k & 3))) & 255;
+// Older saves: id vec4u, amt, stainK, stainS, stamp (vec4 each, 80 bytes).
+function packOldD(old) {
+  const ou = new Uint32Array(old), of = new Float32Array(old);
+  const out = new ArrayBuffer(N * DB), nu = new Uint32Array(out), nf = new Float32Array(out);
+  for (let c = 0; c < N; c++) {
+    const o = c * 20, n = c * 28;
+    for (let k = 0; k < 4; k++) {
+      nf[n + k] = of[o + 8 + k]; nf[n + 4 + k] = of[o + 12 + k];
+      nf[n + 10 + k] = of[o + 4 + k]; nf[n + 18 + k] = of[o + 16 + k];
+    }
+    nu[n + 8] = ((ou[o] & 255) | ((ou[o + 1] & 255) << 8) | ((ou[o + 2] & 255) << 16) | ((ou[o + 3] & 255) << 24)) >>> 0;
+  }
+  return out;
+}
 // Older saves: 4 u32 ids then 4 f32 amounts per cell (32 bytes).
 function packOldG(old) {
   const ou = new Uint32Array(old), of = new Float32Array(old);
@@ -83,7 +102,7 @@ async function init() {
   const A = [buf(N * 16, S | CD), buf(N * 16, S | CD)];
   const B = [buf(N * 16, S | CD), buf(N * 16, S | CD)];
   const G = [buf(N * GB, S | CD), buf(N * GB, S | CD)];  // suspended components (packed, see GP in shaders.js)
-  const Dbuf = buf(N * 80, S | CD);                      // deposited components + stain + stamps
+  const Dbuf = buf(N * DB, S | CD);                      // deposited components + stain + stamps (DS in shaders.js)
   const paramBuf = buf(simParamBufferSize(), U | CD);
   const frameBuf = buf(112, U | CD);
   const renderBuf = buf(48, U | CD);
@@ -116,7 +135,7 @@ async function init() {
     // flocculation fields are relative), so identical sessions reproduce.
     state.simTime = 0;
     for (const b of G) device.queue.writeBuffer(b, 0, new Float32Array(N * GB / 4));
-    device.queue.writeBuffer(Dbuf, 0, new Float32Array(N * 20));
+    device.queue.writeBuffer(Dbuf, 0, new Float32Array(N * DB / 4));
     device.queue.writeBuffer(tilesBuf, 32, new Uint32Array(TX * TY));
   };
   newPaper();
@@ -541,12 +560,12 @@ async function init() {
   // components; pigment fixed in the anonymous stain layer isn't counted).
   window.__sim.readPigment = async name => {
     const id = PIGMENTS.findIndex(pg => pg.name === name);
-    const g = await readBuffer(G[parity], N * GB), d = await readBuffer(Dbuf, N * 80);
+    const g = await readBuffer(G[parity], N * GB), d = await readBuffer(Dbuf, N * DB);
     const gu = new Uint32Array(g), gf = new Float32Array(g), du = new Uint32Array(d), df = new Float32Array(d);
     const out = new Float32Array(N);
-    for (let c = 0; c < N; c++) for (let k = 0; k < 4; k++) {
-      if (gf[c * 5 + 1 + k] > 0 && gId(gu, c, k) === id) out[c] += gf[c * 5 + 1 + k];
-      if (df[c * 20 + 4 + k] > 0 && du[c * 20 + k] === id) out[c] += df[c * 20 + 4 + k];
+    for (let c = 0; c < N; c++) {
+      for (let k = 0; k < 4; k++) if (gf[c * 5 + 1 + k] > 0 && gId(gu, c, k) === id) out[c] += gf[c * 5 + 1 + k];
+      for (let k = 0; k < ND; k++) if (df[c * 28 + 10 + k] > 0 && dId(du, c, k) === id) out[c] += df[c * 28 + 10 + k];
     }
     return out;
   };
@@ -639,12 +658,13 @@ async function init() {
   // be reopened (and rewetted) later. Gzipped; mostly zeros compress well.
   // Version 2: aux.z holds when each cell was last fixed (it was scratch).
   // Version 3: suspended components packed (20 bytes a cell, see GP).
-  const STATE_VERSION = 3;
+  // Version 4: eight deposit components, packed (112 bytes a cell, see DS).
+  const STATE_VERSION = 4;
   async function paintingBlob() {
     const parts = {
       A: await readBuffer(A[parity], N * 16),
       G: await readBuffer(G[parity], N * GB),
-      D: await readBuffer(Dbuf, N * 80),
+      D: await readBuffer(Dbuf, N * DB),
       aux: await readBuffer(auxBuf, N * 16),
     };
     const meta = {
@@ -702,17 +722,10 @@ async function init() {
     if (meta.W !== W || meta.H !== H) throw new Error(`painting is ${meta.W}x${meta.H}, canvas is ${W}x${H}`);
     let off = 4 + len;
     const take = n => { const b = raw.slice(off, off + n); off += n; return b; };
-    const a = take(meta.sizes.A); let g = take(meta.sizes.G); const d = take(meta.sizes.D), ax = take(meta.sizes.aux);
+    const a = take(meta.sizes.A); let g = take(meta.sizes.G), d = take(meta.sizes.D); const ax = take(meta.sizes.aux);
     if ((meta.version ?? 1) < 2) { const f = new Float32Array(ax); for (let c = 0; c < N; c++) f[c * 4 + 2] = 0; }
     // Pigment ids refer to the library at save time; remap by name.
     const remap = meta.pigments.map(name => Math.max(PIGMENTS.findIndex(pg => pg.name === name), 0));
-    const remapIds = (buf, stride, idOffset) => {
-      const u = new Uint32Array(buf), f = new Float32Array(buf);
-      for (let c = 0; c < N; c++) for (let k = 0; k < 4; k++) {
-        const i = c * stride + idOffset + k;
-        if (f[i + 4] > 0) u[i] = remap[u[i]] ?? 0;
-      }
-    };
     // Version 3 packs G (see GP); older saves hold 32-byte components.
     if ((meta.version ?? 1) < 3) g = packOldG(g);
     const gu = new Uint32Array(g), gf = new Float32Array(g);
@@ -721,7 +734,15 @@ async function init() {
       for (let k = 0; k < 4; k++) ids |= ((gf[c * 5 + 1 + k] > 0 ? remap[gId(gu, c, k)] ?? 0 : 0) & 255) << (8 * k);
       gu[c * 5] = ids >>> 0;
     }
-    remapIds(d, 20, 0);
+    // Version 4 has eight packed deposit components (see DS); older saves
+    // hold four, unpacked (80 bytes a cell).
+    if ((meta.version ?? 1) < 4) d = packOldD(d);
+    const du = new Uint32Array(d), df = new Float32Array(d);
+    for (let c = 0; c < N; c++) {
+      const w = [0, 0];
+      for (let k = 0; k < ND; k++) w[k >> 2] |= ((df[c * 28 + 10 + k] > 0 ? remap[dId(du, c, k)] ?? 0 : 0) & 255) << (8 * (k & 3));
+      du[c * 28 + 8] = w[0] >>> 0; du[c * 28 + 9] = w[1] >>> 0;
+    }
     for (const b of A) device.queue.writeBuffer(b, 0, a);
     for (const b of G) device.queue.writeBuffer(b, 0, g);
     for (const b of B) device.queue.writeBuffer(b, 0, new Float32Array(N * 4));
@@ -750,7 +771,7 @@ async function init() {
       const out = rb.getMappedRange().slice(0); rb.destroy(); return out;
     };
     const a = new Float32Array(await grab(A[parity], 16));
-    const gB = await grab(G[parity], GB), dB = await grab(Dbuf, 80);
+    const gB = await grab(G[parity], GB), dB = await grab(Dbuf, DB);
     const gu = new Uint32Array(gB), gf = new Float32Array(gB), du = new Uint32Array(dB), df = new Float32Array(dB);
     let n = 0, water = 0, damp = 0; const wet = {}, dry = {};
     for (let yy = y0; yy <= y1; yy++) for (let xx = Math.max(0, Math.floor(x - r)); xx <= Math.min(W - 1, Math.ceil(x + r)); xx++) {
@@ -759,7 +780,9 @@ async function init() {
       water += a[c * 4]; damp += a[c * 4 + 3];
       for (let k = 0; k < 4; k++) {
         if (gf[c * 5 + 1 + k] > 0) { const nm = PIGMENTS[gId(gu, c, k)]?.name; wet[nm] = (wet[nm] ?? 0) + gf[c * 5 + 1 + k]; }
-        if (df[c * 20 + 4 + k] > 0) { const nm = PIGMENTS[du[c * 20 + k]]?.name; dry[nm] = (dry[nm] ?? 0) + df[c * 20 + 4 + k]; }
+      }
+      for (let k = 0; k < ND; k++) {
+        if (df[c * 28 + 10 + k] > 0) { const nm = PIGMENTS[dId(du, c, k)]?.name; dry[nm] = (dry[nm] ?? 0) + df[c * 28 + 10 + k]; }
       }
     }
     const avg = o => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, +(v / n).toFixed(4)]));
@@ -768,8 +791,8 @@ async function init() {
   // Debug hook: everything stored for one cell.
   window.__sim.cell = async (x, y) => {
     const c = y * W + x, f = async (buf, n) => new Float32Array(await readBuffer(buf, n * 4, c * n * 4));
-    const d = await f(Dbuf, 20), du = new Uint32Array(d.buffer);
-    return { A: [...await f(A[parity], 4)], aux: [...await f(auxBuf, 4)], dep: [0, 1, 2, 3].filter(k => d[4 + k] > 0).map(k => ({ pig: PIGMENTS[du[k]]?.name, amt: d[4 + k], stamp: d[16 + k] })), time: state.simTime };
+    const d = await f(Dbuf, DB / 4), du = new Uint32Array(d.buffer);
+    return { A: [...await f(A[parity], 4)], aux: [...await f(auxBuf, 4)], stain: d[3], dep: [...Array(ND).keys()].filter(k => d[10 + k] > 0).map(k => ({ pig: PIGMENTS[dId(du, 0, k)]?.name, amt: d[10 + k], stamp: d[18 + k] })), time: state.simTime };
   };
   window.__sim.open = blob => openPainting(blob);
   // SHA-256 of each state buffer, to check that an optimisation leaves the
@@ -778,7 +801,7 @@ async function init() {
     const hex = async buf => [...new Uint8Array(await crypto.subtle.digest('SHA-256', buf))].slice(0, 8).map(b => b.toString(16).padStart(2, '0')).join('');
     return {
       A: await hex(await readBuffer(A[parity], N * 16)), G: await hex(await readBuffer(G[parity], N * GB)),
-      D: await hex(await readBuffer(Dbuf, N * 80)), aux: await hex(await readBuffer(auxBuf, N * 16)),
+      D: await hex(await readBuffer(Dbuf, N * DB)), aux: await hex(await readBuffer(auxBuf, N * 16)),
     };
   };
   window.__sim.paintingBlob = paintingBlob;
