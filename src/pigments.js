@@ -22,6 +22,8 @@
 //                (phthalos push through a wash; "inert" pigments stay put).
 //   wick         how much the paper's capillary flow carries past the wet
 //                edge (the soft halo staining organics leave).
+//   load         pigment carried per brushful relative to watercolour (1):
+//                gouache is paint at a much higher pigment-to-water ratio.
 //   magnetic     magnetic susceptibility relative to Mars black (magnetite);
 //                0 for everything else. Not used by the physics yet.
 
@@ -157,8 +159,10 @@ const PANS = [
   // A dropped brushload displaces pigment in a moist wash (DS).
   { name: 'Titanium Buff', code: 'PW6:1', masstone: '#D9C9A8', tint: null, opacity: 'semiopaque',
     ...mineral, density: 1.2, staining: STAIN.low, granulation: GRAN.moderate, mobility: 1 },
+  // Gouache: covers dark paint as a near-white line at a working load
+  // (painter's test card), so it carries 3x the pigment per brushful.
   { name: 'White Gouache', code: 'PW6', masstone: '#F7F5F0', tint: null, opacity: 'opaque',
-    ...mineral, density: 1.2, staining: STAIN.low, granulation: GRAN.none, flocculation: 0 },
+    ...mineral, density: 1.2, staining: STAIN.low, granulation: GRAN.none, flocculation: 0, load: 3 },
   // Pearlescent mica. Really specular (angle-dependent flakes); rendered for
   // now as an opaque gold scatterer. See the flake layer on the roadmap.
   { name: 'Arabic Gold (Coliro)', code: 'mica', masstone: '#C9A24A', tint: null, opacity: 'opaque',

@@ -35,7 +35,7 @@ struct Frame {
 
 // Per-pigment physical properties, each relative to French ultramarine (1).
 //   phys  = (density, staining, granulation, flocculation)
-//   phys2 = (mobility, wick, -, -)
+//   phys2 = (mobility, wick, load, -)  load: pigment per brushful (gouache ~3)
 struct Pigment { K: vec4f, S: vec4f, phys: vec4f, phys2: vec4f };
 
 @group(0) @binding(0) var<uniform> p: Params;
@@ -372,7 +372,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
         let id = fr.brushId[b];
         let ci = candIndex(id);
         let cur = select(0.0, camt[max(ci, 0)], ci >= 0);
-        let conc = p.brushPigment * frac;
+        let conc = p.brushPigment * frac * max(pig[id].phys2.z, 0.0);
         let c0 = select(0.0, cur / w, w > p.wEps);
         let next = max(cur, mix(cur, p.brushWater * conc, k)) + charge * max(conc - c0, 0.0);
         addCand(id, next - cur);

@@ -141,7 +141,7 @@ async function init() {
   PIGMENTS.slice(0, MAX_PIGMENTS).forEach((pg, k) => {
     pigData.set([...pg.K, 0, ...pg.S, 0,
       pg.density, pg.staining, pg.granulation, pg.flocculation,
-      pg.mobility, pg.wick, 0, 0], k * 16);
+      pg.mobility, pg.wick, pg.load ?? 1, 0], k * 16);
   });
   device.queue.writeBuffer(pigBuf, 0, pigData);
   const renderU32 = new Uint32Array(renderData), renderF32 = new Float32Array(renderData);
