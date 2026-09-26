@@ -22,6 +22,7 @@ const state = {
   headless: false,
   simTime: 0,       // simulated seconds (deposit timestamps)
   lastEdit: -Infinity, // when the painting was last touched (for autosave)
+  ground: null,     // render over this colour instead of the paper (layer export)
   magnets: [],      // { shape, x, y, angle, moment } in grid cells (see magnets.js)
   magnetShape: 'disc',
   magDirty: true,   // magnet field needs recomputing
@@ -243,8 +244,8 @@ async function init() {
 
     renderU32[0] = W; renderU32[1] = H;
     renderF32[2] = values.thickness; renderF32[3] = values.wetDarken;
-    renderF32.set([...(TONES[state.tone].color ?? PAPERS[state.paper].color), 1], 4);
-    renderF32[8] = values.paperShade; renderF32[9] = values.suspendedWeight;
+    renderF32.set([...(state.ground ?? TONES[state.tone].color ?? PAPERS[state.paper].color), 1], 4);
+    renderF32[8] = state.ground ? 0 : values.paperShade; renderF32[9] = values.suspendedWeight;
     device.queue.writeBuffer(renderBuf, 0, renderData);
   }
 
@@ -557,6 +558,40 @@ async function init() {
     download(blob, `watercolor-${stamp()}.png`);
   }
 
+  // The paint alone, as two layers to put over any ground or image. Paint
+  // over a ground reflects about body + filter * ground: transparent
+  // watercolour is mostly filter (it colours the light coming back from the
+  // paper), gouache and pearlescents add body (light they scatter back
+  // themselves). Rendering over pure white and pure black (no paper
+  // texture) recovers both: filter = white - black, body = black.
+  //   filter.png: set to Multiply (white where there's no paint)
+  //   body.png:   set to Add / Linear Dodge (black where there's no paint)
+  async function renderOver(ground) {
+    state.ground = ground;
+    try { return await new Promise(resolve => { renderNow(); canvas.toBlob(resolve, 'image/png'); }); }
+    finally { state.ground = null; renderNow(); }
+  }
+  async function layerBlobs() {
+    const pixelsOver = async ground => {
+      const c = new OffscreenCanvas(W, H), g = c.getContext('2d');
+      g.drawImage(await createImageBitmap(await renderOver(ground)), 0, 0);
+      return g.getImageData(0, 0, W, H);
+    };
+    const w = (await pixelsOver([1, 1, 1])).data, b = (await pixelsOver([0, 0, 0])).data;
+    const filter = new ImageData(W, H), f = filter.data;
+    for (let i = 0; i < f.length; i += 4) {
+      for (let c = 0; c < 3; c++) f[i + c] = Math.max(0, w[i + c] - b[i + c]);
+      f[i + 3] = 255;
+    }
+    const png = async img => { const c = new OffscreenCanvas(W, H); c.getContext('2d').putImageData(img, 0, 0); return c.convertToBlob({ type: 'image/png' }); };
+    return { filter: await png(filter), body: await png(new ImageData(b, W, H)) };
+  }
+  async function saveLayer() {
+    const { filter, body } = await layerBlobs(), t = stamp();
+    download(filter, `watercolor-${t}-filter-multiply.png`);
+    setTimeout(() => download(body, `watercolor-${t}-body-add.png`), 300);
+  }
+
   // The full paint state: water, paper dampness, every pigment component,
   // deposit timestamps, the paper itself, magnets and knobs, so a painting can
   // be reopened (and rewetted) later. Gzipped; mostly zeros compress well.
@@ -687,12 +722,15 @@ async function init() {
   window.__sim.open = blob => openPainting(blob);
   window.__sim.paintingBlob = paintingBlob;
   window.__sim.savePNG = savePNG;
+  window.__sim.layerBlobs = layerBlobs;
+  window.__sim.renderOver = renderOver;
   window.__minds = makeMinds(window.__sim);
   window.__sim.savePainting = savePainting;
 
   bindPointer(canvas);
   buildUI({ clear, newPaper });
   document.getElementById('savePNG').addEventListener('click', () => savePNG().catch(e => fail(e.message)));
+  document.getElementById('saveLayer').addEventListener('click', () => saveLayer().catch(e => fail(e.message)));
   document.getElementById('savePainting').addEventListener('click', () => savePainting().catch(e => fail(e.message)));
   // Restore: offer the autosaves, newest first.
   const restoreBtn = document.getElementById('restorePainting');

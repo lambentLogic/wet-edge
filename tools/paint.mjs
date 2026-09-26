@@ -1,7 +1,8 @@
 // Runs a painting script in a private headless Chrome and saves the result,
 // so a scripted painting doesn't need (or disturb) a visible browser tab.
 //
-//   node tools/paint.mjs script.js [--open in.wcpaint] [--save out.wcpaint] [--shot out.png]
+//   node tools/paint.mjs script.js [--open in.wcpaint] [--save out.wcpaint] [--shot out.png] [--layer prefix]
+//   (--layer writes prefix-filter-multiply.png and prefix-body-add.png)
 //
 // The script is evaluated in the page (window.__sim, window.__minds) and
 // should set window.__paintDone to a promise; its log (window.__paintLog)
@@ -16,11 +17,12 @@ const CHROME = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Conte
 const APP_URL = process.env.APP_URL ?? 'http://127.0.0.1:8765/';
 
 const args = process.argv.slice(2);
-let script = null, open = null, save = null, shot = null;
+let script = null, open = null, save = null, shot = null, layer = null;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--open') open = args[++i];
   else if (args[i] === '--save') save = args[++i];
   else if (args[i] === '--shot') shot = args[++i];
+  else if (args[i] === '--layer') layer = args[++i];
   else script = args[i];
 }
 
@@ -59,6 +61,16 @@ try {
     });
     await writeFile(save, Buffer.from(b64, 'base64'));
     console.error(`saved ${save}`);
+  }
+  if (layer) {
+    const parts = await page.evaluate(async () => {
+      const b64 = async blob => { const buf = new Uint8Array(await blob.arrayBuffer()); let s = ''; for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode(...buf.subarray(i, i + 0x8000)); return btoa(s); };
+      const { filter, body } = await window.__sim.layerBlobs();
+      return { filter: await b64(filter), body: await b64(body) };
+    });
+    await writeFile(`${layer}-filter-multiply.png`, Buffer.from(parts.filter, 'base64'));
+    await writeFile(`${layer}-body-add.png`, Buffer.from(parts.body, 'base64'));
+    console.error(`saved ${layer}-filter-multiply.png and ${layer}-body-add.png`);
   }
   if (shot) {
     await new Promise(r => setTimeout(r, 300));
