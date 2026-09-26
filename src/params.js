@@ -65,6 +65,9 @@ export const PARAMS = [
   { key: 'brushRate',     v: 0.4,  min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'load rate' },
   { key: 'brushCharge',   v: 0.1,  min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'wet-in-wet charge' },
   { key: 'chargeDuration', v: 0.1, min: 0, max: 2,  group: 'Brush', target: 'js',  label: 'charge lasts (s)' },
+  { key: 'taperMin',      v: 0.15, min: 0, max: 1,   group: 'Brush', target: 'js',  label: 'taper (width at no pressure)' },
+  { key: 'brushCapacity', v: 5000, min: 0, max: 30000, group: 'Brush', target: 'js', label: 'reservoir (0 = endless)' },
+  { key: 'dryBrushAt',    v: 0.35, min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'dry-brush below load' },
   { key: 'liftDry',       v: 0.05, min: 0, max: 2,   group: 'Brush', target: 'sim', label: 'lifts dried paint' },
   { key: 'liftStrength',  v: 0.2,  min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'lift strength' },
 

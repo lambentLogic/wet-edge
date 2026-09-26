@@ -29,7 +29,9 @@ struct Frame {
   bx0: f32, by0: f32, bx1: f32, by1: f32,
   pressure: f32, brushScale: f32, dryMul: f32, charge: f32,
   time: f32,          // simulated seconds, for deposit timestamps
-  _b: u32, _c: u32, _d: u32,
+  radius: f32,        // brush radius this frame (tapered by pressure)
+  load: f32,          // brush reservoir, 1 = freshly loaded, 0 = empty
+  _d: u32,
   brushId: vec4u,     // the brush's load: up to 4 pigments ...
   brushFrac: vec4f,   // ... and their fractions of the load (sum 1)
 };
@@ -69,6 +71,7 @@ struct Magnets { count: u32, anyMagnet: u32, _b: u32, _c: u32, q: array<vec4f, $
 
 struct Tiles {
   args: array<atomic<u32>, 4>,        // indirect dispatch (x, y, z) + pad
+  brushAcc: array<atomic<u32>, 4>,    // water, pigment the brush laid down this frame (x1e4)
   state: array<u32, ${NTILES}>,       // frames left active
   list: array<u32, ${NTILES}>,        // active tiles this frame
 };
@@ -113,7 +116,7 @@ fn markTiles(@builtin(global_invocation_id) gid: vec3u, @builtin(workgroup_id) w
   if (li == 0u) {
     var hot = atomicLoad(&tileHot);
     if (fr.brushOn == 1u) {
-      let r = p.brushRadius * 1.5 + 2.0;
+      let r = fr.radius * 1.5 + 2.0;
       let lo = min(vec2f(fr.bx0, fr.by0), vec2f(fr.bx1, fr.by1)) - r;
       let hi = max(vec2f(fr.bx0, fr.by0), vec2f(fr.bx1, fr.by1)) + r;
       let t0 = vec2f(f32(i32(wid.x) * TILE), f32(i32(wid.y) * TILE));
@@ -370,10 +373,18 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     let AB = vec2f(fr.bx1, fr.by1) - A;
     let t = clamp(dot(P - A, AB) / max(dot(AB, AB), 1e-6), 0.0, 1.0);
     let dist = length(P - (A + AB * t));
-    let r = p.brushRadius;
+    let r = fr.radius;
     var fall = clamp((r - dist) / max(r * p.brushSoftness, 1e-3), 0.0, 1.0);
     fall = fall * fall * (3.0 - 2.0 * fall);
+    // Dry-brush: a brush running low on water only touches the peaks of the
+    // paper's tooth, so the stroke breaks up (more on rough paper).
+    if (fr.mode != 2u && fr.load < p.dryBrushAt) {
+      let cut = (p.dryBrushAt - fr.load) / max(p.dryBrushAt, 1e-4);
+      fall *= smoothstep(cut - 0.08, cut + 0.08, aux[i].x);
+    }
     let amt = fall * fr.brushScale * fr.pressure;
+    let wBefore = w;
+    var gAdded = 0.0;
     // The brush tops the paper up toward its own water level and
     // pigment concentration rather than adding a fixed amount per frame.
     let k = clamp(p.brushRate * amt, 0.0, 1.0);
@@ -396,6 +407,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
         let c0 = select(0.0, cur / w, w > p.wEps);
         let next = max(cur, mix(cur, p.brushWater * conc, k)) + charge * max(conc - c0, 0.0);
         addCand(id, next - cur);
+        gAdded += max(next - cur, 0.0);
       }
       w = max(w, mix(w, p.brushWater, k)) + charge;
     } else if (fr.mode == 1u) {
@@ -407,6 +419,10 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
       s *= 1.0 - kl;
       liftK = kl;
     }
+    // Tally what the brush laid down, for its reservoir (read back on the CPU).
+    let dw = max(w - wBefore, 0.0);
+    if (dw > 1e-6) { atomicAdd(&tiles.brushAcc[0], u32(dw * 1e4 + 0.5)); }
+    if (gAdded > 1e-6) { atomicAdd(&tiles.brushAcc[1], u32(gAdded * 1e4 + 0.5)); }
   }
 
   // When this cell's current wetting began: pigment deposited before then

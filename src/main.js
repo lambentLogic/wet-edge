@@ -22,6 +22,8 @@ const state = {
   magnets: [],      // { shape, x, y, angle, moment } in grid cells (see magnets.js)
   magnetShape: 'disc',
   magDirty: true,   // magnet field needs recomputing
+  reservoir: 1,     // brush load: 1 = freshly loaded; reloads each stroke
+  brushActive: false,
   pointer: { down: false, x: 0, y: 0, px: 0, py: 0, pressure: 1 },
 };
 
@@ -63,7 +65,9 @@ async function init() {
   let magDepthSeen = null;
   const TILE = 16, TX = Math.ceil(W / TILE), TY = Math.ceil(H / TILE);
   // Tiles struct: indirect args (16 bytes), then per-tile state, then list.
-  const tilesBuf = buf(16 + TX * TY * 8, S | CD);
+  // Tiles struct: indirect args (16 bytes), brush tallies (16), per-tile
+  // state, then the list.
+  const tilesBuf = buf(32 + TX * TY * 8, S | CD);
   // Indirect args are copied out of tilesBuf: a buffer can't be both bound as
   // writable storage and used for an indirect dispatch.
   const argsBuf = buf(16, CD | GPUBufferUsage.INDIRECT);
@@ -79,7 +83,7 @@ async function init() {
     for (const b of [...A, ...B]) device.queue.writeBuffer(b, 0, z);
     for (const b of G) device.queue.writeBuffer(b, 0, new Float32Array(N * 8));
     device.queue.writeBuffer(Dbuf, 0, new Float32Array(N * 20));
-    device.queue.writeBuffer(tilesBuf, 16, new Uint32Array(TX * TY));
+    device.queue.writeBuffer(tilesBuf, 32, new Uint32Array(TX * TY));
   };
   newPaper();
 
@@ -172,6 +176,9 @@ async function init() {
     if (brush) {
       frameF32[4] = brush.x0; frameF32[5] = brush.y0; frameF32[6] = brush.x1; frameF32[7] = brush.y1;
       frameF32[8] = brush.pressure ?? 1;
+      // Taper: width follows pressure (a mouse stays at full width).
+      const pr = Math.min(Math.max(brush.pressure ?? 1, 0), 1);
+      frameF32[13] = values.brushRadius * (values.taperMin + (1 - values.taperMin) * pr);
       // Wet-in-wet charge: strongest at touchdown, then the reservoir is spent.
       const dur = Math.max(values.chargeDuration, 1e-3);
       frameF32[11] = Math.exp(-(brush.age ?? 0) / dur);
@@ -179,6 +186,9 @@ async function init() {
     frameF32[9] = 1 / substeps;
     frameF32[10] = drying ? values.dryerStrength : 1;
     frameF32[12] = state.simTime;
+    frameF32[14] = values.brushCapacity > 0 ? state.reservoir : 1;
+    if (!brush) frameF32[13] = values.brushRadius;
+    state.brushActive = !!brush;
     // Brush load: pigment ids at u32 16..19, fractions at f32 20..23.
     const total = state.brush.reduce((t, b) => t + b.frac, 0) || 1;
     for (let b = 0; b < 4; b++) {
@@ -198,6 +208,7 @@ async function init() {
   // ---- frame loop
   const gx = Math.ceil(W / WG), gy = Math.ceil(H / WG);
   const fpsEl = document.getElementById('fps');
+  const loadBar = document.getElementById('loadBar');
   let last = performance.now(), frames = 0;
 
   // The sim advances in real time, independent of display refresh rate.
@@ -207,7 +218,29 @@ async function init() {
   const MAX_STEPS_PER_FRAME = 10;
   let stepDebt = 0, lastFrame = performance.now();
 
-  const argsReset = new Uint32Array([0, 1, 1, 0]);
+  const argsReset = new Uint32Array([0, 1, 1, 0, 0, 0, 0, 0]);
+
+  // Brush reservoir: the GPU tallies the water each frame's stamp actually
+  // left on the paper (wet paper takes little, dry paper a lot); it comes
+  // back a frame or so later and drains the reservoir.
+  const brushRB = [0, 1, 2].map(() => device.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }));
+  const rbBusy = [false, false, false];
+  function queueBrushReadback(enc) {
+    if (!state.brushActive) return -1;
+    const k = rbBusy.indexOf(false);
+    if (k < 0) return -1;
+    rbBusy[k] = true;
+    enc.copyBufferToBuffer(tilesBuf, 16, brushRB[k], 0, 16);
+    return k;
+  }
+  async function collectBrush(k) {
+    if (k < 0) return;
+    await brushRB[k].mapAsync(GPUMapMode.READ);
+    const u = new Uint32Array(brushRB[k].getMappedRange().slice(0));
+    brushRB[k].unmap();
+    rbBusy[k] = false;
+    if (values.brushCapacity > 0) state.reservoir = Math.max(0, state.reservoir - u[0] / 1e4 / values.brushCapacity);
+  }
 
   // One frame's worth of simulation: find active tiles, then run the physics
   // passes on those tiles only (indirect dispatch; the tile count never
@@ -243,6 +276,7 @@ async function init() {
       parity ^= 1;
     }
     step.end();
+    return queueBrushReadback(enc);
   }
 
   // Draw the current state immediately (for exporting the canvas).
@@ -268,8 +302,9 @@ async function init() {
     stepDebt -= substeps;
     writeUniforms(Math.max(substeps, 1));
     const enc = device.createCommandEncoder();
+    let rbk = -1;
     if (!state.paused && !state.headless && substeps > 0) {
-      encodeSim(enc, substeps);
+      rbk = encodeSim(enc, substeps);
       // Only consume the brush segment once the sim has actually stamped it.
       state.pointer.px = state.pointer.x; state.pointer.py = state.pointer.y;
     }
@@ -281,6 +316,8 @@ async function init() {
     rp.draw(3);
     rp.end();
     device.queue.submit([enc.finish()]);
+    collectBrush(rbk);
+    loadBar.style.width = `${Math.round((values.brushCapacity > 0 ? state.reservoir : 1) * 100)}%`;
 
     frames++;
     const now = performance.now();
@@ -325,8 +362,9 @@ async function init() {
     for (let f = 0; f < nFrames; f++) {
       writeUniforms(per, brushAt(f), drying);
       const enc = device.createCommandEncoder();
-      encodeSim(enc, per);
+      const rbk = encodeSim(enc, per);
       device.queue.submit([enc.finish()]);
+      if (rbk >= 0) await collectBrush(rbk);
       if (++pending >= 60) { await device.queue.onSubmittedWorkDone(); pending = 0; }
     }
     await device.queue.onSubmittedWorkDone(); pending = 0;
@@ -339,6 +377,7 @@ async function init() {
     // reloaded) unless lift() is called in between.
     lift() { strokeFrame = 0; },
     async paint(x0, y0, x1, y1, frames = 24) {
+      if (strokeFrame === 0) state.reservoir = 1;   // a fresh stroke: reloaded
       const at = f => {
         const t0 = f / frames, t1 = (f + 1) / frames;
         return { x0: x0 + (x1 - x0) * t0, y0: y0 + (y1 - y0) * t0, x1: x0 + (x1 - x0) * t1, y1: y0 + (y1 - y0) * t1,
@@ -378,6 +417,7 @@ async function init() {
     const ptr = state.pointer;
     let f = 0;
     ptr.x = ptr.px = x0; ptr.y = ptr.py = y0; ptr.pressure = 1; ptr.downAt = performance.now(); ptr.down = true;
+    state.reservoir = 1;
     const step = () => {
       f++;
       ptr.x = x0 + (x1 - x0) * f / frames; ptr.y = y0 + (y1 - y0) * f / frames;
@@ -407,6 +447,7 @@ async function init() {
     const ptr = state.pointer;
     const [x0, y0, p0 = 1] = points[0];
     ptr.x = ptr.px = x0; ptr.y = ptr.py = y0; ptr.pressure = p0; ptr.downAt = performance.now(); ptr.down = true;
+    state.reservoir = 1;
     let seg = 1, f = 0;
     const step = () => {
       if (seg >= points.length) { ptr.down = false; done(); return; }
@@ -492,7 +533,7 @@ async function init() {
     for (const b of B) device.queue.writeBuffer(b, 0, new Float32Array(N * 4));
     device.queue.writeBuffer(Dbuf, 0, d);
     device.queue.writeBuffer(auxBuf, 0, ax);
-    device.queue.writeBuffer(tilesBuf, 16, new Uint32Array(TX * TY).fill(4));
+    device.queue.writeBuffer(tilesBuf, 32, new Uint32Array(TX * TY).fill(4));
     state.simTime = meta.simTime;
     state.paper = meta.paper; state.tone = meta.tone;
     state.magnets = meta.magnets ?? [];
@@ -500,6 +541,36 @@ async function init() {
     uiSync();
     drawMagnets();
   }
+  // What the brush would feel at (x, y), averaged over radius r: water,
+  // paper dampness, and pigment amounts by name (wet and settled). Reads only
+  // the rows it needs.
+  window.__sim.sense = async (x, y, r = 6) => {
+    const y0 = Math.max(0, Math.floor(y - r)), y1 = Math.min(H - 1, Math.ceil(y + r)), rows = y1 - y0 + 1;
+    const grab = async (buf, stride) => {
+      const size = rows * W * stride;
+      const rb = device.createBuffer({ size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+      const enc = device.createCommandEncoder();
+      enc.copyBufferToBuffer(buf, y0 * W * stride, rb, 0, size);
+      device.queue.submit([enc.finish()]);
+      await rb.mapAsync(GPUMapMode.READ);
+      const out = rb.getMappedRange().slice(0); rb.destroy(); return out;
+    };
+    const a = new Float32Array(await grab(A[parity], 16));
+    const gB = await grab(G[parity], 32), dB = await grab(Dbuf, 80);
+    const gu = new Uint32Array(gB), gf = new Float32Array(gB), du = new Uint32Array(dB), df = new Float32Array(dB);
+    let n = 0, water = 0, damp = 0; const wet = {}, dry = {};
+    for (let yy = y0; yy <= y1; yy++) for (let xx = Math.max(0, Math.floor(x - r)); xx <= Math.min(W - 1, Math.ceil(x + r)); xx++) {
+      if (Math.hypot(xx - x, yy - y) > r) continue;
+      const c = (yy - y0) * W + xx; n++;
+      water += a[c * 4]; damp += a[c * 4 + 3];
+      for (let k = 0; k < 4; k++) {
+        if (gf[c * 8 + 4 + k] > 0) { const nm = PIGMENTS[gu[c * 8 + k]]?.name; wet[nm] = (wet[nm] ?? 0) + gf[c * 8 + 4 + k]; }
+        if (df[c * 20 + 4 + k] > 0) { const nm = PIGMENTS[du[c * 20 + k]]?.name; dry[nm] = (dry[nm] ?? 0) + df[c * 20 + 4 + k]; }
+      }
+    }
+    const avg = o => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, +(v / n).toFixed(4)]));
+    return { water: +(water / n).toFixed(4), damp: +(damp / n).toFixed(4), wet: avg(wet), settled: avg(dry), reservoir: +state.reservoir.toFixed(3) };
+  };
   window.__sim.savePNG = savePNG;
   window.__sim.savePainting = savePainting;
 
@@ -561,6 +632,7 @@ function bindPointer(canvas) {
   });
   canvas.addEventListener('contextmenu', e => { if (state.mode === 3) e.preventDefault(); });
   canvas.addEventListener('pointerdown', e => {
+    state.reservoir = 1;   // each stroke starts with a loaded brush
     if (state.mode === 3) {
       const [x, y] = toGrid(e);
       const hit = magnetAt(x, y);

@@ -23,6 +23,7 @@
     h.setPaper(paper);
     h.setTone('natural');
     h.setBrush('French Ultramarine');
+    S.values.brushCapacity = 0;   // probes use an endless reservoir unless they say otherwise
     Object.assign(S.values, active);
     S.clear();
     h.setMode(0);
@@ -55,6 +56,41 @@
   }
 
   const probes = {
+    // Dry-brush: one long stroke on rough paper from a single load. Fraction
+    // of the stroke's footprint that got paint over its first and last
+    // fifths. With a finite reservoir the end should break up.
+    async drybrush(paper = 'rough') {
+      await fresh(paper);
+      h.setBrush('French Ultramarine');
+      await withValues({ brushRadius: 14, brushPigment: 0.5, brushCapacity: 4000 }, async () => {
+        h.lift();
+        await h.paint(80, 380, 950, 380, 120);
+        await h.wait(15); await h.wait(8, { dry: true }); await h.wait(2);
+      });
+      h.end();
+      const a = await S.read();
+      const cover = (x0, x1) => { let n = 0, hit = 0; for (let y = 370; y < 390; y++) for (let x = x0; x < x1; x++) { n++; if (a[(y * W + x) * 4 + 2] > 0.01) hit++; } return +(hit / n).toFixed(2); };
+      return { start: cover(100, 270), end: cover(760, 930) };
+    },
+
+    // Taper: pressure falls from 1 to 0.1 along a stroke. Painted width
+    // (rows with paint) near the start and near the end.
+    async taper(paper = 'hotPress') {
+      await fresh(paper);
+      h.end();   // path() paints through the real-time loop
+      await withValues({ brushRadius: 20, brushPigment: 0.5, brushCapacity: 0 }, async () => {
+        const n = 30;
+        const pts = Array.from({ length: n + 1 }, (_, k) => [150 + k * 24, 380, 1 - 0.9 * k / n]);
+        await S.path(pts, 3);
+        await new Promise(r => setTimeout(r, 300));
+      });
+      const a = await S.read();
+      const width = x => { let rows = 0; for (let y = 330; y < 430; y++) if (a[(y * W + x) * 4 + 1] + a[(y * W + x) * 4 + 2] > 0.005) rows++; return rows; };
+      const out = { start: width(190), end: width(820), sense: await S.sense(300, 380, 8) };
+      h.end();
+      return out;
+    },
+
     // Leak: the live sky wash. One continuous back-and-forth stroke of clean
     // water over y 30-400 with a big brush, then a few seconds. Fraction of
     // wet cells below y 470 (brush radius past the band). Should be ~0.
