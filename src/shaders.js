@@ -188,8 +188,15 @@ fn pres(i: i32) -> f32 {
   let sigma = min(p.surfaceTension, 0.023 / (max(a.x, 0.01) * p.dt * p.dt));
   var tension = 0.0;
   if (sigma > 0.0 && wet > 0.0) { tension = sigma * surfaceCurvature(i); }
+  // Capillary suction at thin film: pressure drops where the film thins,
+  // like the curved meniscus at a wash's rim, so water flows from thick to
+  // thin wet cells. A drying wash keeps feeding its edge instead of the wet
+  // edge retreating in steps (which laid a band of deposits and a crisp
+  // inner tide line). Only acts on wet cells.
+  let suction = p.capSuction / (1.0 + a.x / max(p.suctionDepth, 1e-4)) * wet;
   return p.gravity * eta(i)
     - tension
+    - suction
     - p.edgePull * (1.0 - aux[i].y) * wet;
 }
 
@@ -469,14 +476,20 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   w -= drink;
   s += drink;
 
-  // Capillary diffusion through the fibers, only where saturated enough to wick.
+  // Capillary diffusion through the fibers, only where saturated enough to
+  // wick. Sizing makes fibres water-repellent, so it slows sideways wicking
+  // too: unsized washi feathers, sized cotton barely wicks past a wash. Too
+  // much wicking out from under a wash's edge drew water (and pigment)
+  // edgeward all through drying, leaving a dark frame and a crisp inner
+  // tide line.
+  let wickRate = p.capillarySpread * (1.0 - clamp(p.sizing, 0.0, 1.0));
   var ds = 0.0;
   let sMin = p.capillaryMin;
   if (aL.w > sMin || a.w > sMin) { ds += aL.w - a.w; }
   if (aR.w > sMin || a.w > sMin) { ds += aR.w - a.w; }
   if (aU.w > sMin || a.w > sMin) { ds += aU.w - a.w; }
   if (aD.w > sMin || a.w > sMin) { ds += aD.w - a.w; }
-  s += p.capillarySpread * p.dt * ds;
+  s += wickRate * p.dt * ds;
   // Paper only dries once no standing water covers it.
   if (w <= p.wEps) { s = max(s - p.paperEvaporation * fr.dryMul * p.dt, 0.0); }
 

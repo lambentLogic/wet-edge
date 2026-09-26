@@ -19,6 +19,8 @@ export const PARAMS = [
   { key: 'tiltX',         v: 0,      min: -0.05, max: 0.05, group: 'Flow', target: 'sim',  label: 'tilt x' },
   { key: 'tiltY',         v: 0,      min: -0.05, max: 0.05, group: 'Flow', target: 'sim',  label: 'tilt y' },
   { key: 'surfaceTension', v: 0.5,  min: 0,    max: 3,     group: 'Flow', target: 'sim',  label: 'surface tension' },
+  { key: 'capSuction',    v: 0,      min: 0,    max: 2,     group: 'Flow', target: 'sim',  label: 'thin-film suction' },
+  { key: 'suctionDepth',  v: 0.02,   min: 0.001, max: 0.2,  group: 'Flow', target: 'sim',  label: 'suction depth scale' },
   { key: 'pinning',       v: 0.35,    min: 0,    max: 0.5,   group: 'Flow', target: 'sim',  label: 'edge pinning' },
   { key: 'edgePull',      v: 0.15,   min: 0,    max: 0.2,   group: 'Flow', target: 'sim',  label: 'edge pull (Curtis η)' },
 
