@@ -402,24 +402,125 @@ function buildUI({ clear, newPaper }) {
     groups[p.group].appendChild(row);
   }
 
-  // Paint box: every pigment in the library. Clicking one loads the brush
-  // with it. Pigment already on the paper is never changed.
+  // Paint box: every pigment in the library. Clicking a pan loads the brush
+  // with it; Shift-clicking (or clicking with Mix on) adds a dab of it to
+  // the selected mixing well instead. Pigment already on the paper is never
+  // changed.
   const palette = document.getElementById('palette');
+  const brushLabel = document.getElementById('brushLabel');
+  const mixToggle = document.getElementById('mixToggle');
+  let mixing = false;
+  mixToggle.addEventListener('click', () => { mixing = !mixing; mixToggle.classList.toggle('on', mixing); });
+
   const pans = PIGMENTS.map((pg, i) => {
     const pan = document.createElement('button');
     pan.className = 'pan';
     pan.title = `${pg.name} (${pg.code}, ${pg.kind})`;
     pan.style.background = swatchColor(pg);
-    pan.addEventListener('click', () => setPigment(i));
+    pan.addEventListener('click', e => (e.shiftKey || mixing) ? addDab(i) : setPigment(i));
     palette.appendChild(pan);
     return pan;
   });
-  const brushLabel = document.getElementById('brushLabel');
+
   const setPigment = i => {
     state.brush = [{ pigment: i, frac: 1 }];
+    selectedWell = -1;
+    renderWells();
     pans.forEach((pan, j) => pan.classList.toggle('on', j === i));
     brushLabel.textContent = `${PIGMENTS[i].name} · ${PIGMENTS[i].code}`;
   };
+
+  // Mixing wells: each holds dabs of up to 4 pigments (the most a wet spot
+  // on the paper can carry). Saved in this browser.
+  const WELLS = 6, WELL_KEY = 'hyperreal-watercolor.wells';
+  const byName = name => PIGMENTS.findIndex(pg => pg.name === name);
+  let wells = Array.from({ length: WELLS }, () => []);   // [{ pigment, dabs }]
+  try {
+    const saved = JSON.parse(localStorage.getItem(WELL_KEY) ?? 'null');
+    if (Array.isArray(saved)) {
+      wells = wells.map((_, k) => (saved[k] ?? [])
+        .map(d => ({ pigment: byName(d.name), dabs: d.dabs }))
+        .filter(d => d.pigment >= 0 && d.dabs > 0).slice(0, 4));
+    }
+  } catch {}
+  const saveWells = () => {
+    try {
+      localStorage.setItem(WELL_KEY, JSON.stringify(
+        wells.map(w => w.map(d => ({ name: PIGMENTS[d.pigment].name, dabs: d.dabs })))));
+    } catch {}
+  };
+  let selectedWell = -1;
+  const wellsEl = document.getElementById('wells');
+  const wellMsg = document.getElementById('wellMsg');
+
+  const loadWell = k => {
+    selectedWell = k;
+    const w = wells[k];
+    pans.forEach(pan => pan.classList.remove('on'));
+    if (w.length) {
+      state.brush = w.map(d => ({ pigment: d.pigment, frac: d.dabs }));
+      brushLabel.textContent = `Well ${k + 1}: ` + w.map(d => `${d.dabs} ${PIGMENTS[d.pigment].code}`).join(' + ');
+    } else {
+      brushLabel.textContent = `Well ${k + 1} is empty: shift-click pans (or turn on Mix) to add dabs`;
+    }
+    renderWells();
+  };
+
+  function addDab(i) {
+    if (selectedWell < 0) { selectedWell = 0; }
+    const w = wells[selectedWell];
+    const d = w.find(d => d.pigment === i);
+    wellMsg.textContent = '';
+    if (d) d.dabs++;
+    else if (w.length < 4) w.push({ pigment: i, dabs: 1 });
+    else { wellMsg.textContent = 'A well holds up to 4 pigments.'; return; }
+    saveWells();
+    loadWell(selectedWell);
+  }
+
+  function renderWells() {
+    wellsEl.replaceChildren();
+    wells.forEach((w, k) => {
+      const well = document.createElement('div');
+      well.className = 'well' + (k === selectedWell ? ' on' : '');
+      const chip = document.createElement('button');
+      chip.className = 'wellChip';
+      chip.title = w.length ? w.map(d => `${d.dabs}× ${PIGMENTS[d.pigment].name}`).join(', ') : `Well ${k + 1} (empty)`;
+      chip.style.background = w.length
+        ? mixColor(w.map(d => [PIGMENTS[d.pigment], d.dabs]))
+        : 'transparent';
+      chip.addEventListener('click', () => loadWell(k));
+      well.appendChild(chip);
+      if (k === selectedWell) {
+        const parts = document.createElement('div');
+        parts.className = 'wellParts';
+        w.forEach(d => {
+          const b = document.createElement('button');
+          b.className = 'dab';
+          b.title = `Remove a dab of ${PIGMENTS[d.pigment].name}`;
+          b.style.background = swatchColor(PIGMENTS[d.pigment]);
+          b.textContent = d.dabs;
+          b.addEventListener('click', () => {
+            d.dabs--;
+            wells[k] = w.filter(x => x.dabs > 0);
+            saveWells(); loadWell(k);
+          });
+          parts.appendChild(b);
+        });
+        if (w.length) {
+          const clr = document.createElement('button');
+          clr.className = 'dab clr';
+          clr.title = 'Empty this well';
+          clr.textContent = '×';
+          clr.addEventListener('click', () => { wells[k] = []; saveWells(); loadWell(k); });
+          parts.appendChild(clr);
+        }
+        well.appendChild(parts);
+      }
+      wellsEl.appendChild(well);
+    });
+  }
+
   setPigment(0);
 
   const modeBtns = [...document.querySelectorAll('[data-mode]')];
@@ -478,8 +579,17 @@ function buildUI({ clear, newPaper }) {
 // Display colour of a pigment at a mid-strength wash over white paper
 // (Kubelka-Munk), for the palette chips.
 function swatchColor(pg, thickness = 2) {
+  return mixColor([[pg, 1]], thickness);
+}
+
+// Display colour of a mix of pigments, given as [pigment, parts] pairs:
+// absorption and scattering add in proportion, as on the paper.
+function mixColor(parts, thickness = 2) {
+  const total = parts.reduce((t, [, n]) => t + n, 0) || 1;
   const c = [0, 1, 2].map(ch => {
-    const K = pg.K[ch], S = Math.max(pg.S[ch], 1e-4), a = 1 + K / S, b = Math.max(Math.sqrt(a * a - 1), 1e-4);
+    const K = parts.reduce((t, [pg, n]) => t + pg.K[ch] * n / total, 0);
+    const S = Math.max(parts.reduce((t, [pg, n]) => t + pg.S[ch] * n / total, 0), 1e-4);
+    const a = 1 + K / S, b = Math.max(Math.sqrt(a * a - 1), 1e-4);
     const bs = Math.min(b * S * thickness, 20), sh = Math.sinh(bs), c = a * sh + b * Math.cosh(bs);
     const R = sh / c, T = b / c, Rg = 0.97;
     return Math.round(255 * Math.min(1, R + T * T * Rg / (1 - R * Rg)));

@@ -32,6 +32,15 @@
   .pan { aspect-ratio: 1; border-radius: 5px; border: 2px solid transparent; padding: 0; cursor: pointer;
     box-shadow: inset 0 0 0 1px rgba(0,0,0,.25); }
   .pan.on { border-color: var(--accent); }
+  #wells { display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; margin-bottom: 4px; }
+  .well { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  .wellChip { width: 100%; aspect-ratio: 1; border-radius: 50%; padding: 0; cursor: pointer;
+    border: 2px dashed #45423c; box-shadow: inset 0 2px 4px rgba(0,0,0,.25); }
+  .well.on .wellChip { border: 2px solid var(--accent); }
+  .wellParts { display: flex; flex-wrap: wrap; gap: 2px; justify-content: center; grid-column: 1 / -1; }
+  .dab { width: 18px; height: 18px; border-radius: 50%; padding: 0; font-size: 10px; line-height: 1;
+    color: #fff; text-shadow: 0 0 2px #000, 0 0 2px #000; border: 1px solid #45423c; }
+  .dab.clr { background: #34322e; text-shadow: none; }
   .hint { color: var(--dim); font-size: 11px; margin-top: 10px; }
   #error { color: #e98a7a; }
 </style>
@@ -47,6 +56,12 @@
     <button data-mode="2">Lift</button>
   </div>
   <div id="palette" title="Paint box: click a pan to load the brush ( [ and ] cycle )"></div>
+  <div class="row" style="align-items:center; margin-bottom:4px">
+    <span class="hint" style="margin:0; flex:1">Mixing wells · shift-click a pan to add a dab</span>
+    <button id="mixToggle" title="When on, clicking a pan adds a dab to the selected well">Mix</button>
+  </div>
+  <div id="wells"></div>
+  <div id="wellMsg" class="hint" style="margin:0 0 4px; color:#e98a7a"></div>
   <div id="brushLabel" class="hint" style="margin:0 0 8px"></div>
   <div class="row"><select id="paperType" title="Paper texture and physics"></select><select id="tone" title="Paper tone" style="flex:0 0 auto"></select></div>
   <div class="row">
