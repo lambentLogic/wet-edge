@@ -1,5 +1,6 @@
 import { PARAMS, SIM_PARAMS, simParamBufferSize } from './params.js';
-import { simWGSL, renderWGSL, MAX_PIGMENTS } from './shaders.js';
+import { simWGSL, renderWGSL, MAX_PIGMENTS, MAX_CHARGES } from './shaders.js';
+import { SHAPES, buildCharges, drawMagnet, hitMagnet } from './magnets.js';
 import { makePaper, PAPERS, DEFAULT_PAPER, TONES } from './paper.js';
 import { PIGMENTS } from './pigments.js';
 
@@ -18,7 +19,9 @@ const state = {
   paused: false,
   headless: false,
   simTime: 0,       // simulated seconds (deposit timestamps)
-  magnets: [],      // { x, y, moment } in grid cells; moment sign = pole facing up
+  magnets: [],      // { shape, x, y, angle, moment } in grid cells (see magnets.js)
+  magnetShape: 'disc',
+  magDirty: true,   // magnet field needs recomputing
   pointer: { down: false, x: 0, y: 0, px: 0, py: 0, pressure: 1 },
 };
 
@@ -27,7 +30,7 @@ async function init() {
   if (!navigator.gpu) return fail('WebGPU is not available in this browser.');
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
   if (!adapter) return fail('No WebGPU adapter found.');
-  // 9 storage buffers per stage are needed; WebGPU's default limit is 8.
+  // 10 storage buffers per stage are needed; WebGPU's default limit is 8.
   const device = await adapter.requestDevice({
     requiredLimits: { maxStorageBuffersPerShaderStage: Math.min(adapter.limits.maxStorageBuffersPerShaderStage, 10) },
   });
@@ -53,10 +56,11 @@ async function init() {
   const frameBuf = buf(96, U | CD);
   const renderBuf = buf(48, U | CD);
   const pigBuf = buf(MAX_PIGMENTS * 64, U | CD);
-  const MAX_MAGNETS = 8;
-  const magBuf = buf(16 + MAX_MAGNETS * 16, U | CD);
-  const magData = new ArrayBuffer(16 + MAX_MAGNETS * 16);
+  const magBuf = buf(16 + MAX_CHARGES * 32, U | CD);
+  const magData = new ArrayBuffer(16 + MAX_CHARGES * 32);
   const magU32 = new Uint32Array(magData), magF32 = new Float32Array(magData);
+  const magPhiBuf = buf(N * 4, S | CD);   // |B|^2, recomputed when magnets change
+  let magDepthSeen = null;
   const TILE = 16, TX = Math.ceil(W / TILE), TY = Math.ceil(H / TILE);
   // Tiles struct: indirect args (16 bytes), then per-tile state, then list.
   const tilesBuf = buf(16 + TX * TY * 8, S | CD);
@@ -92,7 +96,7 @@ async function init() {
     entries: [
       [0, 'uniform'], [1, 'uniform'], [2, 'storage'],
       [3, 'read-only-storage'], [4, 'storage'], [5, 'read-only-storage'], [6, 'storage'],
-      [7, 'storage'], [9, 'read-only-storage'], [10, 'storage'], [11, 'storage'], [12, 'uniform'], [13, 'uniform'],
+      [7, 'storage'], [8, 'storage'], [9, 'read-only-storage'], [10, 'storage'], [11, 'storage'], [12, 'uniform'], [13, 'uniform'],
     ].map(([binding, type]) => ({ binding, visibility: C, buffer: { type } })),
   });
   const simPL = device.createPipelineLayout({ bindGroupLayouts: [simLayout] });
@@ -110,7 +114,7 @@ async function init() {
   const simBG = [0, 1].map(k => device.createBindGroup({
     layout: simLayout,
     entries: [[0, paramBuf], [1, frameBuf], [2, auxBuf], [3, A[k]], [4, A[1 - k]], [5, B[k]], [6, B[1 - k]],
-              [7, tilesBuf], [9, G[k]], [10, G[1 - k]], [11, Dbuf], [12, pigBuf], [13, magBuf]]
+              [7, tilesBuf], [8, magPhiBuf], [9, G[k]], [10, G[1 - k]], [11, Dbuf], [12, pigBuf], [13, magBuf]]
       .map(([binding, buffer]) => ({ binding, resource: { buffer } })),
   }));
 
@@ -184,12 +188,6 @@ async function init() {
     }
     device.queue.writeBuffer(frameBuf, 0, frameData);
 
-    // Magnets
-    const mags = state.magnets.slice(0, MAX_MAGNETS);
-    magU32[0] = mags.length;
-    mags.forEach((mg, k) => magF32.set([mg.x, mg.y, mg.moment, 0], 4 + k * 4));
-    device.queue.writeBuffer(magBuf, 0, magData);
-
     renderU32[0] = W; renderU32[1] = H;
     renderF32[2] = values.thickness; renderF32[3] = values.wetDarken;
     renderF32.set([...(TONES[state.tone].color ?? PAPERS[state.paper].color), 1], 4);
@@ -220,7 +218,17 @@ async function init() {
     pass.setBindGroup(0, simBG[parity]);
     pass.setPipeline(pipes.blurH); pass.dispatchWorkgroups(gx, gy);
     pass.setPipeline(pipes.blurV); pass.dispatchWorkgroups(gx, gy);
-    pass.setPipeline(pipes.magField); pass.dispatchWorkgroups(gx, gy);
+    // Magnet field: only recomputed when a magnet or the depth changes.
+    if (values.magnetDepth !== magDepthSeen) { state.magDirty = true; magDepthSeen = values.magnetDepth; }
+    if (state.magDirty) {
+      const charges = buildCharges(state.magnets, values.magnetDepth, MAX_CHARGES);
+      magU32[0] = charges.length;
+      magU32[1] = state.magnets.length > 0 ? 1 : 0;
+      charges.forEach(([ax, ay, bx, by, z, q], k) => magF32.set([ax, ay, z, q, bx, by, 0, 0], 4 + k * 8));
+      device.queue.writeBuffer(magBuf, 0, magData);
+      pass.setPipeline(pipes.magField); pass.dispatchWorkgroups(gx, gy);
+      state.magDirty = false;
+    }
     pass.setPipeline(pipes.markTiles); pass.dispatchWorkgroups(gx, gy);
     pass.setPipeline(pipes.compactTiles); pass.dispatchWorkgroups(Math.ceil(TX * TY / 64));
     pass.end();
@@ -327,7 +335,7 @@ async function init() {
     setMode(m) { state.mode = m; },
     setTone(key) { state.tone = key; },
     // Magnets under the paper: [{ x, y, moment }] in grid cells.
-    setMagnets(list) { state.magnets = list.map(mg => ({ moment: 1, ...mg })); drawMagnets(); },
+    setMagnets(list) { state.magnets = list.map(mg => ({ shape: 'disc', angle: 0, moment: 1, ...mg })); drawMagnets(); },
     magnetCount() { return state.magnets.length; },
     pigmentNames() { return PIGMENTS.map(pg => pg.name); },
     // Load the brush: setBrush('French Ultramarine') or a mix,
@@ -393,7 +401,24 @@ function bindPointer(canvas) {
       removeMagnet(lastMagnet);
     }
   });
-  const magnetAt = (x, y) => state.magnets.find(mg => Math.hypot(mg.x - x, mg.y - y) < 18);
+  const magnetAt = (x, y) => [...state.magnets].reverse().find(mg => hitMagnet(mg, x, y));
+  // Rotate a magnet: R (Shift+R backwards) for the last one touched, or the
+  // scroll wheel over one.
+  const rotateMagnet = (mg, da) => { mg.angle = (mg.angle ?? 0) + da; drawMagnets(); };
+  canvas.addEventListener('wheel', e => {
+    if (state.mode !== 3) return;
+    const hit = magnetAt(...toGrid(e));
+    if (!hit) return;
+    e.preventDefault();
+    rotateMagnet(hit, Math.sign(e.deltaY) * Math.PI / 24);
+    lastMagnet = hit;
+  }, { passive: false });
+  window.addEventListener('keydown', e => {
+    if (state.mode === 3 && lastMagnet && (e.key === 'r' || e.key === 'R')
+        && e.target.tagName !== 'INPUT' && e.target.tagName !== 'SELECT') {
+      rotateMagnet(lastMagnet, (e.shiftKey ? -1 : 1) * Math.PI / 12);
+    }
+  });
   canvas.addEventListener('contextmenu', e => { if (state.mode === 3) e.preventDefault(); });
   canvas.addEventListener('pointerdown', e => {
     if (state.mode === 3) {
@@ -404,7 +429,7 @@ function bindPointer(canvas) {
       } else if (hit) {
         dragMagnet = hit;
       } else if (state.magnets.length < 8) {
-        dragMagnet = { x, y, moment: 1 };
+        dragMagnet = { shape: state.magnetShape, x, y, angle: 0, moment: 1 };
         state.magnets.push(dragMagnet);
       }
       lastMagnet = dragMagnet ?? lastMagnet;
@@ -599,6 +624,9 @@ function buildUI({ clear, newPaper }) {
 
   document.getElementById('clear').addEventListener('click', clear);
   document.getElementById('flipMagnets').addEventListener('click', flipMagnets);
+  const shapeSel = document.getElementById('magnetShape');
+  for (const [key, sh] of Object.entries(SHAPES)) shapeSel.add(new Option(sh.name, key));
+  shapeSel.addEventListener('change', () => { state.magnetShape = shapeSel.value; setMode(3); });
   document.getElementById('clearMagnets').addEventListener('click', () => { state.magnets = []; drawMagnets(); });
   document.getElementById('paper').addEventListener('click', () => newPaper());
   // A paper preset sets its surface and its physics knobs together.
@@ -666,27 +694,15 @@ function flipMagnets() {
   drawMagnets();
 }
 
-// Magnets are drawn on a 2D canvas laid over the paper.
+// Magnets are drawn on a 2D canvas laid over the paper. Any change that
+// redraws them also marks the field for recomputation.
 function drawMagnets() {
+  state.magDirty = true;
   const ov = document.getElementById('overlay');
   if (!ov) return;
   const g = ov.getContext('2d');
   g.clearRect(0, 0, ov.width, ov.height);
-  for (const mg of state.magnets) {
-    const north = mg.moment > 0;
-    const col = north ? 'rgba(210, 70, 60, 0.9)' : 'rgba(60, 100, 210, 0.9)';
-    g.beginPath();
-    g.arc(mg.x, mg.y, 16, 0, Math.PI * 2);
-    g.lineWidth = 2;
-    g.strokeStyle = col;
-    g.setLineDash([4, 3]);
-    g.stroke();
-    g.setLineDash([]);
-    g.fillStyle = col;
-    g.font = 'bold 13px system-ui, sans-serif';
-    g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.fillText(north ? 'N' : 'S', mg.x + 22, mg.y - 18);
-  }
+  for (const mg of state.magnets) drawMagnet(g, mg);
 }
 
 function fail(msg) {

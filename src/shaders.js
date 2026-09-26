@@ -19,8 +19,9 @@ import { paramStructWGSL } from './params.js';
 // exact either way, since Kubelka-Munk absorption and scattering simply add.
 
 export const MAX_PIGMENTS = 32;
+export const MAX_CHARGES = 512;
 
-export const simWGSL = (NTILES, MAXP = MAX_PIGMENTS) => /* wgsl */ `
+export const simWGSL = (NTILES, MAXP = MAX_PIGMENTS, MAXQ = MAX_CHARGES) => /* wgsl */ `
 ${paramStructWGSL()}
 
 struct Frame {
@@ -56,10 +57,15 @@ struct Dep { id: vec4u, amt: vec4f, stainK: vec4f, stainS: vec4f, stamp: vec4f }
 @group(0) @binding(10) var<storage, read_write> Gout: array<Comp4>;
 @group(0) @binding(11) var<storage, read_write> D: array<Dep>;
 @group(0) @binding(12) var<uniform> pig: array<Pigment, ${MAXP}>;
-// Magnets under the paper: vertical dipoles at (x, y) in cells with signed
-// moment (sign = which pole faces up), MAX_MAGNETS at most.
-struct Magnets { count: u32, _a: u32, _b: u32, _c: u32, m: array<vec4f, 8> };
+// Magnets under the paper, as magnetic charges (the pole model): each magnet
+// shape is built on the CPU from horizontal line-segment charges (a point
+// charge is a zero-length segment), so discs, bars, horseshoes, rings, rods
+// and striped sheets all share one field calculation and interact
+// correctly. Each charge is two vec4s: (ax, ay, depth, q), (bx, by, -, -).
+struct Magnets { count: u32, anyMagnet: u32, _b: u32, _c: u32, q: array<vec4f, ${MAXQ * 2}> };
 @group(0) @binding(13) var<uniform> mag: Magnets;
+// |B|^2 at the paper surface, recomputed only when magnets change.
+@group(0) @binding(8) var<storage, read_write> magPhi: array<f32>;
 
 struct Tiles {
   args: array<atomic<u32>, 4>,        // indirect dispatch (x, y, z) + pad
@@ -347,7 +353,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     if (vU > 0.0 && gU.amt[k] > 0.0) { addCand(gU.id[k],  p.dt * vU * gU.amt[k]); }
   }
 
-  if (p.mixing > 0.5 || mag.count > 0u) { mixPigments(x, y, a, gi, aL, aR, aU, aD, gL, gR, gU, gD); }
+  if (p.mixing > 0.5 || mag.anyMagnet > 0u) { mixPigments(x, y, a, gi, aL, aR, aU, aD, gL, gR, gU, gD); }
 
   var s = a.w;
 
@@ -544,32 +550,39 @@ fn depositInto(dep: ptr<function, Dep>, occ: ptr<function, vec4<bool>>, id: u32,
 }
 
 // ---------------------------------------------------------------- magnets
-// Field of vertical dipoles magnetDepth mm below the paper, summed as
-// vectors (so like and opposite poles interact), evaluated at the paper
-// surface. The force on a small magnetic particle goes as its susceptibility
-// times grad |B|^2, so aux.z holds |B|^2 (normalised so a unit magnet gives
-// 1 directly above it) for the drift in mixPigments. Written once per frame,
-// after the wet-mask blur has finished with aux.z.
+// |B|^2 at the paper surface from all magnetic charges: B = sum q r / |r|^3.
+// The force on a small magnetic particle goes as its susceptibility times
+// grad |B|^2, which drives the drift in mixPigments. Charges are normalised
+// on the CPU so a disc magnet gives 1 directly above it.
 @compute @workgroup_size(16, 16)
 fn magField(@builtin(global_invocation_id) id: vec3u) {
   let x = i32(id.x); let y = i32(id.y);
   if (!inb(x, y)) { return; }
-  var phi = 0.0;
-  if (mag.count > 0u) {
-    let d = max(p.magnetDepth / 0.2, 1.0);   // mm -> cells
-    var B = vec3f(0.0);
-    for (var k = 0u; k < min(mag.count, 8u); k++) {
-      let mk = mag.m[k];
-      let r = vec3f(f32(x) + 0.5 - mk.x, f32(y) + 0.5 - mk.y, d);
+  var B = vec3f(0.0);
+  let P = vec3f(f32(x) + 0.5, f32(y) + 0.5, 0.0);
+  for (var k = 0u; k < min(mag.count, ${MAXQ}u); k++) {
+    let c0 = mag.q[2u * k];
+    let c1 = mag.q[2u * k + 1u];
+    let A = vec3f(c0.x, c0.y, -c0.z);
+    let E = vec3f(c1.x, c1.y, -c0.z);
+    let L = length(E - A);
+    if (L < 1e-3) {
+      let r = P - A;
       let R2 = dot(r, r);
-      let R5 = R2 * R2 * sqrt(R2);
-      // Dipole along z with moment mk.z: B = (3 (m.r) r / R^2 - m) / R^3
-      B += mk.z * (3.0 * d * r / R5 - vec3f(0.0, 0.0, 1.0) / (R2 * sqrt(R2)));
+      B += c0.w * r / (R2 * sqrt(R2));
+    } else {
+      // Uniform line charge q/L along A->E: exact field at P.
+      let u = (E - A) / L;
+      let sP = dot(P - A, u);
+      let perp = (P - A) - sP * u;
+      let rho = max(length(perp), 1e-3);
+      let t1 = -sP; let t2 = L - sP;
+      let r1 = sqrt(t1 * t1 + rho * rho); let r2 = sqrt(t2 * t2 + rho * rho);
+      let lam = c0.w / L;
+      B += lam * ((perp / rho) * (t2 / r2 - t1 / r1) / rho + u * (1.0 / r2 - 1.0 / r1));
     }
-    let d3 = d * d * d;
-    phi = dot(B, B) * d3 * d3 / 4.0;
   }
-  aux[ix(x, y)].z = phi;
+  magPhi[ix(x, y)] = dot(B, B);
 }
 
 // ---------------------------------------------------------------- flocculation
@@ -625,7 +638,7 @@ fn mixPigments(x: i32, y: i32, a: vec4f, gi: Comp4,
   let cT = a.y / a.x;
   let wi = smoothstep(p.mixEdgeLo, p.mixEdgeHi, aux[i].y);
   let mixOn = p.mixing > 0.5;
-  let magOn = mag.count > 0u;
+  let magOn = mag.anyMagnet > 0u;
   // Mixing and drift (flocculation + magnetism) share the explicit-scheme
   // stability budget (4 neighbours), half each, so together they can't
   // overdraw a cell.
@@ -667,7 +680,7 @@ fn mixPigments(x: i32, y: i32, a: vec4f, gi: Comp4,
     // right up to the wet edge). Upwind in concentration. Both cells compute
     // the same flux, so it conserves pigment.
     let bucket = u32(max(floor(max(aux[i].w, aux[j].w) / 10.0), 0.0));
-    let dPhi = aux[i].z - aux[j].z;   // magnetic potential |B|^2, from magField
+    let dPhi = magPhi[i] - magPhi[j];   // |B|^2, from magField
     for (var m = 0; m < 8; m++) {
       var id = 0u; var here = 0.0; var there = 0.0;
       if (m < 4) {

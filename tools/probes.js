@@ -55,6 +55,27 @@
   }
 
   const probes = {
+    // Magnet shapes: one of each under a pale Mars black wash. Screenshot.
+    async shapes(paper = 'hotPress') {
+      await fresh(paper);
+      h.setMagnets([]);
+      h.setBrush('Mars Black');
+      await withValues({ brushRadius: 26, brushPigment: 0.1 }, async () => {
+        for (let y = 70; y <= 700; y += 26) { h.lift(); await h.paint(50, y, 975, y, 30); }
+        h.setMagnets([
+          { shape: 'disc', x: 180, y: 210 },
+          { shape: 'bar', x: 480, y: 210, angle: 0.3 },
+          { shape: 'horseshoe', x: 810, y: 210 },
+          { shape: 'ring', x: 190, y: 540 },
+          { shape: 'strip', x: 500, y: 540, angle: -0.5 },
+          { shape: 'sheet', x: 820, y: 540 },
+        ]);
+        await h.wait(35); await h.wait(10, { dry: true }); await h.wait(2);
+      });
+      h.end();
+      return 'painted';
+    },
+
     // Magnet: a Mars black wash with a magnet under its centre. Fraction of
     // the wash's pigment within 3 mm of the magnet, with the magnet vs a
     // control without one. Also leaves the magnet in place for screenshots.

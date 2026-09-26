@@ -57,6 +57,7 @@
     <button data-mode="1">Water</button>
     <button data-mode="2">Lift</button>
     <button data-mode="3" title="Click to place a magnet under the paper, drag to move. Remove: double-click it, drag it off the paper, or Delete after touching it">Magnet</button>
+    <select id="magnetShape" title="Magnet shape (R or scroll over a magnet to rotate)" style="flex:0 0 auto"></select>
   </div>
   <div id="palette" title="Paint box: click a pan to load the brush ( [ and ] cycle )"></div>
   <div class="row" style="align-items:center; margin-bottom:4px">
@@ -77,7 +78,7 @@
     <button id="reset">Reset knobs</button>
   </div>
   <div id="knobs"></div>
-  <p class="hint">Keys: 1 paint · 2 water · 3 lift · 4 magnet (double-click or drag off to remove) · F flip poles · [ ] pigment · hold D to dry · space pause · C clear.
+  <p class="hint">Keys: 1 paint · 2 water · 3 lift · 4 magnet (R / scroll to rotate; double-click or drag off to remove) · F flip poles · [ ] pigment · hold D to dry · space pause · C clear.
     Number boxes are unclamped.</p>
 </aside>
 <script type="module" src="src/main.js"></script>
