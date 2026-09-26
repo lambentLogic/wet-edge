@@ -317,6 +317,14 @@ fn velocity(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) lid
 fn sum4(v: vec4f) -> f32 { return v.x + v.y + v.z + v.w; }
 
 // Amount of pigment id in a component list (0 if absent).
+// How freely pigment can be carried into a cell: 1 normally, falling to 0
+// as its suspended pigment gets as concentrated as a paste (jamLo..jamHi
+// pigment per unit of water).
+fn jam(a: vec4f) -> f32 {
+  if (a.y <= 0.0) { return 1.0; }
+  return 1.0 - smoothstep(p.jamLo, p.jamHi, a.y / max(a.x, 1e-4));
+}
+
 fn amtOf(c: Comp4, id: u32) -> f32 {
   var a = 0.0;
   for (var k = 0; k < 4; k++) { if (c.amt[k] > 0.0 && c.id[k] == id) { a += c.amt[k]; } }
@@ -399,14 +407,20 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   var w = a.x - p.dt * (fwR - fwL + fwD - fwU);
 
   // Own pigment keeps the fraction that doesn't flow out; neighbours' flows
-  // in carry their components.
-  let keep = 1.0 - p.dt * (max(uR, 0.0) + max(-uL, 0.0) + max(vD, 0.0) + max(-vU, 0.0));
+  // in carry their components. Pigment can't be carried into a cell where
+  // it's already a paste (jam): the water flows on and leaves its pigment
+  // behind. Without this, flow toward a drying contact line piled pigment
+  // into single cells at 20-70 times the wash around them (black contour
+  // lines). Each face uses the receiving cell's jam, the same on both
+  // sides, so pigment is conserved.
+  let jI = jam(a); let jR = jam(aR); let jL = jam(aL); let jD = jam(aD); let jU = jam(aU);
+  let keep = 1.0 - p.dt * (max(uR, 0.0) * jR + max(-uL, 0.0) * jL + max(vD, 0.0) * jD + max(-vU, 0.0) * jU);
   for (var k = 0; k < 4; k++) { if (gi.amt[k] > 0.0) { addCand(gi.id[k], gi.amt[k] * keep); } }
   if (VARIANT != 4u) { for (var k = 0; k < 4; k++) {
-    if (uR < 0.0 && gR.amt[k] > 0.0) { addCand(gR.id[k], -p.dt * uR * gR.amt[k]); }
-    if (uL > 0.0 && gL.amt[k] > 0.0) { addCand(gL.id[k],  p.dt * uL * gL.amt[k]); }
-    if (vD < 0.0 && gD.amt[k] > 0.0) { addCand(gD.id[k], -p.dt * vD * gD.amt[k]); }
-    if (vU > 0.0 && gU.amt[k] > 0.0) { addCand(gU.id[k],  p.dt * vU * gU.amt[k]); }
+    if (uR < 0.0 && gR.amt[k] > 0.0) { addCand(gR.id[k], -p.dt * uR * gR.amt[k] * jI); }
+    if (uL > 0.0 && gL.amt[k] > 0.0) { addCand(gL.id[k],  p.dt * uL * gL.amt[k] * jI); }
+    if (vD < 0.0 && gD.amt[k] > 0.0) { addCand(gD.id[k], -p.dt * vD * gD.amt[k] * jI); }
+    if (vU > 0.0 && gU.amt[k] > 0.0) { addCand(gU.id[k],  p.dt * vU * gU.amt[k] * jI); }
   } }
 
   if (VARIANT != 2u && (p.mixing > 0.5 || mag.anyMagnet > 0u)) { mixPigments(x, y, a, gi, aL, aR, aU, aD, gL, gR, gU, gD); }

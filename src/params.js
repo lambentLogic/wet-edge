@@ -45,6 +45,8 @@ export const PARAMS = [
   { key: 'pigmentDiffusion', v: 0.05, min: 0, max: 1, group: 'Pigment', target: 'sim', label: 'diffusion in water' },
   { key: 'mixEdgeLo',   v: 0.6,  min: 0, max: 1,   group: 'Pigment', target: 'sim', label: 'no mixing near edge (lo)' },
   { key: 'mixEdgeHi',   v: 0.9,  min: 0, max: 1,   group: 'Pigment', target: 'sim', label: 'no mixing near edge (hi)' },
+  { key: 'jamLo',       v: 6,    min: 0, max: 50,  group: 'Pigment', target: 'sim', label: 'paste: jams from (pigment/water)' },
+  { key: 'jamHi',       v: 12,   min: 0, max: 100, group: 'Pigment', target: 'sim', label: 'paste: fully jammed at' },
   { key: 'density',     v: 0.02, min: 0, max: 0.2, group: 'Pigment', target: 'sim', label: 'density (settling)' },
   { key: 'staining',    v: 1,    min: 0, max: 10,  group: 'Pigment', target: 'sim' },
   { key: 'granulation', v: 0.6,  min: 0, max: 2,   group: 'Pigment', target: 'sim' },
