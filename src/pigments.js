@@ -127,7 +127,9 @@ const PANS = [
     ...organic, staining: STAIN.high, mobility: 1.7 },
   { name: 'Quinacridone Rose', code: 'PV19', masstone: '#C8285A', tint: '#EF8FA8', opacity: 'transparent',
     ...organic, staining: STAIN.high, mobility: 1.7 },
-  { name: 'Pyrrole Rubine', code: 'PR264', masstone: '#8E1233', tint: '#E07090', opacity: 'semitransparent',
+  // Painter: "a lil less ruby-dark than I'd expect and more pink" with the
+  // tint at #E07090 (2026-09-26): deeper ruby masstone, raspberry-red tint.
+  { name: 'Pyrrole Rubine', code: 'PR264', masstone: '#760B28', tint: '#CC4058', opacity: 'semitransparent',
     ...organic, staining: STAIN.medium, mobility: 1.3 },
   // "Blooms very readily" yet "inert wet in wet" (handprint).
   { name: 'Pyrrole Scarlet', code: 'PR255', masstone: '#D8321E', tint: '#F2826A', opacity: 'semitransparent',

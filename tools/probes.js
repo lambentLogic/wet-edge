@@ -126,6 +126,25 @@
       return { blackLeft: { fixed: +(after.fixed / before.fixed).toFixed(2), free: +(after.free / before.free).toFixed(2) } };
     },
 
+    // Bit-exact state check for optimisations: a fixed scene (a big wet
+    // wash, strokes of several pigments into it, a lift, drying) and the
+    // SHA-256 of every state buffer after it. Same code path, same hashes;
+    // compare before and after a change that shouldn't alter results.
+    async stateHash(paper = 'coldPress') {
+      await fresh(paper);
+      await withValues({ brushRadius: 30 }, async () => {
+        for (let y = 150; y <= 600; y += 40) { h.lift(); await h.paint(120, y, 900, y, 12); }
+      });
+      for (const [name, y] of [['Quinacridone Rose', 250], ['Phthalo Green', 350], ['Mars Black', 450], ['White Gouache', 520]]) {
+        h.setBrush(name); h.lift(); await h.paint(200, y, 820, y + 30, 20);
+      }
+      await h.wait(4);
+      h.setMode(2); h.lift(); await h.paint(300, 200, 700, 560, 20); h.setMode(0);
+      await h.wait(10); await h.wait(10, { dry: true }); await h.wait(1);
+      h.end();
+      return await S.stateHashes();
+    },
+
     // Water brush: one dab of pigment, five strokes without reloading, a
     // squeeze before the fourth. Mean paint in each stroke and the brush's
     // stores after it: strokes should pale as pigment runs out, the squeeze

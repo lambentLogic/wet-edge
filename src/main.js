@@ -749,6 +749,15 @@ async function init() {
     return { A: [...await f(A[parity], 4)], aux: [...await f(auxBuf, 4)], dep: [0, 1, 2, 3].filter(k => d[4 + k] > 0).map(k => ({ pig: PIGMENTS[du[k]]?.name, amt: d[4 + k], stamp: d[16 + k] })), time: state.simTime };
   };
   window.__sim.open = blob => openPainting(blob);
+  // SHA-256 of each state buffer, to check that an optimisation leaves the
+  // simulation bit-identical.
+  window.__sim.stateHashes = async () => {
+    const hex = async buf => [...new Uint8Array(await crypto.subtle.digest('SHA-256', buf))].slice(0, 8).map(b => b.toString(16).padStart(2, '0')).join('');
+    return {
+      A: await hex(await readBuffer(A[parity], N * 16)), G: await hex(await readBuffer(G[parity], N * 32)),
+      D: await hex(await readBuffer(Dbuf, N * 80)), aux: await hex(await readBuffer(auxBuf, N * 16)),
+    };
+  };
   window.__sim.paintingBlob = paintingBlob;
   window.__sim.savePNG = savePNG;
   window.__sim.layerBlobs = layerBlobs;
