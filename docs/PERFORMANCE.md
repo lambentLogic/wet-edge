@@ -38,9 +38,10 @@ local LLM shared the GPU.)
 | writing back only the D fields that changed | about 2% |
 
 Transport reads 5 cells of A and G (upwind candidates), B faces, D (80 B)
-and aux, and writes A, G and D. That's roughly 500 B per cell per step,
-about 165 GB/s at the current rate, so it looks memory-bound. This is an
-estimate, not profiled.
+and aux, and writes A, G and D. A naive traffic estimate is roughly 500 B
+per cell per step, but neighbouring reads can hit caches. The diagnostic
+variants below show that transport logic dominates; the traffic estimate
+does not measure physical memory bandwidth.
 
 ## Constraints
 
@@ -56,8 +57,7 @@ estimate, not profiled.
 - 8 x 8 workgroups for velocity and transport (four per tile; suggested
   by Sol, 2026-09-26). The result was bit-identical but not faster: over
   three runs each, the whole sheet ran at 0.37-0.41x real time versus
-  0.38-0.39x, and part of the sheet at 1.24-1.37x versus 1.41-1.68x. So
-  occupancy doesn't look like the limit, which leaves bandwidth. Reverted.
+  0.38-0.39x, and part of the sheet at 1.24-1.37x versus 1.41-1.68x. Reverted.
   Rerun on an idle GPU (2026-09-26), three runs each: 16 x 16 at 0.68x
   whole sheet and 3.53-3.55x partial; 8 x 8 at 0.67x and 3.56-3.57x.
   Identical state hashes. No difference either way.
@@ -66,12 +66,11 @@ estimate, not profiled.
   (32 B down to 20 B a cell; Sol's second suggestion, 2026-09-26). Bit
   identical (A, D and aux hashes unchanged). Alternating runs: 0.67-0.68x
   vs 0.63-0.67x whole sheet, partial within noise. Kept (a few percent,
-  smaller saves), but G traffic clearly isn't the main cost either: the
-  big transport shader may be limited more by arithmetic or latency than
-  by raw bandwidth. Profiling with timestamp queries would tell.
+  smaller saves). G traffic clearly isn't the main cost.
 
-- Diagnostic transport variants (Sol's suggestion, 2026-09-26): same
-  reads and writes but parts of the logic removed. Whole sheet wet, idle
+- Diagnostic transport variants (Sol's suggestion, 2026-09-26):
+  simplified kernels that retain representative reads and writes while
+  removing parts of the logic. Whole sheet wet, idle
   GPU (`PRE_JS="window.__transportVariant=N" node tools/measure.mjs speed`):
 
   | variant | speed |
@@ -84,15 +83,22 @@ estimate, not profiled.
   | 4 (+ no neighbour candidates) + `mixing=0` | 1.20x |
   | `--set flocculation=0` | 0.81x |
 
-  So memory traffic is about 6% of transport's time; the logic is the
-  rest. Mixing and flocculation drift are about 30% of it; settling about
-  15%; gathering neighbours' candidates almost nothing. Most of the cost
+  The reads-and-writes variant runs much faster, so logic dominates the
+  measured workload. It changes the data written and does not isolate an
+  exact percentage for memory traffic. Mixing and flocculation drift are
+  about 30% of it; settling about 15%; gathering neighbours' candidates
+  almost nothing. Most of the cost
   (1.2x vs 11x) is in what every cell runs regardless: the candidate
   list and its sort, the deposit-slot loops, binding, absorption. They
   index small private arrays (cid/camt/taken, the Dep fields) with loop
   counters, which on GPUs can push them out of registers into local
-  memory. Next experiment: rewrite that bookkeeping with fixed indices
-  (unrolled, vec4 selects) and compare, checking stateHash.
+  memory. A full fixed-index rewrite remains an experiment.
+- Fixed-index `candIndex` and `addCand` switches (Sol, 2026-09-26):
+  `speed` fell from 0.67x to 0.59x, and A/D state hashes changed; reverted.
+  This partial rewrite gave no evidence of a register-spill win.
+- Replacing the eight `taken` flags with a `u32` bit mask and skipping
+  mixing when all five nearby cells had no suspended pigment both kept
+  state hashes identical, but `speed` stayed at 0.67x; reverted.
 - Caching the flocculation noise per cell (bit-identical): no measurable
   change. Kept, harmless.
 
