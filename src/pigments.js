@@ -53,19 +53,23 @@ function kmReflect(K, S, x, Rg) {
 // only over white paper, and produced nonsense on dark grounds (a green
 // bismuth vanadate).
 //
-// Transparent pigments get their physically low scattering fixed (so they
-// all but vanish on black, as real ones do), and instead the fit finds their
-// tinting strength: how much thinner their light wash is than their
-// masstone. Other pigments fit S, with the transparency rating as a weak
-// prior, at a standard tint thickness.
-function fitKM(masstone, tint, opacity) {
+// Scattering is set by how far the pigment's refractive index is from the
+// binder's (gum arabic, ~1.5), not by its transparency rating: ratings like
+// "semi-transparent" often reflect a pigment's darkness and strength. So
+// pigments with a known low index (organics, ultramarine, sub-micron oxides)
+// get a fixed low `scatter`, and the fit finds their tinting strength
+// instead: how much thinner their light wash is than their masstone. A
+// concentrated film of such a pigment is dark and can't lighten black.
+// High-index pigments (titanium dioxide, bismuth vanadate, opaque iron
+// oxides) fit S, with the transparency rating as a weak prior.
+function fitKM(masstone, tint, opacity, scatter) {
   const Rm = hexToRGB(masstone), Rt = tint ? hexToRGB(tint) : null;
-  const prior = Math.log(OPACITY_S[opacity]);
+  const prior = Math.log(scatter ?? OPACITY_S[opacity]);
   const kGrid = [], sGrid = [];
   for (let v = Math.log(1e-3); v <= Math.log(40); v += 0.05) kGrid.push(v);
-  if (opacity === 'transparent') sGrid.push(prior);
+  if (scatter) sGrid.push(prior);
   else for (let v = Math.log(1e-3); v <= Math.log(40); v += 0.05) sGrid.push(v);
-  const tintXs = opacity === 'transparent' && Rt ? [0.08, 0.12, 0.18, 0.25, 0.35, 0.5, 0.7, 1.0] : [TINT_X];
+  const tintXs = scatter && Rt ? [0.08, 0.12, 0.18, 0.25, 0.35, 0.5, 0.7, 1.0] : [TINT_X];
   let best = Infinity, bestK = null, bestS = 0;
   for (const tx of tintXs) for (const ls of sGrid) {
     const s = Math.exp(ls);
@@ -86,7 +90,8 @@ function fitKM(masstone, tint, opacity) {
   return { K: bestK.map(v => +v.toFixed(5)), S: [bestS, bestS, bestS].map(v => +v.toFixed(5)) };
 }
 
-const organic = { kind: 'organic', density: 0.3, granulation: 0, flocculation: 0, mobility: 1.5, wick: 0.5 };
+// Organic pigments have low refractive indices: little scattering.
+const organic = { kind: 'organic', scatter: 0.04, density: 0.3, granulation: 0, flocculation: 0, mobility: 1.5, wick: 0.5 };
 const mineral = { kind: 'mineral', density: 1.3, flocculation: 0.2, mobility: 0.8, wick: 0 };
 
 const PANS = [
@@ -103,7 +108,7 @@ const PANS = [
   { name: 'Benzimidazolone Blue', code: 'PB80', masstone: '#2E2A7A', tint: '#6C6FC4', opacity: 'transparent',
     ...organic, staining: STAIN.high, mobility: 2, wick: 0.6 },
   { name: 'French Ultramarine', code: 'PB29', masstone: '#20308E', tint: '#5A6FD0', opacity: 'semitransparent',
-    ...mineral, density: 1, staining: STAIN.lowmed, granulation: GRAN.strong, flocculation: 1, mobility: 1 },
+    ...mineral, scatter: 0.06, density: 1, staining: STAIN.lowmed, granulation: GRAN.strong, flocculation: 1, mobility: 1 },
   { name: 'Dioxazine Violet', code: 'PV23', masstone: '#3A1F5E', tint: '#8A6FC0', opacity: 'semitransparent',
     ...organic, staining: STAIN.high, mobility: 1.5 },
   { name: 'Perylene Violet', code: 'PV29', masstone: '#4A2331', tint: '#B08090', opacity: 'semitransparent',
@@ -116,7 +121,7 @@ const PANS = [
     ...organic, staining: STAIN.medium, mobility: 1.3 },
   // "Blooms very readily" yet "inert wet in wet" (handprint).
   { name: 'Pyrrole Scarlet', code: 'PR255', masstone: '#D8321E', tint: '#F2826A', opacity: 'semitransparent',
-    ...organic, staining: STAIN.high, granulation: 0.1, mobility: 0.8 },
+    ...organic, scatter: undefined, staining: STAIN.high, granulation: 0.1, mobility: 0.8 },
   { name: 'Perylene Maroon', code: 'PR179', masstone: '#5A1A1E', tint: '#B8606A', opacity: 'transparent',
     ...organic, staining: STAIN.high, mobility: 1.2 },
   { name: 'Perylene Green', code: 'PBk31', masstone: '#1E2B24', tint: '#5E7F74', opacity: 'semitransparent',
@@ -133,12 +138,12 @@ const PANS = [
     ...mineral, density: 1.5, staining: STAIN.lowmed, granulation: GRAN.moderate },
   // Sub-micron oxide, but granulates "in threads" in DS's formulation.
   { name: 'Transparent Red Oxide', code: 'PR101', masstone: '#9A3A1A', tint: '#D88050', opacity: 'transparent',
-    ...mineral, density: 0.9, staining: STAIN.low, granulation: GRAN.moderate, flocculation: 0.5 },
+    ...mineral, scatter: 0.04, density: 0.9, staining: STAIN.low, granulation: GRAN.moderate, flocculation: 0.5 },
   { name: 'Transparent Yellow Oxide', code: 'PY42', masstone: '#B37A1E', tint: '#E0B060', opacity: 'transparent',
-    ...mineral, density: 0.9, staining: STAIN.low, granulation: GRAN.moderate, flocculation: 0.3 },
+    ...mineral, scatter: 0.04, density: 0.9, staining: STAIN.low, granulation: GRAN.moderate, flocculation: 0.3 },
   // Da Vinci natural raw umber; granulation seen wet largely vanishes dry.
   { name: 'Raw Umber', code: 'PBr7', masstone: '#4A3F2E', tint: '#A09A80', opacity: 'transparent',
-    ...mineral, staining: STAIN.medium, granulation: GRAN.slight },
+    ...mineral, scatter: 0.06, staining: STAIN.medium, granulation: GRAN.slight },
   // A dropped brushload displaces pigment in a moist wash (DS).
   { name: 'Titanium Buff', code: 'PW6:1', masstone: '#D9C9A8', tint: null, opacity: 'semiopaque',
     ...mineral, density: 1.2, staining: STAIN.low, granulation: GRAN.moderate, mobility: 1 },
@@ -150,4 +155,4 @@ const PANS = [
     ...mineral, density: 1.6, staining: STAIN.low, granulation: GRAN.slight, flocculation: 0, mobility: 0.7 },
 ];
 
-export const PIGMENTS = PANS.map(p => ({ ...p, ...fitKM(p.masstone, p.tint, p.opacity) }));
+export const PIGMENTS = PANS.map(p => ({ ...p, ...fitKM(p.masstone, p.tint, p.opacity, p.scatter) }));
