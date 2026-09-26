@@ -798,9 +798,11 @@ function bindPointer(canvas) {
     const r = canvas.getBoundingClientRect();
     return [(e.clientX - r.left) / r.width * W, (e.clientY - r.top) / r.height * H];
   };
-  // Touch: a pen's pressure, or for a mouse/trackpad its speed (a quick
-  // flick reads as a lighter touch, like many drawing apps). Side of the
-  // brush from Shift or pen tilt.
+  // Touch: a pen's pressure. With a mouse or trackpad, full pressure, or a
+  // light touch while Option is held (the brush skims: on dry paper it
+  // catches only the tooth). Speed can lighten the touch too (knob
+  // speedTouch; off by default, as it made fast strokes break up into
+  // dots unexpectedly). Side of the brush from Shift or pen tilt.
   let lastMove = null, smoothSpeed = 0;
   const pressureOf = e => {
     if (e.pointerType === 'pen') return Math.max(e.pressure, 0.05) * 1.5;
@@ -810,7 +812,8 @@ function bindPointer(canvas) {
       smoothSpeed = smoothSpeed * 0.7 + v * 0.3;
     }
     lastMove = { t: now, x, y };
-    return 1 / (1 + values.speedTouch * smoothSpeed);
+    const light = e.altKey ? values.lightTouch : 1;
+    return light / (1 + values.speedTouch * smoothSpeed);
   };
   const sideOf = e => {
     if (e.shiftKey) return 1;
@@ -924,7 +927,11 @@ function buildUI({ clear, newPaper }) {
     const num = Object.assign(document.createElement('input'), { type: 'number', step: 'any', value: p.v });
     const name = document.createElement('span');
     name.textContent = p.label ?? p.key;
-    const set = v => { if (Number.isFinite(v)) { values[p.key] = v; range.value = v; num.value = +v.toPrecision(4); } };
+    const set = v => {
+      if (!Number.isFinite(v)) return;
+      values[p.key] = v; range.value = v; num.value = +v.toPrecision(4);
+      if (p.key === 'brushPigment') document.getElementById('strength').value = v;   // the panel's Paint strength slider
+    };
     range.addEventListener('input', () => set(parseFloat(range.value)));
     num.addEventListener('change', () => set(parseFloat(num.value)));
     inputs[p.key] = set;
@@ -1116,8 +1123,12 @@ function buildUI({ clear, newPaper }) {
   const applyPaperKnobs = () => {
     for (const [k, v] of Object.entries(PAPERS[state.paper].knobs)) inputs[k](v);
   };
+  const strength = document.getElementById('strength');
+  strength.value = values.brushPigment;
+  strength.addEventListener('input', () => { values.brushPigment = +strength.value; inputs.brushPigment(values.brushPigment); });
   uiSync = () => {
     for (const p of PARAMS) inputs[p.key](values[p.key]);
+    strength.value = values.brushPigment;
     document.getElementById('paperType').value = state.paper;
     document.getElementById('tone').value = state.tone;
   };
