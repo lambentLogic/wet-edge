@@ -22,6 +22,8 @@
 //                (phthalos push through a wash; "inert" pigments stay put).
 //   wick         how much the paper's capillary flow carries past the wet
 //                edge (the soft halo staining organics leave).
+//   magnetic     magnetic susceptibility relative to Mars black (magnetite);
+//                0 for everything else. Not used by the physics yet.
 
 const PAPER_WHITE = 0.97;
 const MASS_X = 2.0;
@@ -91,8 +93,8 @@ function fitKM(masstone, tint, opacity, scatter) {
 }
 
 // Organic pigments have low refractive indices: little scattering.
-const organic = { kind: 'organic', scatter: 0.04, density: 0.3, granulation: 0, flocculation: 0, mobility: 1.5, wick: 0.5 };
-const mineral = { kind: 'mineral', density: 1.3, flocculation: 0.2, mobility: 0.8, wick: 0 };
+const organic = { kind: 'organic', magnetic: 0, scatter: 0.04, density: 0.3, granulation: 0, flocculation: 0, mobility: 1.5, wick: 0.5 };
+const mineral = { kind: 'mineral', magnetic: 0, density: 1.3, flocculation: 0.2, mobility: 0.8, wick: 0 };
 
 const PANS = [
   { name: 'Phthalo Green', code: 'PG7', masstone: '#00594A', tint: '#1FA58C', opacity: 'transparent',
@@ -146,6 +148,12 @@ const PANS = [
   // Da Vinci natural raw umber; granulation seen wet largely vanishes dry.
   { name: 'Raw Umber', code: 'PBr7', masstone: '#4A3F2E', tint: '#A09A80', opacity: 'transparent',
     ...mineral, scatter: 0.06, staining: STAIN.medium, granulation: GRAN.slight },
+  // Synthetic magnetite, Fe3O4: a heavy, granulating, low-staining warm black
+  // with a high refractive index, and ferrimagnetic. It moves under a magnet
+  // while wet (the magnetism feature in the spec). Colours are estimates.
+  { name: 'Mars Black', code: 'PBk11', masstone: '#1F1D1C', tint: '#7B7874', opacity: 'semiopaque',
+    ...mineral, density: 1.7, staining: STAIN.low, granulation: GRAN.moderate, flocculation: 0.4, mobility: 0.7,
+    magnetic: 1 },
   // A dropped brushload displaces pigment in a moist wash (DS).
   { name: 'Titanium Buff', code: 'PW6:1', masstone: '#D9C9A8', tint: null, opacity: 'semiopaque',
     ...mineral, density: 1.2, staining: STAIN.low, granulation: GRAN.moderate, mobility: 1 },
