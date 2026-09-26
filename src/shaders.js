@@ -359,6 +359,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
 
   // Brush: stamped along the segment the pointer travelled this frame. Its
   // load can hold up to 4 pigments (a palette mix).
+  var liftK = 0.0;   // lifting agitation from the brush this step
   if (fr.brushOn == 1u) {
     let P = vec2f(f32(x) + 0.5, f32(y) + 0.5);
     let A = vec2f(fr.bx0, fr.by0);
@@ -400,6 +401,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
       w *= 1.0 - kl;
       for (var j = 0u; j < cn; j++) { camt[j] *= 1.0 - kl; }
       s *= 1.0 - kl;
+      liftK = kl;
     }
   }
 
@@ -423,6 +425,18 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
 
   var dep = D[i];
   var dOcc = vec4<bool>(dep.amt.x > 0.0, dep.amt.y > 0.0, dep.amt.z > 0.0, dep.amt.w > 0.0);
+
+  // Lifting: the damp, scrubbing brush detaches settled pigment and the
+  // brush takes it away, in proportion to how liftable each pigment is
+  // (inverse staining): Mars black and ultramarine come up readily, phthalos
+  // and quinacridones barely. Pigment fixed in the stain layer stays.
+  if (liftK > 0.0) {
+    for (var j = 0; j < 4; j++) {
+      if (!dOcc[j]) { continue; }
+      let omega = max(p.staining * pig[dep.id[j]].phys.y, 1e-4);
+      dep.amt[j] *= 1.0 - clamp(liftK * p.liftDry / (omega * omega), 0.0, 1.0);
+    }
+  }
   for (var j = 0u; j < cn; j++) {
     if (!taken[j] && camt[j] > 0.0) { depositInto(&dep, &dOcc, cid[j], camt[j]); }
   }

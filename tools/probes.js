@@ -55,6 +55,33 @@
   }
 
   const probes = {
+    // Lift: dried stripes of a non-staining and a staining pigment, then the
+    // Lift brush scrubbed across both. Fraction of each stripe's pigment
+    // removed where the lift passed.
+    async lift(paper = 'coldPress') {
+      await fresh(paper);
+      const names = ['Mars Black', 'French Ultramarine', 'Phthalo Blue (GS)', 'Quinacridone Rose'];
+      await withValues({ brushRadius: 22, brushPigment: 0.5 }, async () => {
+        for (const [k, name] of names.entries()) {
+          h.setBrush(name);
+          for (let y = 120 + k * 150; y <= 160 + k * 150; y += 20) { h.lift(); await h.paint(200, y, 800, y, 20); }
+        }
+        await h.wait(25); await h.wait(10, { dry: true }); await h.wait(2);
+      });
+      const band = async (y0) => { const a = await S.read(); let v = 0; for (let y = y0; y < y0 + 40; y++) for (let x = 470; x < 530; x++) v += a[(y * W + x) * 4 + 2]; return v; };
+      const before = []; for (let k = 0; k < 4; k++) before.push(await band(120 + k * 150));
+      h.setMode(2);
+      await withValues({ brushRadius: 25 }, async () => {
+        for (let pass = 0; pass < 3; pass++) { h.lift(); await h.paint(500, 80, 500, 700, 40); }
+        await h.wait(5);
+      });
+      h.setMode(0);
+      const out = {};
+      for (let k = 0; k < 4; k++) out[names[k]] = +(1 - (await band(120 + k * 150)) / before[k]).toFixed(2);
+      h.end();
+      return out;
+    },
+
     // Flood: a dozen overlapping wet passes, each a fresh touchdown on wet
     // paper, over a band 150-450. Fraction of wet cells outside the band
     // (plus a brush-radius margin) after a few seconds. Should be ~0.

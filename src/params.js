@@ -65,6 +65,7 @@ export const PARAMS = [
   { key: 'brushRate',     v: 0.4,  min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'load rate' },
   { key: 'brushCharge',   v: 0.1,  min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'wet-in-wet charge' },
   { key: 'chargeDuration', v: 0.1, min: 0, max: 2,  group: 'Brush', target: 'js',  label: 'charge lasts (s)' },
+  { key: 'liftDry',       v: 0.05, min: 0, max: 2,   group: 'Brush', target: 'sim', label: 'lifts dried paint' },
   { key: 'liftStrength',  v: 0.2,  min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'lift strength' },
 
   // --- Render (Kubelka-Munk) ---
