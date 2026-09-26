@@ -454,7 +454,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     bindNow = fr.time + wetStart >= p.bindTime;
     wetStart = max(fr.time, 1e-3);
   }
-  aux[i].w = wetStart;
+  if (wetStart != aux[i].w) { aux[i].w = wetStart; }
 
   // Keep the 4 largest candidates in suspension; the rest settle out.
   var gId = vec4u(0u); var gAmt = vec4f(0.0); var gOcc = vec4<bool>(false);
@@ -470,6 +470,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   }
 
   var dep = D[i];
+  let depIn = dep;
   var dOcc = vec4<bool>(dep.amt.x > 0.0, dep.amt.y > 0.0, dep.amt.z > 0.0, dep.amt.w > 0.0);
   if (bindNow) {
     // Everything here dried and set: bind it, and merge bound layers of the
@@ -613,7 +614,12 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   dep.stainK += vec4f(stK, stA);
   dep.stainS += vec4f(stS, stL);
   Gout[i] = gOut;
-  D[i] = dep;
+  // Write back only what changed (memory traffic is the bottleneck when
+  // much of the sheet is wet; amounts change every step, the rest rarely).
+  if (any(dep.amt != depIn.amt)) { D[i].amt = dep.amt; }
+  if (any(dep.stamp != depIn.stamp)) { D[i].stamp = dep.stamp; }
+  if (any(dep.id != depIn.id)) { D[i].id = dep.id; }
+  if (any(dep.stainK != depIn.stainK) || any(dep.stainS != depIn.stainS)) { D[i].stainK = dep.stainK; D[i].stainS = dep.stainS; }
   Aout[i] = vec4f(finite(w), sum4(gOut.amt), sum4(dep.amt) + dep.stainK.w, finite(s));
 }
 
