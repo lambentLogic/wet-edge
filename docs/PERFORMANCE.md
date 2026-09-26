@@ -17,16 +17,18 @@ anyone (human or model) looking for speedups.
 - Storage buffers (at the 10-per-stage limit):
   - A (w, gSum, dSum, s), 16 B, ping-pong
   - B (u, v, scratch, -), 16 B, ping-pong
-  - G: 4 pigment ids (packed bytes) + amounts, 20 B, ping-pong
-  - D: deposits (ids, amounts, stain K/S, timestamps), 80 B, in place
+  - G: 8 pigment ids (packed bytes) + amounts, 40 B, ping-pong
+  - D: 8 deposits (packed ids, amounts, timestamps) + stain K/S, 112 B, in place
   - aux (paper height, wet mask, fix time, wet start), 16 B
   - tiles, magnet field, pigments, magnets, params
 
 ## Where the time goes (M3 Pro, 18 GB)
 
-With the whole sheet wet (`speed` probe), on an idle GPU: 0.68x real
-time (about 2.4 ms per step). Part of the sheet wet (`speedPartial`):
-3.55x. (Earlier figures of 0.33x were taken while a painting tab and a
+With the whole sheet wet (`speed` probe), on an idle GPU: 0.38x real
+time since cells hold eight suspended and eight deposited pigments
+(2026-09-26; it was 0.68x with four of each). Part of the sheet wet
+(`speedPartial`): 2.29x (was 3.55x). The painter chose the slowdown to be
+rid of dark veins where many pigments meet. (Earlier figures of 0.33x were taken while a painting tab and a
 local LLM shared the GPU.)
 
 | Measurement | Time |

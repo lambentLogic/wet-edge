@@ -61,14 +61,19 @@ struct Pigment { K: vec4f, S: vec4f, phys: vec4f, phys2: vec4f };
 @group(0) @binding(4) var<storage, read_write> Aout: array<vec4f>;
 @group(0) @binding(5) var<storage, read> Bin: array<vec4f>;
 @group(0) @binding(6) var<storage, read_write> Bout: array<vec4f>;
-struct Comp4 { id: vec4u, amt: vec4f };
-// Stored form of Comp4 (20 bytes, not 32): the four pigment ids packed as
-// bytes into one u32. Memory traffic is what limits speed when much of the
-// sheet is wet, and every cell reads five of these per step.
-struct GP { ids: u32, amt: array<f32, 4> };
-fn unpackG(g: GP) -> Comp4 {
-  return Comp4(vec4u(g.ids & 255u, (g.ids >> 8u) & 255u, (g.ids >> 16u) & 255u, g.ids >> 24u),
-               vec4f(g.amt[0], g.amt[1], g.amt[2], g.amt[3]));
+// A cell's suspended pigment: up to NG components (pigment id, amount).
+// Eight, so a passage worked with many pigments keeps them all in the water
+// (with four, a fifth pigment settled on arrival and diffusion kept feeding
+// it in: dark veins where many pigments met).
+const NG: i32 = 8;
+struct Comp8 { id: array<u32, 8>, amt: array<f32, 8> };
+// Stored form (40 bytes): the ids packed as bytes into two u32.
+struct GP { ids: vec2u, amt: array<f32, 8> };
+fn unpackG(g: GP) -> Comp8 {
+  var o: Comp8;
+  o.amt = g.amt;
+  for (var k = 0; k < 8; k++) { o.id[k] = (g.ids[k / 4] >> (8u * u32(k % 4))) & 255u; }
+  return o;
 }
 // A cell's deposited (settled) components, up to ND of them, plus the
 // anonymous stain layer. stainK.w = stained amount; stamp = when each
@@ -94,10 +99,12 @@ fn packIds(d: Dep) -> vec2u {
 fn sumD(a: array<f32, 8>) -> f32 { var t = 0.0; for (var k = 0; k < 8; k++) { t += a[k]; } return t; }
 @group(0) @binding(9) var<storage, read> Gin: array<GP>;
 @group(0) @binding(10) var<storage, read_write> Gout: array<GP>;
-fn packG(c: Comp4) -> GP {
-  return GP((c.id.x & 255u) | ((c.id.y & 255u) << 8u) | ((c.id.z & 255u) << 16u) | ((c.id.w & 255u) << 24u),
-            array<f32, 4>(c.amt.x, c.amt.y, c.amt.z, c.amt.w));
+fn packG(c: Comp8) -> GP {
+  var w = vec2u(0u);
+  for (var k = 0; k < 8; k++) { w[k / 4] |= (c.id[k] & 255u) << (8u * u32(k % 4)); }
+  return GP(w, c.amt);
 }
+fn sumG(a: array<f32, 8>) -> f32 { var t = 0.0; for (var k = 0; k < 8; k++) { t += a[k]; } return t; }
 @group(0) @binding(11) var<storage, read_write> D: array<DS>;
 @group(0) @binding(12) var<uniform> pig: array<Pigment, ${MAXP}>;
 // Magnets under the paper, as magnetic charges (the pole model): each magnet
@@ -344,18 +351,18 @@ fn jam(a: vec4f) -> f32 {
   return 1.0 - smoothstep(p.jamLo, p.jamHi, a.y / max(a.x, 1e-4));
 }
 
-fn amtOf(c: Comp4, id: u32) -> f32 {
+fn amtOf(c: Comp8, id: u32) -> f32 {
   var a = 0.0;
-  for (var k = 0; k < 4; k++) { if (c.amt[k] > 0.0 && c.id[k] == id) { a += c.amt[k]; } }
+  for (var k = 0; k < NG; k++) { if (c.amt[k] > 0.0 && c.id[k] == id) { a += c.amt[k]; } }
   return a;
 }
 
 // Candidate list for this cell's suspended pigment: everything that ends up
 // here this step (own pigment that stays, inflow from neighbours, brush),
-// merged by id before the 4 largest are kept.
-const MAXC: u32 = 8u;
-var<private> cid: array<u32, 8>;
-var<private> camt: array<f32, 8>;
+// merged by id before NG of them are kept.
+const MAXC: u32 = 16u;
+var<private> cid: array<u32, 16>;
+var<private> camt: array<f32, 16>;
 var<private> cn: u32;
 // Pigment fixed into the stain layer this step (KM totals and amount).
 var<private> stK: vec3f;
@@ -383,7 +390,7 @@ fn addCand(id: u32, a: f32) {
   if (k >= 0) { camt[k] += a; return; }
   if (a < 0.0) { return; }
   if (cn < MAXC) { cid[cn] = id; camt[cn] = a; cn++; return; }
-  stainAdd(id, a);   // nine or more pigments meeting in one cell: fix it
+  stainAdd(id, a);   // seventeen or more pigments meeting in one cell: fix it
 }
 
 @compute @workgroup_size(16, 16)
@@ -411,8 +418,9 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     // DIAGNOSTIC: same reads and writes, no logic.
     let dep0 = D[i]; let au = aux[i];
     let nb = (aL + aR + aU + aD) * 1e-9 + vec4f(uR + uL + vD + vU) * 1e-9 + vec4f(au.w * 1e-12);
-    let ga = gi.amt + (gL.amt + gR.amt + gU.amt + gD.amt) * 1e-9;
-    Gout[i] = packG(Comp4(gi.id ^ ((gL.id ^ gR.id ^ gU.id ^ gD.id) & vec4u(0u)), ga));
+    var ga = gi.amt;
+    for (var k = 0; k < NG; k++) { ga[k] += (gL.amt[k] + gR.amt[k] + gU.amt[k] + gD.amt[k]) * 1e-9; }
+    Gout[i] = packG(Comp8(gi.id, ga));
     var am = dep0.amt; am[0] += dep0.stainK.w * 1e-12;
     D[i].amt = am;
     D[i].stamp = dep0.stamp;
@@ -435,8 +443,8 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   // sides, so pigment is conserved.
   let jI = jam(a); let jR = jam(aR); let jL = jam(aL); let jD = jam(aD); let jU = jam(aU);
   let keep = 1.0 - p.dt * (max(uR, 0.0) * jR + max(-uL, 0.0) * jL + max(vD, 0.0) * jD + max(-vU, 0.0) * jU);
-  for (var k = 0; k < 4; k++) { if (gi.amt[k] > 0.0) { addCand(gi.id[k], gi.amt[k] * keep); } }
-  if (VARIANT != 4u) { for (var k = 0; k < 4; k++) {
+  for (var k = 0; k < NG; k++) { if (gi.amt[k] > 0.0) { addCand(gi.id[k], gi.amt[k] * keep); } }
+  if (VARIANT != 4u) { for (var k = 0; k < NG; k++) {
     if (uR < 0.0 && gR.amt[k] > 0.0) { addCand(gR.id[k], -p.dt * uR * gR.amt[k] * jI); }
     if (uL > 0.0 && gL.amt[k] > 0.0) { addCand(gL.id[k],  p.dt * uL * gL.amt[k] * jI); }
     if (vD < 0.0 && gD.amt[k] > 0.0) { addCand(gD.id[k], -p.dt * vD * gD.amt[k] * jI); }
@@ -545,21 +553,21 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   var dep = unpackD(D[i]);
   let depIn = dep;
 
-  // Keep 4 candidates in suspension; the rest settle out. With more than
-  // four, rank each by all of it that's free here: suspended plus its unset
+  // Keep NG candidates in suspension; the rest settle out. With more than
+  // NG, rank each by all of it that's free here: suspended plus its unset
   // deposit. Ranked by suspended amount alone, a pigment arriving as the
   // fifth settled on arrival and could never be lifted again (the four
   // slots stayed taken), so neighbours kept feeding it in and it piled up
   // into dark lines. This way a growing pile wins a slot and lifts.
-  var rank: array<f32, 8>;
+  var rank: array<f32, 16>;
   for (var j = 0u; j < cn; j++) {
     var r = camt[j];
-    if (cn > 4u) { for (var k = 0; k < ND; k++) { if (dep.id[k] == cid[j] && dep.amt[k] > 0.0 && dep.stamp[k] >= 0.0) { r += dep.amt[k]; } } }
+    if (cn > u32(NG)) { for (var k = 0; k < ND; k++) { if (dep.id[k] == cid[j] && dep.amt[k] > 0.0 && dep.stamp[k] >= 0.0) { r += dep.amt[k]; } } }
     rank[j] = r;
   }
-  var gId = vec4u(0u); var gAmt = vec4f(0.0); var gOcc = vec4<bool>(false);
-  var taken: array<bool, 8>;
-  for (var slot = 0; slot < 4; slot++) {
+  var gId: array<u32, 8>; var gAmt: array<f32, 8>; var gOcc: array<bool, 8>;
+  var taken: array<bool, 16>;
+  for (var slot = 0; slot < NG; slot++) {
     var best = -1; var bestR = 0.0;
     for (var j = 0u; j < cn; j++) {
       if (!taken[j] && camt[j] > 0.0 && rank[j] > bestR) { best = i32(j); bestR = rank[j]; }
@@ -639,15 +647,15 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     for (var j = 0; j < ND; j++) {
       if (!dOcc[j]) { continue; }
       var found = false;
-      for (var k = 0; k < 4; k++) { if (gOcc[k] && gId[k] == dep.id[j]) { found = true; } }
+      for (var k = 0; k < NG; k++) { if (gOcc[k] && gId[k] == dep.id[j]) { found = true; } }
       if (!found) {
-        for (var k = 0; k < 4; k++) {
+        for (var k = 0; k < NG; k++) {
           if (!gOcc[k]) { gOcc[k] = true; gId[k] = dep.id[j]; gAmt[k] = 0.0; found = true; break; }
         }
       }
     }
     let thin = p.settleDepth / (w + 0.01);
-    for (var k = 0; k < 4; k++) {
+    for (var k = 0; k < NG; k++) {
       if (!gOcc[k]) { continue; }
       let id = gId[k];
       // Matching deposited component (allocate, or evict the most staining).
@@ -722,15 +730,15 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
 
   // Once the surface water is gone, whatever pigment it carried settles.
   if (w <= p.wEps) {
-    for (var k = 0; k < 4; k++) {
+    for (var k = 0; k < NG; k++) {
       if (gOcc[k] && gAmt[k] > 0.0) { depositInto(&dep, &dOcc, gId[k], gAmt[k]); }
       gAmt[k] = 0.0; gOcc[k] = false;
     }
   }
 
   // Write back; empty components get amount 0.
-  var gOut: Comp4;
-  for (var k = 0; k < 4; k++) {
+  var gOut: Comp8;
+  for (var k = 0; k < NG; k++) {
     let am = finite(select(0.0, gAmt[k], gOcc[k] && gAmt[k] > 1e-12));
     gOut.id[k] = gId[k]; gOut.amt[k] = am;
   }
@@ -754,7 +762,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   if (chS) { D[i].stamp = dep.stamp; }
   if (chI) { D[i].ids = packIds(dep); }
   if (any(dep.stainK != depIn.stainK) || any(dep.stainS != depIn.stainS)) { D[i].stainK = dep.stainK; D[i].stainS = dep.stainS; }
-  Aout[i] = vec4f(finite(w), sum4(gOut.amt), sumD(dep.amt) + dep.stainK.w, finite(s));
+  Aout[i] = vec4f(finite(w), sumG(gOut.amt), sumD(dep.amt) + dep.stainK.w, finite(s));
 }
 
 // A deposited component's timestamp is the amount-weighted mean time its
@@ -972,8 +980,8 @@ fn ownHere(x: i32, y: i32, id: u32, bucket: u32) -> f32 {
   return v;
 }
 
-fn mixPigments(x: i32, y: i32, a: vec4f, gi: Comp4,
-       aL: vec4f, aR: vec4f, aU: vec4f, aD: vec4f, gL: Comp4, gR: Comp4, gU: Comp4, gD: Comp4) {
+fn mixPigments(x: i32, y: i32, a: vec4f, gi: Comp8,
+       aL: vec4f, aR: vec4f, aU: vec4f, aD: vec4f, gL: Comp8, gR: Comp8, gU: Comp8, gD: Comp8) {
   if (a.x <= p.wEps) { return; }
   ownN = 0u;
   let i = ix(x, y);
@@ -1002,14 +1010,14 @@ fn mixPigments(x: i32, y: i32, a: vec4f, gi: Comp4,
       let contrast = (hi - min(cT, cnT)) / (hi + 1e-4);
       let base = p.pigmentDiffusion + p.marangoni * hi * pow(contrast, p.marangoniContrast);
       // Pigments present in the neighbour (and possibly here too).
-      for (var m = 0; m < 4; m++) {
+      for (var m = 0; m < NG; m++) {
         if (gn.amt[m] <= 0.0) { continue; }
         let id = gn.id[m];
         let rate = min(base * pig[id].phys2.x, cap);
         addCand(id, p.dt * face * rate * wmin * (gn.amt[m] / n.x - amtOf(gi, id) / a.x));
       }
       // Pigments present here but not in the neighbour.
-      for (var m = 0; m < 4; m++) {
+      for (var m = 0; m < NG; m++) {
         if (gi.amt[m] <= 0.0 || amtOf(gn, gi.id[m]) > 0.0) { continue; }
         let id = gi.id[m];
         let rate = min(base * pig[id].phys2.x, cap);
@@ -1027,14 +1035,14 @@ fn mixPigments(x: i32, y: i32, a: vec4f, gi: Comp4,
     // pigments; computed only if some pigment here flocculates.
     let together = clamp(p.flocTogether, 0.0, 1.0);
     var jointHere = 0.0; var jointThere = 0.0; var haveJoint = false;
-    for (var m = 0; m < 8; m++) {
+    for (var m = 0; m < 2 * NG; m++) {
       var id = 0u; var here = 0.0; var there = 0.0;
-      if (m < 4) {
+      if (m < NG) {
         if (gi.amt[m] <= 0.0) { continue; }
         id = gi.id[m]; here = gi.amt[m]; there = amtOf(gn, id);
       } else {
-        if (gn.amt[m - 4] <= 0.0 || amtOf(gi, gn.id[m - 4]) > 0.0) { continue; }
-        id = gn.id[m - 4]; here = 0.0; there = gn.amt[m - 4];
+        if (gn.amt[m - NG] <= 0.0 || amtOf(gi, gn.id[m - NG]) > 0.0) { continue; }
+        id = gn.id[m - NG]; here = 0.0; there = gn.amt[m - NG];
       }
       var v = 0.0;   // drift velocity from the neighbour into this cell
       let chiF = p.flocculation * pig[id].phys.w * p.flocDrift;
@@ -1062,11 +1070,19 @@ struct R {
   paperShade: f32, suspendedWeight: f32, fixDeepen: f32, spectral: f32,
 };
 struct Pigment { K: vec4f, S: vec4f, phys: vec4f, phys2: vec4f };
-struct Comp4 { id: vec4u, amt: vec4f };
-struct GP { ids: u32, amt: array<f32, 4> };   // stored form, see the sim
-fn unpackG(g: GP) -> Comp4 {
-  return Comp4(vec4u(g.ids & 255u, (g.ids >> 8u) & 255u, (g.ids >> 16u) & 255u, g.ids >> 24u),
-               vec4f(g.amt[0], g.amt[1], g.amt[2], g.amt[3]));
+// A cell's suspended pigment: up to NG components (pigment id, amount).
+// Eight, so a passage worked with many pigments keeps them all in the water
+// (with four, a fifth pigment settled on arrival and diffusion kept feeding
+// it in: dark veins where many pigments met).
+const NG: i32 = 8;
+struct Comp8 { id: array<u32, 8>, amt: array<f32, 8> };
+// Stored form (40 bytes, see the sim): the ids packed as bytes into two u32.
+struct GP { ids: vec2u, amt: array<f32, 8> };
+fn unpackG(g: GP) -> Comp8 {
+  var o: Comp8;
+  o.amt = g.amt;
+  for (var k = 0; k < 8; k++) { o.id[k] = (g.ids[k / 4] >> (8u * u32(k % 4))) & 255u; }
+  return o;
 }
 // A cell's deposited (settled) components, up to ND of them, plus the
 // anonymous stain layer. stainK.w = stained amount; stamp = when each
@@ -1190,7 +1206,7 @@ fn spectralColour(i: u32, wet: f32, h: f32) -> vec4f {
   }
 
   var Kw: array<vec4f, 4>; var Sw: array<vec4f, 4>; var tw = 0.0;
-  for (var k = 0; k < 4; k++) {
+  for (var k = 0; k < NG; k++) {
     let ag = max(g.amt[k], 0.0) * r.suspendedWeight;
     if (ag > 0.0) {
       let pk = g.id[k] * 8u;
@@ -1265,7 +1281,7 @@ fn fs(@builtin(position) fc: vec4f) -> @location(0) vec4f {
 
   // Wet pigment on top.
   var Kw = vec3f(0.0); var Sw = vec3f(0.0); var tw = 0.0;
-  for (var k = 0; k < 4; k++) {
+  for (var k = 0; k < NG; k++) {
     let ag = max(g.amt[k], 0.0) * r.suspendedWeight;
     if (ag > 0.0) { Kw += pig[g.id[k]].K.rgb * ag * r.thickness; Sw += pig[g.id[k]].S.rgb * ag * r.thickness; tw += ag; }
   }

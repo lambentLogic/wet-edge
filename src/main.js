@@ -12,9 +12,11 @@ const WG = 16;
 // Spectral table floats: pigments (16 K + 16 S each), ground, stain maps.
 const SPEC_FLOATS = MAX_PIGMENTS * 32 + NB + 6 * NB;
 // Suspended components (G): bytes per cell, stored packed (GP in
-// shaders.js): four 8-bit pigment ids in one u32, then four f32 amounts.
-const GB = 20;
-const gId = (gu, c, k) => (gu[c * 5] >>> (8 * k)) & 255;
+// shaders.js): eight 8-bit pigment ids in two u32, then eight f32 amounts.
+// As 32-bit words: ids 0-1, amounts 2-9.
+const NG = 8, GB = 40;
+const gId = (gu, c, k) => (gu[c * 10 + (k >> 2)] >>> (8 * (k & 3))) & 255;
+const gAmt = (gf, c, k) => gf[c * 10 + 2 + k];
 // Deposits (D): bytes per cell, stored packed (DS in shaders.js): stainK,
 // stainS (4 f32 each), 8 pigment ids as bytes in 2 u32, 8 f32 amounts,
 // 8 f32 stamps, padding. As floats: 0-3, 4-7, 8-9, 10-17, 18-25.
@@ -34,14 +36,19 @@ function packOldD(old) {
   }
   return out;
 }
-// Older saves: 4 u32 ids then 4 f32 amounts per cell (32 bytes).
-function packOldG(old) {
+// Older saves: version 3 packed four ids into one u32 then four amounts (20
+// bytes a cell); before that, four u32 ids then four amounts (32 bytes).
+function packOldG(old, version) {
   const ou = new Uint32Array(old), of = new Float32Array(old);
   const out = new ArrayBuffer(N * GB), nu = new Uint32Array(out), nf = new Float32Array(out);
   for (let c = 0; c < N; c++) {
     let ids = 0;
-    for (let k = 0; k < 4; k++) { ids |= (ou[c * 8 + k] & 255) << (8 * k); nf[c * 5 + 1 + k] = of[c * 8 + 4 + k]; }
-    nu[c * 5] = ids >>> 0;
+    for (let k = 0; k < 4; k++) {
+      const id = version >= 3 ? (ou[c * 5] >>> (8 * k)) & 255 : ou[c * 8 + k] & 255;
+      ids |= id << (8 * k);
+      nf[c * 10 + 2 + k] = version >= 3 ? of[c * 5 + 1 + k] : of[c * 8 + 4 + k];
+    }
+    nu[c * 10] = ids >>> 0;
   }
   return out;
 }
@@ -564,7 +571,7 @@ async function init() {
     const gu = new Uint32Array(g), gf = new Float32Array(g), du = new Uint32Array(d), df = new Float32Array(d);
     const out = new Float32Array(N);
     for (let c = 0; c < N; c++) {
-      for (let k = 0; k < 4; k++) if (gf[c * 5 + 1 + k] > 0 && gId(gu, c, k) === id) out[c] += gf[c * 5 + 1 + k];
+      for (let k = 0; k < NG; k++) if (gAmt(gf, c, k) > 0 && gId(gu, c, k) === id) out[c] += gAmt(gf, c, k);
       for (let k = 0; k < ND; k++) if (df[c * 28 + 10 + k] > 0 && dId(du, c, k) === id) out[c] += df[c * 28 + 10 + k];
     }
     return out;
@@ -659,7 +666,8 @@ async function init() {
   // Version 2: aux.z holds when each cell was last fixed (it was scratch).
   // Version 3: suspended components packed (20 bytes a cell, see GP).
   // Version 4: eight deposit components, packed (112 bytes a cell, see DS).
-  const STATE_VERSION = 4;
+  // Version 5: eight suspended components (40 bytes a cell, see GP).
+  const STATE_VERSION = 5;
   async function paintingBlob() {
     const parts = {
       A: await readBuffer(A[parity], N * 16),
@@ -726,13 +734,13 @@ async function init() {
     if ((meta.version ?? 1) < 2) { const f = new Float32Array(ax); for (let c = 0; c < N; c++) f[c * 4 + 2] = 0; }
     // Pigment ids refer to the library at save time; remap by name.
     const remap = meta.pigments.map(name => Math.max(PIGMENTS.findIndex(pg => pg.name === name), 0));
-    // Version 3 packs G (see GP); older saves hold 32-byte components.
-    if ((meta.version ?? 1) < 3) g = packOldG(g);
+    // Version 5 holds eight packed suspended components (see GP).
+    if ((meta.version ?? 1) < 5) g = packOldG(g, meta.version ?? 1);
     const gu = new Uint32Array(g), gf = new Float32Array(g);
     for (let c = 0; c < N; c++) {
-      let ids = 0;
-      for (let k = 0; k < 4; k++) ids |= ((gf[c * 5 + 1 + k] > 0 ? remap[gId(gu, c, k)] ?? 0 : 0) & 255) << (8 * k);
-      gu[c * 5] = ids >>> 0;
+      const w = [0, 0];
+      for (let k = 0; k < NG; k++) w[k >> 2] |= ((gAmt(gf, c, k) > 0 ? remap[gId(gu, c, k)] ?? 0 : 0) & 255) << (8 * (k & 3));
+      gu[c * 10] = w[0] >>> 0; gu[c * 10 + 1] = w[1] >>> 0;
     }
     // Version 4 has eight packed deposit components (see DS); older saves
     // hold four, unpacked (80 bytes a cell).
@@ -778,8 +786,8 @@ async function init() {
       if (Math.hypot(xx - x, yy - y) > r) continue;
       const c = (yy - y0) * W + xx; n++;
       water += a[c * 4]; damp += a[c * 4 + 3];
-      for (let k = 0; k < 4; k++) {
-        if (gf[c * 5 + 1 + k] > 0) { const nm = PIGMENTS[gId(gu, c, k)]?.name; wet[nm] = (wet[nm] ?? 0) + gf[c * 5 + 1 + k]; }
+      for (let k = 0; k < NG; k++) {
+        if (gAmt(gf, c, k) > 0) { const nm = PIGMENTS[gId(gu, c, k)]?.name; wet[nm] = (wet[nm] ?? 0) + gAmt(gf, c, k); }
       }
       for (let k = 0; k < ND; k++) {
         if (df[c * 28 + 10 + k] > 0) { const nm = PIGMENTS[dId(du, c, k)]?.name; dry[nm] = (dry[nm] ?? 0) + df[c * 28 + 10 + k]; }
