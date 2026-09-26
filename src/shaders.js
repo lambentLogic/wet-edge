@@ -31,7 +31,7 @@ struct Frame {
   time: f32,          // simulated seconds, for deposit timestamps
   radius: f32,        // brush radius this frame (tapered by pressure)
   load: f32,          // brush reservoir, 1 = freshly loaded, 0 = empty
-  _d: u32,
+  concMul: f32,       // paint concentration relative to the recipe (brush's pigment : water)
   brushId: vec4u,     // the brush's load: up to 4 pigments ...
   brushFrac: vec4f,   // ... and their fractions of the load (sum 1)
 };
@@ -376,12 +376,19 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     let r = fr.radius;
     var fall = clamp((r - dist) / max(r * p.brushSoftness, 1e-3), 0.0, 1.0);
     fall = fall * fall * (3.0 - 2.0 * fall);
-    // Dry-brush: a brush running low on water only touches the peaks of the
-    // paper's tooth, so the stroke breaks up (more on rough paper).
-    if (fr.mode != 2u && fr.load < p.dryBrushAt) {
-      let cut = (p.dryBrushAt - fr.load) / max(p.dryBrushAt, 1e-4);
-      fall *= smoothstep(cut - 0.08, cut + 0.08, aux[i].x);
+    // Dry-brush is technique: a light, fast touch with a fairly dry brush
+    // only kisses the peaks of the paper's tooth. It needs dry paper; on
+    // damp or wet paper the surface pulls the paint in and contact is full.
+    // (Speed enters through the touch: a quick mouse flick reads as a light
+    // touch, and pens and scripts give their pressure directly.)
+    let touch = (1.0 - clamp(fr.pressure, 0.0, 1.0)) * (1.0 - 0.6 * clamp(fr.load, 0.0, 1.0));
+    let dryPaper = a.x <= p.wEps && a.w < p.dampThreshold;
+    if (fr.mode != 2u && dryPaper && touch > 0.0) {
+      let cut = p.skipAmount * touch;
+      fall *= smoothstep(cut - 0.15, cut + 0.15, aux[i].x);
     }
+    // fr.brushScale includes the dwell (computed on the CPU from smoothed
+    // stroke speed): a fast stroke spends less time over each spot.
     let amt = fall * fr.brushScale * fr.pressure;
     let wBefore = w;
     var gAdded = 0.0;
@@ -396,6 +403,8 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     // pinning holds, or overlapping passes flood the paper.
     let chargeRoom = max(p.pinning - max(w, p.brushWater), 0.0);
     let charge = select(0.0, min(p.brushCharge * fr.charge * k, chargeRoom), a.x > p.wEps);
+    // Water the brush can still lay down falls as its reservoir empties.
+    let level = p.brushWater * mix(p.emptyLevel, 1.0, clamp(fr.load, 0.0, 1.0));
     if (fr.mode == 0u) {
       for (var b = 0; b < 4; b++) {
         let frac = fr.brushFrac[b];
@@ -403,13 +412,16 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
         let id = fr.brushId[b];
         let ci = candIndex(id);
         let cur = select(0.0, camt[max(ci, 0)], ci >= 0);
-        let conc = p.brushPigment * frac * max(pig[id].phys2.z, 0.0);
+        // Concentration follows the brush's pigment : water (computed on the
+        // CPU): an emptying dip brush's paint thickens, a squeezed water
+        // brush's paint thins.
+        let conc = p.brushPigment * frac * max(pig[id].phys2.z, 0.0) * max(fr.concMul, 0.0);
         let c0 = select(0.0, cur / w, w > p.wEps);
-        let next = max(cur, mix(cur, p.brushWater * conc, k)) + charge * max(conc - c0, 0.0);
+        let next = max(cur, mix(cur, level * conc, k)) + charge * max(conc - c0, 0.0);
         addCand(id, next - cur);
         gAdded += max(next - cur, 0.0);
       }
-      w = max(w, mix(w, p.brushWater, k)) + charge;
+      w = max(w, mix(w, level, k)) + charge;
     } else if (fr.mode == 1u) {
       w = max(w, mix(w, p.brushWater, k)) + charge;
     } else {

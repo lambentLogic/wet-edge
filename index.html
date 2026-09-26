@@ -43,7 +43,9 @@
   .dab { width: 18px; height: 18px; border-radius: 50%; padding: 0; font-size: 10px; line-height: 1;
     color: #fff; text-shadow: 0 0 2px #000, 0 0 2px #000; border: 1px solid #45423c; }
   .dab.clr { background: #34322e; text-shadow: none; }
-  #loadWrap { height: 4px; background: #34322e; border-radius: 2px; margin: 0 0 10px; overflow: hidden; }
+  #loadWrap, #pigWrap { height: 4px; background: #34322e; border-radius: 2px; margin: 0 0 3px; overflow: hidden; }
+  #pigWrap { margin-bottom: 10px; }
+  #pigBar { height: 100%; width: 100%; }
   #loadBar { height: 100%; width: 100%; background: var(--accent); transition: width 60ms linear; }
   .hint { color: var(--dim); font-size: 11px; margin-top: 10px; }
   #error { color: #e98a7a; }
@@ -69,7 +71,11 @@
   <div id="wells"></div>
   <div id="wellMsg" class="hint" style="margin:0 0 4px; color:#e98a7a"></div>
   <div id="brushLabel" class="hint" style="margin:0 0 4px"></div>
-  <div id="loadWrap" title="Brush reservoir: runs down as the brush lays water on the paper; reloads each stroke"><div id="loadBar"></div></div>
+  <div class="row" style="align-items:center; margin-bottom:4px">
+    <select id="brushType" title="Brush. Dip brushes reload every stroke. The water brush keeps its pigment and water between strokes: click a pan to pick up a dab, hold Q to squeeze water in, E to wipe the pigment out."></select>
+  </div>
+  <div id="loadWrap" title="Water in the brush"><div id="loadBar"></div></div>
+  <div id="pigWrap" title="Pigment in the brush"><div id="pigBar"></div></div>
   <div class="row"><select id="paperType" title="Paper texture and physics"></select><select id="tone" title="Paper tone" style="flex:0 0 auto"></select></div>
   <div class="row">
     <button id="dry">Blow-dry (hold)</button>
@@ -87,7 +93,7 @@
     <input id="openInput" type="file" accept=".wcpaint" hidden>
   </div>
   <div id="knobs"></div>
-  <p class="hint">Keys: 1 paint · 2 water · 3 lift · 4 magnet (R / scroll to rotate; double-click or drag off to remove) · F flip poles · [ ] pigment · hold D to dry · space pause · C clear.
+  <p class="hint">Keys: 1 paint · 2 water · 3 lift · Shift-drag side of brush · 4 magnet (R / scroll to rotate; double-click or drag off to remove) · F flip poles · [ ] pigment · hold D to dry · space pause · C clear.
     Number boxes are unclamped.</p>
 </aside>
 <script type="module" src="src/main.js"></script>

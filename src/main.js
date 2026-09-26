@@ -1,6 +1,7 @@
 import { PARAMS, SIM_PARAMS, simParamBufferSize } from './params.js';
 import { simWGSL, renderWGSL, MAX_PIGMENTS, MAX_CHARGES } from './shaders.js';
 import { SHAPES, buildCharges, drawMagnet, hitMagnet } from './magnets.js';
+import { BRUSHES, DEFAULT_BRUSH } from './brushes.js';
 import { makePaper, PAPERS, DEFAULT_PAPER, TONES } from './paper.js';
 import { PIGMENTS } from './pigments.js';
 
@@ -22,8 +23,15 @@ const state = {
   magnets: [],      // { shape, x, y, angle, moment } in grid cells (see magnets.js)
   magnetShape: 'disc',
   magDirty: true,   // magnet field needs recomputing
-  reservoir: 1,     // brush load: 1 = freshly loaded; reloads each stroke
+  reservoir: 1,     // water in the brush: 1 = fully loaded
+  // Dip brush: reloads its recipe every stroke. Water brush: pigment and
+  // water are separate stores that persist between strokes; clicking a pan
+  // adds a dab of pigment, Q squeezes water in, E wipes the pigment out.
+  brushType: 'dip',
+  pigStore: 1,      // pigment in the brush, in dabs (water brush)
+  squeezing: false,
   brushActive: false,
+  smoothSeg: 0,     // smoothed brush travel per frame (cells), for dwell
   pointer: { down: false, x: 0, y: 0, px: 0, py: 0, pressure: 1 },
 };
 
@@ -164,8 +172,18 @@ async function init() {
 
   const pointerBrush = () => {
     const ptr = state.pointer;
-    return ptr.down ? { x0: ptr.px, y0: ptr.py, x1: ptr.x, y1: ptr.y, pressure: ptr.pressure,
-                        age: (performance.now() - ptr.downAt) / 1000 } : null;
+    if (!ptr.down) return null;
+    const age = (performance.now() - ptr.downAt) / 1000;
+    let pressure = ptr.pressure;
+    // Without a pen: strokes ease in from a light touch at touchdown.
+    if (!ptr.pen) pressure *= Math.min(1, 0.3 + 0.7 * age / Math.max(values.touchdownEase, 1e-3));
+    // Hand input: the brush trails the pointer smoothly instead of jumping to
+    // each event, so it never sits still between events (which dotted fast
+    // strokes). Scripted strokes are already smooth and go straight there.
+    const follow = ptr.scripted ? 1 : 0.5;
+    ptr.nx = ptr.px + (ptr.x - ptr.px) * follow;
+    ptr.ny = ptr.py + (ptr.y - ptr.py) * follow;
+    return { x0: ptr.px, y0: ptr.py, x1: ptr.nx, y1: ptr.ny, pressure, side: ptr.side ?? 0, age };
   };
 
   function writeUniforms(substeps, brush = pointerBrush(), drying = state.drying) {
@@ -175,18 +193,33 @@ async function init() {
     frameU32[0] = W; frameU32[1] = H; frameU32[2] = state.mode; frameU32[3] = brush ? 1 : 0;
     if (brush) {
       frameF32[4] = brush.x0; frameF32[5] = brush.y0; frameF32[6] = brush.x1; frameF32[7] = brush.y1;
-      frameF32[8] = brush.pressure ?? 1;
-      // Taper: width follows pressure (a mouse stays at full width).
+      // Side of the brush (Shift, or a tilted pen): a wider, lighter touch,
+      // the classic dry-brush drag of a round's belly.
+      const side = Math.min(Math.max(brush.side ?? 0, 0), 1);
       const pr = Math.min(Math.max(brush.pressure ?? 1, 0), 1);
-      frameF32[13] = values.brushRadius * (values.taperMin + (1 - values.taperMin) * pr);
+      // Contact: lighter on the side of the brush (drives skipping and load).
+      frameF32[8] = pr * (1 - 0.65 * side);
+      // Taper: width follows pressure; the side of the brush is wider.
+      frameF32[13] = values.brushRadius * (values.taperMin + (1 - values.taperMin) * pr) * (1 + 0.8 * side);
       // Wet-in-wet charge: strongest at touchdown, then the reservoir is spent.
       const dur = Math.max(values.chargeDuration, 1e-3);
       frameF32[11] = Math.exp(-(brush.age ?? 0) / dur);
     }
-    frameF32[9] = 1 / substeps;
+    // Dwell: a fast stroke spends less time over each spot and lays less
+    // there. Measured from the smoothed per-frame travel, since mouse events
+    // and frames don't line up (a frame with no new event would otherwise
+    // read as the brush resting, and dot the stroke).
+    let dwell = 1;
+    if (brush) {
+      const seg = Math.hypot(brush.x1 - brush.x0, brush.y1 - brush.y0);
+      state.smoothSeg = brush.age < 0.02 ? seg : state.smoothSeg * 0.6 + seg * 0.4;
+      dwell = Math.min(1, Math.max(0.15, 2 * frameF32[13] / Math.max(state.smoothSeg, 1e-3)));
+    }
+    frameF32[9] = dwell / substeps;
     frameF32[10] = drying ? values.dryerStrength : 1;
     frameF32[12] = state.simTime;
     frameF32[14] = values.brushCapacity > 0 ? state.reservoir : 1;
+    frameF32[15] = concMul();
     if (!brush) frameF32[13] = values.brushRadius;
     state.brushActive = !!brush;
     // Brush load: pigment ids at u32 16..19, fractions at f32 20..23.
@@ -209,6 +242,7 @@ async function init() {
   const gx = Math.ceil(W / WG), gy = Math.ceil(H / WG);
   const fpsEl = document.getElementById('fps');
   const loadBar = document.getElementById('loadBar');
+  const pigBar = document.getElementById('pigBar');
   let last = performance.now(), frames = 0;
 
   // The sim advances in real time, independent of display refresh rate.
@@ -219,6 +253,15 @@ async function init() {
   let stepDebt = 0, lastFrame = performance.now();
 
   const argsReset = new Uint32Array([0, 1, 1, 0, 0, 0, 0, 0]);
+
+  // Paint concentration relative to the recipe. Dip brush: its pigment stays
+  // in the bristles as the water goes, so paint thickens as it empties.
+  // Water brush: the ratio of the two stores.
+  function concMul() {
+    const w = values.brushCapacity > 0 ? state.reservoir : 1;
+    if (state.brushType === 'water') return Math.min(state.pigStore / Math.max(w, 0.05), 4);
+    return 1 + values.thicken * (1 - w);
+  }
 
   // Brush reservoir: the GPU tallies the water each frame's stamp actually
   // left on the paper (wet paper takes little, dry paper a lot); it comes
@@ -239,7 +282,11 @@ async function init() {
     const u = new Uint32Array(brushRB[k].getMappedRange().slice(0));
     brushRB[k].unmap();
     rbBusy[k] = false;
-    if (values.brushCapacity > 0) state.reservoir = Math.max(0, state.reservoir - u[0] / 1e4 / values.brushCapacity);
+    if (values.brushCapacity > 0) {
+      state.reservoir = Math.max(0, state.reservoir - u[0] / 1e4 / values.brushCapacity);
+      // A dab is a fixed amount of pigment, whatever the brush's water holds.
+      if (state.brushType === 'water') state.pigStore = Math.max(0, state.pigStore - u[1] / 1e4 / Math.max(values.dabSize, 1e-6));
+    }
   }
 
   // One frame's worth of simulation: find active tiles, then run the physics
@@ -306,7 +353,7 @@ async function init() {
     if (!state.paused && !state.headless && substeps > 0) {
       rbk = encodeSim(enc, substeps);
       // Only consume the brush segment once the sim has actually stamped it.
-      state.pointer.px = state.pointer.x; state.pointer.py = state.pointer.y;
+      if (state.pointer.down) { state.pointer.px = state.pointer.nx; state.pointer.py = state.pointer.ny; }
     }
     const rp = enc.beginRenderPass({
       colorAttachments: [{ view: ctx.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: [1, 1, 1, 1] }],
@@ -317,7 +364,10 @@ async function init() {
     rp.end();
     device.queue.submit([enc.finish()]);
     collectBrush(rbk);
+    if (state.squeezing) state.reservoir = Math.min(1, state.reservoir + values.squeezeRate * elapsed);
     loadBar.style.width = `${Math.round((values.brushCapacity > 0 ? state.reservoir : 1) * 100)}%`;
+    pigBar.style.width = `${Math.round(Math.min(state.brushType === 'water' ? state.pigStore : 1, 1) * 100)}%`;
+    pigBar.style.background = state.brush.length ? swatchColor(PIGMENTS[state.brush[0].pigment]) : 'transparent';
 
     frames++;
     const now = performance.now();
@@ -377,7 +427,7 @@ async function init() {
     // reloaded) unless lift() is called in between.
     lift() { strokeFrame = 0; },
     async paint(x0, y0, x1, y1, frames = 24) {
-      if (strokeFrame === 0) state.reservoir = 1;   // a fresh stroke: reloaded
+      if (strokeFrame === 0 && state.brushType === 'dip') state.reservoir = 1;   // a fresh dip stroke: reloaded
       const at = f => {
         const t0 = f / frames, t1 = (f + 1) / frames;
         return { x0: x0 + (x1 - x0) * t0, y0: y0 + (y1 - y0) * t0, x1: x0 + (x1 - x0) * t1, y1: y0 + (y1 - y0) * t1,
@@ -389,6 +439,11 @@ async function init() {
     wait(seconds, { dry = false } = {}) { strokeFrame = 0; return simFrames(Math.round(seconds * HZ), () => null, dry); },
     setMode(m) { state.mode = m; },
     setTone(key) { state.tone = key; },
+    // Brush type ('dip' | 'water'), and water-brush squeezing / store levels.
+    setBrushType(t) { state.brushType = t; state.reservoir = 1; state.pigStore = 1; },
+    setBrushPreset(key) { const b = BRUSHES[key]; Object.assign(values, b.knobs); state.brushType = b.type; state.reservoir = 1; state.pigStore = 1; },
+    squeeze(seconds) { state.reservoir = Math.min(1, state.reservoir + values.squeezeRate * seconds); },
+    brushStores() { return { water: +state.reservoir.toFixed(3), pigment: +state.pigStore.toFixed(3) }; },
     // Magnets under the paper: [{ x, y, moment }] in grid cells.
     setMagnets(list) { state.magnets = list.map(mg => ({ shape: 'disc', angle: 0, moment: 1, ...mg })); drawMagnets(); },
     magnetCount() { return state.magnets.length; },
@@ -417,7 +472,8 @@ async function init() {
     const ptr = state.pointer;
     let f = 0;
     ptr.x = ptr.px = x0; ptr.y = ptr.py = y0; ptr.pressure = 1; ptr.downAt = performance.now(); ptr.down = true;
-    state.reservoir = 1;
+    ptr.pen = true; ptr.side = 0; ptr.scripted = true;
+    if (state.brushType === 'dip') state.reservoir = 1;
     const step = () => {
       f++;
       ptr.x = x0 + (x1 - x0) * f / frames; ptr.y = y0 + (y1 - y0) * f / frames;
@@ -447,7 +503,8 @@ async function init() {
     const ptr = state.pointer;
     const [x0, y0, p0 = 1] = points[0];
     ptr.x = ptr.px = x0; ptr.y = ptr.py = y0; ptr.pressure = p0; ptr.downAt = performance.now(); ptr.down = true;
-    state.reservoir = 1;
+    ptr.pen = true; ptr.side = 0; ptr.scripted = true;   // scripted strokes use their exact pressure and path
+    if (state.brushType === 'dip') state.reservoir = 1;
     let seg = 1, f = 0;
     const step = () => {
       if (seg >= points.length) { ptr.down = false; done(); return; }
@@ -593,7 +650,25 @@ function bindPointer(canvas) {
     const r = canvas.getBoundingClientRect();
     return [(e.clientX - r.left) / r.width * W, (e.clientY - r.top) / r.height * H];
   };
-  const pressureOf = e => (e.pointerType === 'pen' ? Math.max(e.pressure, 0.05) * 1.5 : 1);
+  // Touch: a pen's pressure, or for a mouse/trackpad its speed (a quick
+  // flick reads as a lighter touch, like many drawing apps). Side of the
+  // brush from Shift or pen tilt.
+  let lastMove = null, smoothSpeed = 0;
+  const pressureOf = e => {
+    if (e.pointerType === 'pen') return Math.max(e.pressure, 0.05) * 1.5;
+    const now = performance.now(), [x, y] = toGrid(e);
+    if (lastMove) {
+      const dt = Math.max(now - lastMove.t, 1), v = Math.hypot(x - lastMove.x, y - lastMove.y) / dt;
+      smoothSpeed = smoothSpeed * 0.7 + v * 0.3;
+    }
+    lastMove = { t: now, x, y };
+    return 1 / (1 + values.speedTouch * smoothSpeed);
+  };
+  const sideOf = e => {
+    if (e.shiftKey) return 1;
+    if (e.pointerType === 'pen' && (e.tiltX || e.tiltY)) return Math.min(Math.max((Math.hypot(e.tiltX, e.tiltY) - 30) / 40, 0), 1);
+    return 0;
+  };
   // Magnet mode: click to place, drag to move. To remove one: double-click
   // it, drag it off the paper, press Delete after touching it, or
   // Option/Control/right-click it.
@@ -632,7 +707,7 @@ function bindPointer(canvas) {
   });
   canvas.addEventListener('contextmenu', e => { if (state.mode === 3) e.preventDefault(); });
   canvas.addEventListener('pointerdown', e => {
-    state.reservoir = 1;   // each stroke starts with a loaded brush
+    if (state.brushType === 'dip') state.reservoir = 1;   // a dip brush is reloaded each stroke
     if (state.mode === 3) {
       const [x, y] = toGrid(e);
       const hit = magnetAt(x, y);
@@ -652,7 +727,11 @@ function bindPointer(canvas) {
     try { canvas.setPointerCapture(e.pointerId); } catch {}
     [ptr.x, ptr.y] = toGrid(e);
     ptr.px = ptr.x; ptr.py = ptr.y;
+    lastMove = null; smoothSpeed = 0;
+    ptr.scripted = false;
     ptr.pressure = pressureOf(e);
+    ptr.side = sideOf(e);
+    ptr.pen = e.pointerType === 'pen';
     ptr.downAt = performance.now();
     ptr.down = true;
   });
@@ -660,6 +739,8 @@ function bindPointer(canvas) {
     if (dragMagnet) { [dragMagnet.x, dragMagnet.y] = toGrid(e); drawMagnets(); return; }
     [ptr.x, ptr.y] = toGrid(e);
     ptr.pressure = pressureOf(e);
+    ptr.side = sideOf(e);
+    ptr.pen = e.pointerType === 'pen';
   });
   const up = () => {
     ptr.down = false;
@@ -724,12 +805,48 @@ function buildUI({ clear, newPaper }) {
   });
 
   const setPigment = i => {
-    state.brush = [{ pigment: i, frac: 1 }];
+    if (state.brushType === 'water') {
+      // Pick up a dab: it joins whatever is still in the brush.
+      const items = state.brush.map(b => ({ ...b, frac: b.frac * state.pigStore }));
+      const hit = items.find(b => b.pigment === i);
+      if (hit) hit.frac += 1; else items.push({ pigment: i, frac: 1 });
+      items.sort((a, b) => b.frac - a.frac);
+      state.brush = items.filter(b => b.frac > 0.02).slice(0, 4);
+      state.pigStore = state.brush.reduce((t, b) => t + b.frac, 0);
+      state.brush.forEach(b => { b.frac /= state.pigStore; });
+    } else {
+      state.brush = [{ pigment: i, frac: 1 }];
+    }
     selectedWell = -1;
     renderWells();
     pans.forEach((pan, j) => pan.classList.toggle('on', j === i));
-    brushLabel.textContent = `${PIGMENTS[i].name} · ${PIGMENTS[i].code}`;
+    updateBrushLabel();
   };
+  function updateBrushLabel() {
+    const names = state.brush.map(b => PIGMENTS[b.pigment].code);
+    brushLabel.textContent = state.brushType === 'water'
+      ? `Water brush: ${state.pigStore > 0.02 ? state.brush.map(b => `${Math.round(b.frac * 100)}% ${PIGMENTS[b.pigment].code}`).join(' + ') : 'clean'} · Q squeeze, E wipe`
+      : (state.brush.length === 1 ? `${PIGMENTS[state.brush[0].pigment].name} · ${names[0]}` : names.join(' + '));
+  }
+  // Brush presets set the brush knobs and type together.
+  const brushSel = document.getElementById('brushType');
+  for (const [key, b] of Object.entries(BRUSHES)) brushSel.add(new Option(b.name, key));
+  const applyBrush = key => {
+    const b = BRUSHES[key];
+    for (const [k, v] of Object.entries(b.knobs)) inputs[k](v);
+    state.brushType = b.type;
+    state.reservoir = 1; state.pigStore = 1;
+    brushSel.value = key;
+    updateBrushLabel();
+  };
+  brushSel.addEventListener('change', () => applyBrush(brushSel.value));
+  applyBrush(DEFAULT_BRUSH);
+  window.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || state.brushType !== 'water') return;
+    if (e.key === 'q' || e.key === 'Q') state.squeezing = true;
+    if (e.key === 'e' || e.key === 'E') { state.pigStore = 0; updateBrushLabel(); }
+  });
+  window.addEventListener('keyup', e => { if (e.key === 'q' || e.key === 'Q') state.squeezing = false; });
 
   // Mixing wells: each holds dabs of up to 4 pigments (the most a wet spot
   // on the paper can carry). Saved in this browser.
@@ -760,6 +877,7 @@ function buildUI({ clear, newPaper }) {
     pans.forEach(pan => pan.classList.remove('on'));
     if (w.length) {
       state.brush = w.map(d => ({ pigment: d.pigment, frac: d.dabs }));
+      if (state.brushType === 'water') state.pigStore = 1;
       brushLabel.textContent = `Well ${k + 1}: ` + w.map(d => `${d.dabs} ${PIGMENTS[d.pigment].code}`).join(' + ');
     } else {
       brushLabel.textContent = `Well ${k + 1} is empty: shift-click pans (or turn on Mix) to add dabs`;

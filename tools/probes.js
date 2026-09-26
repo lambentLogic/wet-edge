@@ -56,21 +56,64 @@
   }
 
   const probes = {
-    // Dry-brush: one long stroke on rough paper from a single load. Fraction
-    // of the stroke's footprint that got paint over its first and last
-    // fifths. With a finite reservoir the end should break up.
+    // Water brush: one dab of pigment, five strokes without reloading, a
+    // squeeze before the fourth. Mean paint in each stroke and the brush's
+    // stores after it: strokes should pale as pigment runs out, the squeeze
+    // should refill water and dilute.
+    async waterbrush(paper = 'coldPress') {
+      await fresh(paper);
+      h.setBrushPreset('water');
+      h.setBrush('French Ultramarine');
+      const out = [];
+      await withValues({ brushPigment: 0.5 }, async () => {
+        for (let k = 0; k < 5; k++) {
+          if (k === 3) h.squeeze(1.5);
+          const y = 150 + k * 110;
+          h.lift(); await h.paint(150, y, 870, y, 40);
+          await h.wait(0.2);
+          const a = await S.read(); let sum = 0, n = 0;
+          for (let yy = y - 8; yy < y + 8; yy++) for (let x = 200; x < 820; x++) { sum += a[(yy * W + x) * 4 + 1] + a[(yy * W + x) * 4 + 2]; n++; }
+          out.push({ paint: +(sum / n).toFixed(4), ...h.brushStores() });
+        }
+      });
+      h.setBrushType('dip');
+      h.end();
+      return out;
+    },
+
+    // Dry-brush and an emptying brush, on rough paper. Coverage of each
+    // stroke's footprint (fraction of cells with paint) and the mean paint
+    // where it landed:
+    //  - loaded: a long, firm stroke from one load (start vs end fifths).
+    //    It should stay solid and get more intense as it empties.
+    //  - skim: a light, fast stroke on dry paper. It should break up.
+    //  - damp: the same light, fast stroke over damp paper. Full contact.
     async drybrush(paper = 'rough') {
       await fresh(paper);
+      h.end();   // path() paints through the real-time loop
       h.setBrush('French Ultramarine');
+      const stats = async (x0, x1, y) => {
+        const a = await S.read(); let n = 0, hit = 0, sum = 0;
+        for (let yy = y - 6; yy < y + 6; yy++) for (let x = x0; x < x1; x++) { n++; const v = a[(yy * W + x) * 4 + 1] + a[(yy * W + x) * 4 + 2]; if (v > 0.01) { hit++; sum += v; } }
+        return { cover: +(hit / n).toFixed(2), paint: +(sum / Math.max(hit, 1)).toFixed(3) };
+      };
+      const out = {};
       await withValues({ brushRadius: 14, brushPigment: 0.5, brushCapacity: 4000 }, async () => {
-        h.lift();
-        await h.paint(80, 380, 950, 380, 120);
-        await h.wait(15); await h.wait(8, { dry: true }); await h.wait(2);
+        await S.path([[80, 200, 1], [950, 200, 1]].flatMap((p, k, arr) => k ? Array.from({ length: 30 }, (_, j) => [arr[0][0] + (p[0] - arr[0][0]) * (j + 1) / 30, 200, 1]) : [p]), 4);
+        await new Promise(r => setTimeout(r, 300));
+        out.loadedStart = await stats(100, 270, 200); out.loadedEnd = await stats(760, 930, 200);
+        await S.path([[80, 400, 0.25], [950, 400, 0.25]], 30);
+        await new Promise(r => setTimeout(r, 300));
+        out.skim = await stats(200, 800, 400);
+        h.setMode(1);
+        await S.path([[60, 600, 1], [980, 600, 1]], 40);
+        await new Promise(r => setTimeout(r, 1500));
+        h.setMode(0);
+        await S.path([[80, 600, 0.25], [950, 600, 0.25]], 30);
+        await new Promise(r => setTimeout(r, 300));
+        out.damp = await stats(200, 800, 600);
       });
-      h.end();
-      const a = await S.read();
-      const cover = (x0, x1) => { let n = 0, hit = 0; for (let y = 370; y < 390; y++) for (let x = x0; x < x1; x++) { n++; if (a[(y * W + x) * 4 + 2] > 0.01) hit++; } return +(hit / n).toFixed(2); };
-      return { start: cover(100, 270), end: cover(760, 930) };
+      return out;
     },
 
     // Taper: pressure falls from 1 to 0.1 along a stroke. Painted width
