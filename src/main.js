@@ -21,6 +21,7 @@ const state = {
   paused: false,
   headless: false,
   simTime: 0,       // simulated seconds (deposit timestamps)
+  lastEdit: -Infinity, // when the painting was last touched (for autosave)
   magnets: [],      // { shape, x, y, angle, moment } in grid cells (see magnets.js)
   magnetShape: 'disc',
   magDirty: true,   // magnet field needs recomputing
@@ -359,6 +360,7 @@ async function init() {
     writeUniforms(Math.max(substeps, 1));
     const enc = device.createCommandEncoder();
     let rbk = -1;
+    if (state.pointer.down || state.drying) state.lastEdit = t;
     if (!state.paused && !state.headless && substeps > 0) {
       rbk = encodeSim(enc, substeps);
       // Only consume the brush segment once the sim has actually stamped it.
@@ -447,6 +449,7 @@ async function init() {
     },
     wait(seconds, { dry = false } = {}) { strokeFrame = 0; return simFrames(Math.round(seconds * HZ), () => null, dry); },
     setMode(m) { state.mode = m; },
+    mode() { return state.mode; },
     setTone(key) { state.tone = key; },
     // Brush type ('dip' | 'water'), and water-brush squeezing / store levels.
     setBrushType(t) { state.brushType = t; state.reservoir = 1; state.pigStore = 1; },
@@ -531,10 +534,10 @@ async function init() {
   window.__sim.setDrying = on => { state.drying = on; document.getElementById('dry').classList.toggle('on', on); };
 
   // ---- save / open
-  async function readBuffer(src, size) {
+  async function readBuffer(src, size, offset = 0) {
     const rb = device.createBuffer({ size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
     const enc = device.createCommandEncoder();
-    enc.copyBufferToBuffer(src, 0, rb, 0, size);
+    enc.copyBufferToBuffer(src, offset, rb, 0, size);
     device.queue.submit([enc.finish()]);
     await rb.mapAsync(GPUMapMode.READ);
     const out = rb.getMappedRange().slice(0);
@@ -558,7 +561,7 @@ async function init() {
   // deposit timestamps, the paper itself, magnets and knobs, so a painting can
   // be reopened (and rewetted) later. Gzipped; mostly zeros compress well.
   const STATE_VERSION = 1;
-  async function savePainting() {
+  async function paintingBlob() {
     const parts = {
       A: await readBuffer(A[parity], N * 16),
       G: await readBuffer(G[parity], N * 32),
@@ -573,9 +576,45 @@ async function init() {
     const head = new TextEncoder().encode(JSON.stringify(meta));
     const len = new Uint32Array([head.byteLength]);
     const blob = new Blob([len, head, parts.A, parts.G, parts.D, parts.aux]);
-    const gz = await new Response(blob.stream().pipeThrough(new CompressionStream('gzip'))).blob();
-    download(gz, `painting-${stamp()}.wcpaint`);
+    return new Response(blob.stream().pipeThrough(new CompressionStream('gzip'))).blob();
   }
+  async function savePainting() {
+    download(await paintingBlob(), `painting-${stamp()}.wcpaint`);
+  }
+
+  // Autosave into the browser's own storage (IndexedDB), so a reload or a
+  // closed tab doesn't lose unsaved work. Saves every 20 s while you're
+  // painting and for two minutes after (while it dries), keeping the last
+  // two saves; after a reload, Restore offers them.
+  const autosave = (() => {
+    const open = () => new Promise((res, rej) => {
+      const rq = indexedDB.open('hyperreal-watercolor', 1);
+      rq.onupgradeneeded = () => rq.result.createObjectStore('autosave');
+      rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error);
+    });
+    const tx = async (mode, fn) => {
+      const db = await open();
+      return new Promise((res, rej) => {
+        const t = db.transaction('autosave', mode), st = t.objectStore('autosave'), out = fn(st);
+        t.oncomplete = () => res(out.result ?? out); t.onerror = () => rej(t.error);
+      });
+    };
+    let saving = false;
+    async function save() {
+      if (saving || state.headless) return;
+      saving = true;
+      try {
+        const blob = await paintingBlob(), at = Date.now();
+        const prev = await tx('readonly', st => st.get('latest'));
+        await tx('readwrite', st => { if (prev) st.put(prev, 'previous'); return st.put({ blob, at }, 'latest'); });
+      } catch (e) { console.warn('autosave failed:', e); } finally { saving = false; }
+    }
+    setInterval(() => {
+      const now = performance.now();
+      if (now - state.lastEdit < 120000) save();
+    }, 20000);
+    return { save, get: key => tx('readonly', st => st.get(key)) };
+  })();
 
   async function openPainting(file) {
     const raw = await new Response(file.stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
@@ -639,6 +678,12 @@ async function init() {
     const avg = o => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, +(v / n).toFixed(4)]));
     return { water: +(water / n).toFixed(4), damp: +(damp / n).toFixed(4), wet: avg(wet), settled: avg(dry), reservoir: +state.reservoir.toFixed(3) };
   };
+  // Debug hook: everything stored for one cell.
+  window.__sim.cell = async (x, y) => {
+    const c = y * W + x, f = async (buf, n) => new Float32Array(await readBuffer(buf, n * 4, c * n * 4));
+    const d = await f(Dbuf, 20), du = new Uint32Array(d.buffer);
+    return { A: [...await f(A[parity], 4)], aux: [...await f(auxBuf, 4)], dep: [0, 1, 2, 3].filter(k => d[4 + k] > 0).map(k => ({ pig: PIGMENTS[du[k]]?.name, amt: d[4 + k], stamp: d[16 + k] })), time: state.simTime };
+  };
   window.__sim.savePNG = savePNG;
   window.__minds = makeMinds(window.__sim);
   window.__sim.savePainting = savePainting;
@@ -647,6 +692,19 @@ async function init() {
   buildUI({ clear, newPaper });
   document.getElementById('savePNG').addEventListener('click', () => savePNG().catch(e => fail(e.message)));
   document.getElementById('savePainting').addEventListener('click', () => savePainting().catch(e => fail(e.message)));
+  // Restore: offer the autosaves, newest first.
+  const restoreBtn = document.getElementById('restorePainting');
+  const ago = at => { const m = Math.round((Date.now() - at) / 60000); return m < 1 ? 'just now' : m < 90 ? `${m} min ago` : new Date(at).toLocaleString(); };
+  (async () => {
+    const saves = (await Promise.all(['latest', 'previous'].map(k => autosave.get(k).catch(() => null)))).filter(Boolean);
+    if (!saves.length) return;
+    let k = 0;
+    const label = () => { restoreBtn.textContent = `Restore (${ago(saves[k].at)})`; restoreBtn.title = saves.length > 1 ? 'Restore the autosave; click again for the one before' : 'Restore the autosave'; };
+    label(); restoreBtn.hidden = false;
+    restoreBtn.addEventListener('click', () => {
+      openPainting(saves[k].blob).then(() => { k = (k + 1) % saves.length; label(); }).catch(e => fail(`Couldn't restore: ${e.message}`));
+    });
+  })();
   const openInput = document.getElementById('openInput');
   document.getElementById('openPainting').addEventListener('click', () => openInput.click());
   openInput.addEventListener('change', () => {

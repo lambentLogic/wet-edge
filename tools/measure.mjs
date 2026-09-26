@@ -6,6 +6,8 @@
 //   node tools/measure.mjs edge bleed              # selected probes
 //   node tools/measure.mjs edge --set marangoni=0  # with knob overrides
 //   node tools/measure.mjs --paper vellum          # on another paper preset
+//   node tools/measure.mjs fill --eval 'window.__fillOpts = {spacing: 1}'
+//                                                  # run page JS before probes
 //
 // CHROME_PATH overrides the browser; APP_URL overrides the address.
 
@@ -22,9 +24,11 @@ const overrides = {};
 const names = [];
 let paper = 'coldPress';
 let shot = null;
+const evals = [];
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--paper') paper = args[++i];
   else if (args[i] === '--shot') shot = args[++i];
+  else if (args[i] === '--eval') evals.push(args[++i]);
   else if (args[i] === '--set') {
     const [k, v] = args[++i].split('=');
     overrides[k] = parseFloat(v);
@@ -42,10 +46,11 @@ const browser = await puppeteer.launch({
 try {
   const page = await browser.newPage();
   await page.setViewport({ width: 1500, height: 900, deviceScaleFactor: 1 });
-  page.on('console', m => { if (m.type() === 'error') console.error('[page]', m.text()); });
+  page.on('console', m => { if (m.type() === 'error' && !m.text().includes('404')) console.error('[page]', m.text()); });
   await page.goto(APP_URL);
   await page.waitForFunction(() => window.__sim?.headless, { timeout: 20_000 });
   await page.evaluate(await readFile(new URL('./probes.js', import.meta.url), 'utf8'));
+  for (const js of evals) await page.evaluate(js);
 
   const all = await page.evaluate(() => Object.keys(window.__probes).filter(k => k !== 'withValues'));
   const run = names.length ? names : all;

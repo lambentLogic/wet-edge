@@ -22,6 +22,7 @@
     h.begin();
     h.setPaper(paper);
     h.setTone('natural');
+    h.setBrushPreset('round');    // don't inherit another probe's brush
     h.setBrush('French Ultramarine');
     S.values.brushCapacity = 0;   // probes use an endless reservoir unless they say otherwise
     Object.assign(S.values, active);
@@ -56,6 +57,43 @@
   }
 
   const probes = {
+    // The fill mind: a full-width mop glaze (phthalo blue + ultramarine)
+    // across fresh paper and over a dried base wash of the same pigments.
+    // For each region: seam = strongest thin line (1-2 cells) across the
+    // rows, as a fraction of the mean (paper texture alone gives ~0.05);
+    // banding = spread of row averages. Seams used to appear at every row
+    // when a glaze unbound the old paint under it.
+    async fill(paper = 'coldPress') {
+      await fresh(paper);
+      h.end();
+      h.setBrushPreset('mop');
+      S.values.brushCapacity = 0;
+      const mix = [['Phthalo Blue (GS)', 1], ['French Ultramarine', 1]];
+      h.setBrush(mix);
+      S.values.brushPigment = 0.1;
+      const base = [[250, 150], [774, 150], [774, 450], [250, 450]];
+      await window.__minds.fill(base);
+      await window.__minds.waitDry(base, { maxS: 60 });
+      S.values.brushCapacity = 30000;
+      h.setBrush([['Phthalo Blue (GS)', 3], ['French Ultramarine', 1]]);
+      S.values.brushPigment = 0.045;
+      const glaze = [[-10, 150], [1034, 150], [1034, 400], [-10, 400]];
+      const r = await window.__minds.fill(glaze);
+      await window.__minds.waitDry(glaze, { maxS: 60 });
+      h.begin();
+      const a = await S.read();
+      const region = (x0, x1) => {
+        const rows = [];
+        for (let y = 200; y < 380; y++) { let v = 0; for (let x = x0; x < x1; x++) { const i = (y * W + x) * 4; v += a[i + 1] + a[i + 2]; } rows.push(v / (x1 - x0)); }
+        const mean = rows.reduce((s, v) => s + v, 0) / rows.length;
+        const sd = Math.sqrt(rows.reduce((s, v) => s + (v - mean) ** 2, 0) / rows.length);
+        let seam = 0;
+        for (let k = 3; k < rows.length - 3; k++) seam = Math.max(seam, Math.abs(rows[k] - (rows[k - 3] + rows[k + 3]) / 2) / mean);
+        return { seam: +seam.toFixed(2), banding: +(sd / mean).toFixed(3) };
+      };
+      return { fresh: region(20, 220), overBase: region(400, 624), rewets: r.rewets };
+    },
+
     // Water brush: one dab of pigment, five strokes without reloading, a
     // squeeze before the fourth. Mean paint in each stroke and the brush's
     // stores after it: strokes should pale as pigment runs out, the squeeze

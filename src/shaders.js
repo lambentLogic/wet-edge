@@ -54,7 +54,7 @@ struct Pigment { K: vec4f, S: vec4f, phys: vec4f, phys2: vec4f };
 @group(0) @binding(5) var<storage, read> Bin: array<vec4f>;
 @group(0) @binding(6) var<storage, read_write> Bout: array<vec4f>;
 struct Comp4 { id: vec4u, amt: vec4f };
-// stainK.w = stained amount; stamp = when each component last received
+// stainK.w = stained amount; stamp = when each component last received (negative: bound, see stampMix)
 // pigment, so the renderer can stack washes in the order they dried.
 struct Dep { id: vec4u, amt: vec4f, stainK: vec4f, stainS: vec4f, stamp: vec4f };
 @group(0) @binding(9) var<storage, read> Gin: array<Comp4>;
@@ -439,10 +439,22 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     if (gAdded > 1e-6) { atomicAdd(&tiles.brushAcc[1], u32(gAdded * 1e4 + 0.5)); }
   }
 
-  // When this cell's current wetting began: pigment deposited before then
-  // has dried and is bound.
+  // Wetting and drying. aux.w > 0: when this cell's current wetting began.
+  // aux.w <= 0: the cell is dry, since -aux.w. Gum arabic binds the pigment
+  // once the paper has stayed dry for bindTime; rewetting after that marks
+  // everything deposited here as bound (it rewets slowly). A rim that
+  // flickers dry for a moment between dabs is still the same wetting.
   var wetStart = aux[i].w;
-  if (a.x <= p.wEps && w > p.wEps) { wetStart = fr.time; aux[i].w = wetStart; }
+  // Dry means the paper itself has nearly dried out, not just lost its shine.
+  let dryNow = a.x <= p.wEps && a.w < 0.25 * p.dampThreshold;
+  var bindNow = false;
+  // (Paper wicking ahead of a wet front counts as wetting too.)
+  if (dryNow && wetStart > 0.0) { wetStart = -fr.time; }
+  if (!dryNow && wetStart <= 0.0) {
+    bindNow = fr.time + wetStart >= p.bindTime;
+    wetStart = max(fr.time, 1e-3);
+  }
+  aux[i].w = wetStart;
 
   // Keep the 4 largest candidates in suspension; the rest settle out.
   var gId = vec4u(0u); var gAmt = vec4f(0.0); var gOcc = vec4<bool>(false);
@@ -459,6 +471,20 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
 
   var dep = D[i];
   var dOcc = vec4<bool>(dep.amt.x > 0.0, dep.amt.y > 0.0, dep.amt.z > 0.0, dep.amt.w > 0.0);
+  if (bindNow) {
+    // Everything here dried and set: bind it, and merge bound layers of the
+    // same pigment so the next wash has free components to settle into.
+    for (var k = 0; k < 4; k++) { if (dep.stamp[k] >= 0.0) { dep.stamp[k] = -dep.stamp[k] - 1.0; } }
+    for (var k = 0; k < 4; k++) {
+      for (var m = k + 1; m < 4; m++) {
+        if (dOcc[k] && dOcc[m] && dep.id[m] == dep.id[k]) {
+          let t = (stampTime(dep.stamp[k]) * dep.amt[k] + stampTime(dep.stamp[m]) * dep.amt[m]) / max(dep.amt[k] + dep.amt[m], 1e-12);
+          dep.amt[k] += dep.amt[m]; dep.stamp[k] = -t - 1.0;
+          dep.amt[m] = 0.0; dOcc[m] = false;
+        }
+      }
+    }
+  }
 
   // Lifting: the damp, scrubbing brush detaches settled pigment and the
   // brush takes it away, in proportion to how liftable each pigment is
@@ -519,11 +545,20 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
       }
       // Pigment that dried before this wetting began is bound by its gum
       // arabic and rewets slowly: only a fraction goes back into suspension.
-      let bound = select(1.0, p.rewetLift, dep.stamp[j] < wetStart);
-      let up = min(max(dep.amt[j] * (1.0 + (h - 1.0) * gam), 0.0) * rho / omega * bound * p.dt, dep.amt[j]);
+      let lift = max(1.0 + (h - 1.0) * gam, 0.0) * rho / omega * p.dt;
+      let bound = select(1.0, p.rewetLift, dep.stamp[j] < 0.0);
+      let up = min(dep.amt[j] * lift * bound, dep.amt[j]);
       gAmt[k] += up - down;
       dep.stamp[j] = stampMix(dep.stamp[j], dep.amt[j], down);
       dep.amt[j] += down - up;
+      // A bound layer of the same pigment underneath, kept apart from the
+      // fresh deposit, rewets slowly too.
+      for (var m = 0; m < 4; m++) {
+        if (m != j && dOcc[m] && dep.id[m] == id && dep.stamp[m] < 0.0) {
+          let upB = min(dep.amt[m] * lift * p.rewetLift, dep.amt[m]);
+          gAmt[k] += upB; dep.amt[m] -= upB;
+        }
+      }
     }
   }
 
@@ -584,11 +619,17 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
 
 // A deposited component's timestamp is the amount-weighted mean time its
 // pigment settled, so a little old paint lifting and resettling under a new
-// wash doesn't drag the whole old layer up into it.
+// wash doesn't drag the whole old layer up into it. Its sign says whether
+// the component is bound (dried and gum-set): bound stamps are stored as
+// -time - 1. Fresh pigment settling onto a bound layer of the same pigment
+// joins it bound, rather than unbinding the old paint.
 fn stampMix(stamp: f32, amt: f32, added: f32) -> f32 {
   if (added <= 0.0) { return stamp; }
-  return (stamp * max(amt, 0.0) + fr.time * added) / (max(amt, 0.0) + added);
+  let t = (stampTime(stamp) * max(amt, 0.0) + fr.time * added) / (max(amt, 0.0) + added);
+  return select(t, -t - 1.0, stamp < 0.0);
 }
+
+fn stampTime(stamp: f32) -> f32 { return select(stamp, -stamp - 1.0, stamp < 0.0); }
 
 // Put pigment into a cell's deposited components: same pigment, else an
 // empty component, else the permanent stain layer.
@@ -609,17 +650,20 @@ fn stainDep(dep: ptr<function, Dep>, id: u32, a: f32) {
   (*dep).stainS += vec4f(pig[id].S.rgb * a, a / (om * om));
 }
 
-// The deposited component for pigment id: the matching one, else an empty
-// one. With all four taken, the most staining pigment present is the one
+// The deposited component for fresh pigment id: the matching unbound one,
+// else an empty one (so fresh paint settling over a bound layer of the same
+// pigment stays free while this wetting lasts), else the matching bound one
+// (it joins that layer bound). With all four taken, the most staining pigment present is the one
 // fixed into the stain layer (it behaves like stain anyway): if that is an
 // existing component it is evicted and the slot reused; if it is the
 // newcomer, returns -1 and the caller stains the newcomer. Non-staining
 // pigments like Mars black keep their identity and stay liftable.
 fn depSlot(dep: ptr<function, Dep>, occ: ptr<function, vec4<bool>>, id: u32) -> i32 {
-  for (var m = 0; m < 4; m++) { if ((*occ)[m] && (*dep).id[m] == id) { return m; } }
+  for (var m = 0; m < 4; m++) { if ((*occ)[m] && (*dep).id[m] == id && (*dep).stamp[m] >= 0.0) { return m; } }
   for (var m = 0; m < 4; m++) {
     if (!(*occ)[m]) { (*occ)[m] = true; (*dep).id[m] = id; (*dep).amt[m] = 0.0; (*dep).stamp[m] = fr.time; return m; }
   }
+  for (var m = 0; m < 4; m++) { if ((*occ)[m] && (*dep).id[m] == id) { return m; } }
   var e = 0;
   for (var m = 1; m < 4; m++) { if (stainOmega((*dep).id[m]) > stainOmega((*dep).id[e])) { e = m; } }
   if (stainOmega((*dep).id[e]) <= stainOmega(id)) { return -1; }
@@ -843,17 +887,19 @@ fn fs(@builtin(position) fc: vec4f) -> @location(0) vec4f {
   var col = Rg;
   col = overLayer(col, dep.stainK.rgb * r.thickness, dep.stainS.rgb * r.thickness, dep.stainK.w);
 
-  // Deposited components, oldest first.
+  // Deposited components, oldest first (a stamp's sign marks bound paint;
+  // the time is its magnitude, see stampTime in the sim).
+  let st = vec4f(select(dep.stamp, -dep.stamp - vec4f(1.0), dep.stamp < vec4f(0.0)));
   var done = vec4<bool>(false);
   for (var n = 0; n < 4; n++) {
     var first = -1;
     for (var k = 0; k < 4; k++) {
-      if (!done[k] && dep.amt[k] > 0.0 && (first < 0 || dep.stamp[k] < dep.stamp[first])) { first = k; }
+      if (!done[k] && dep.amt[k] > 0.0 && (first < 0 || st[k] < st[first])) { first = k; }
     }
     if (first < 0) { break; }
     var Kx = vec3f(0.0); var Sx = vec3f(0.0); var total = 0.0;
     for (var k = 0; k < 4; k++) {
-      if (!done[k] && dep.amt[k] > 0.0 && dep.stamp[k] - dep.stamp[first] <= LAYER_GAP) {
+      if (!done[k] && dep.amt[k] > 0.0 && st[k] - st[first] <= LAYER_GAP) {
         done[k] = true;
         let ad = dep.amt[k] * r.thickness;
         Kx += pig[dep.id[k]].K.rgb * ad; Sx += pig[dep.id[k]].S.rgb * ad; total += dep.amt[k];
