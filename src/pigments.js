@@ -122,8 +122,10 @@ const PANS = [
   // "Blooms very readily" yet "inert wet in wet" (handprint).
   { name: 'Pyrrole Scarlet', code: 'PR255', masstone: '#D8321E', tint: '#F2826A', opacity: 'semitransparent',
     ...organic, scatter: undefined, staining: STAIN.high, granulation: 0.1, mobility: 0.8 },
-  { name: 'Perylene Maroon', code: 'PR179', masstone: '#5A1A1E', tint: '#B8606A', opacity: 'transparent',
-    ...organic, staining: STAIN.high, mobility: 1.2 },
+  // Rated transparent, but shows up on a dark ground (painter's
+  // observation), so its scattering is fitted rather than fixed low.
+  { name: 'Perylene Maroon', code: 'PR179', masstone: '#5A1A1E', tint: '#B8606A', opacity: 'semitransparent',
+    ...organic, scatter: undefined, staining: STAIN.high, mobility: 1.2 },
   { name: 'Perylene Green', code: 'PBk31', masstone: '#1E2B24', tint: '#5E7F74', opacity: 'semitransparent',
     ...organic, staining: STAIN.medium, mobility: 1.2 },
   // "Inactive wet in wet but blossoms when rewetted" (handprint).
