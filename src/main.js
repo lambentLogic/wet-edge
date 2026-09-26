@@ -328,6 +328,7 @@ async function init() {
     setTone(key) { state.tone = key; },
     // Magnets under the paper: [{ x, y, moment }] in grid cells.
     setMagnets(list) { state.magnets = list.map(mg => ({ moment: 1, ...mg })); drawMagnets(); },
+    magnetCount() { return state.magnets.length; },
     pigmentNames() { return PIGMENTS.map(pg => pg.name); },
     // Load the brush: setBrush('French Ultramarine') or a mix,
     // setBrush([['French Ultramarine', 2], ['Burnt Umber', 1]]).
@@ -374,22 +375,39 @@ function bindPointer(canvas) {
     return [(e.clientX - r.left) / r.width * W, (e.clientY - r.top) / r.height * H];
   };
   const pressureOf = e => (e.pointerType === 'pen' ? Math.max(e.pressure, 0.05) * 1.5 : 1);
-  // Magnet mode: click to place, drag to move, Alt/right-click to remove.
+  // Magnet mode: click to place, drag to move. To remove one: double-click
+  // it, drag it off the paper, press Delete after touching it, or
+  // Option/Control/right-click it.
   let dragMagnet = null;
+  let lastMagnet = null;
+  const removeMagnet = mg => { state.magnets = state.magnets.filter(x => x !== mg); if (lastMagnet === mg) lastMagnet = null; drawMagnets(); };
+  canvas.addEventListener('dblclick', e => {
+    if (state.mode !== 3) return;
+    const hit = magnetAt(...toGrid(e));
+    if (hit) removeMagnet(hit);
+  });
+  window.addEventListener('keydown', e => {
+    if (state.mode === 3 && lastMagnet && (e.key === 'Delete' || e.key === 'Backspace')
+        && e.target.tagName !== 'INPUT' && e.target.tagName !== 'SELECT') {
+      e.preventDefault();
+      removeMagnet(lastMagnet);
+    }
+  });
   const magnetAt = (x, y) => state.magnets.find(mg => Math.hypot(mg.x - x, mg.y - y) < 18);
   canvas.addEventListener('contextmenu', e => { if (state.mode === 3) e.preventDefault(); });
   canvas.addEventListener('pointerdown', e => {
     if (state.mode === 3) {
       const [x, y] = toGrid(e);
       const hit = magnetAt(x, y);
-      if (e.altKey || e.button === 2) {
-        if (hit) state.magnets = state.magnets.filter(mg => mg !== hit);
+      if (e.altKey || e.ctrlKey || e.button === 2) {
+        if (hit) removeMagnet(hit);
       } else if (hit) {
         dragMagnet = hit;
       } else if (state.magnets.length < 8) {
         dragMagnet = { x, y, moment: 1 };
         state.magnets.push(dragMagnet);
       }
+      lastMagnet = dragMagnet ?? lastMagnet;
       try { canvas.setPointerCapture(e.pointerId); } catch {}
       drawMagnets();
       return;
@@ -406,7 +424,12 @@ function bindPointer(canvas) {
     [ptr.x, ptr.y] = toGrid(e);
     ptr.pressure = pressureOf(e);
   });
-  const up = () => { ptr.down = false; dragMagnet = null; };
+  const up = () => {
+    ptr.down = false;
+    // A magnet dragged off the paper is removed.
+    if (dragMagnet && (dragMagnet.x < 0 || dragMagnet.y < 0 || dragMagnet.x > W || dragMagnet.y > H)) removeMagnet(dragMagnet);
+    dragMagnet = null;
+  };
   canvas.addEventListener('pointerup', up);
   canvas.addEventListener('pointercancel', up);
 }
