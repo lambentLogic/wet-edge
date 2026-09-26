@@ -122,7 +122,7 @@ async function init() {
   newPaper();
 
   // ---- pipelines
-  const simModule = device.createShaderModule({ code: simWGSL(TX * TY) });
+  const simModule = device.createShaderModule({ code: simWGSL(TX * TY, undefined, undefined, window.__transportVariant ?? 0) });
   const renderModule = device.createShaderModule({ code: renderWGSL() });
   for (const m of [simModule, renderModule]) {
     const info = await m.getCompilationInfo();

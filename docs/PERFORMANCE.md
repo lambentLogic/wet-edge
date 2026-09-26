@@ -70,6 +70,32 @@ estimate, not profiled.
   big transport shader may be limited more by arithmetic or latency than
   by raw bandwidth. Profiling with timestamp queries would tell.
 
+- Diagnostic transport variants (Sol's suggestion, 2026-09-26): same
+  reads and writes but parts of the logic removed. Whole sheet wet, idle
+  GPU (`PRE_JS="window.__transportVariant=N" node tools/measure.mjs speed`):
+
+  | variant | speed |
+  | --- | --- |
+  | full transport | 0.68-0.70x |
+  | 1: reads and writes only, no logic | 11x |
+  | 2: no mixing/drift | 0.98x |
+  | 3: no settling | 0.81x |
+  | `--set mixing=0` + 3 | 1.21x |
+  | 4 (+ no neighbour candidates) + `mixing=0` | 1.20x |
+  | `--set flocculation=0` | 0.81x |
+
+  So memory traffic is about 6% of transport's time; the logic is the
+  rest. Mixing and flocculation drift are about 30% of it; settling about
+  15%; gathering neighbours' candidates almost nothing. Most of the cost
+  (1.2x vs 11x) is in what every cell runs regardless: the candidate
+  list and its sort, the deposit-slot loops, binding, absorption. They
+  index small private arrays (cid/camt/taken, the Dep fields) with loop
+  counters, which on GPUs can push them out of registers into local
+  memory. Next experiment: rewrite that bookkeeping with fixed indices
+  (unrolled, vec4 selects) and compare, checking stateHash.
+- Caching the flocculation noise per cell (bit-identical): no measurable
+  change. Kept, harmless.
+
 ## Ideas not yet tried
 
 - Settle and absorb every few steps (multi-rate), so D is touched less.

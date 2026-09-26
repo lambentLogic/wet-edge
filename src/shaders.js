@@ -22,7 +22,13 @@ import { TO_RGB } from './spectral.js';
 export const MAX_PIGMENTS = 32;
 export const MAX_CHARGES = 512;
 
-export const simWGSL = (NTILES, MAXP = MAX_PIGMENTS, MAXQ = MAX_CHARGES) => /* wgsl */ `
+export const simWGSL = (NTILES, MAXP = MAX_PIGMENTS, MAXQ = MAX_CHARGES, VARIANT = 0) => /* wgsl */ `
+// Diagnostic transport variants for profiling (see docs/PERFORMANCE.md);
+// 0 in normal use, where the others compile away. Chosen before load with
+// window.__transportVariant (PRE_JS for tools/measure.mjs).
+//   1: same reads and writes, no logic   2: no mixing/drift
+//   3: no settling                      4: as 3, and no candidates from neighbours
+const VARIANT: u32 = ${VARIANT}u;
 ${paramStructWGSL()}
 
 struct Frame {
@@ -374,6 +380,17 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   if (x < W() - 1) { let j = ix(x + 1, y); aR = Ain[j]; gR = unpackG(Gin[j]); }
   if (y > 0)       { let j = ix(x, y - 1); vU = Bout[j].y; aU = Ain[j]; gU = unpackG(Gin[j]); }
   if (y < H() - 1) { let j = ix(x, y + 1); aD = Ain[j]; gD = unpackG(Gin[j]); }
+  if (VARIANT == 1u) {
+    // DIAGNOSTIC: same reads and writes, no logic.
+    let dep0 = D[i]; let au = aux[i];
+    let nb = (aL + aR + aU + aD) * 1e-9 + vec4f(uR + uL + vD + vU) * 1e-9 + vec4f(au.w * 1e-12);
+    let ga = gi.amt + (gL.amt + gR.amt + gU.amt + gD.amt) * 1e-9;
+    Gout[i] = packG(Comp4(gi.id ^ ((gL.id ^ gR.id ^ gU.id ^ gD.id) & vec4u(0u)), ga));
+    D[i].amt = dep0.amt + vec4f(dep0.stainK.w * 1e-12);
+    D[i].stamp = dep0.stamp;
+    Aout[i] = a + nb;
+    return;
+  }
 
   let fwR = uR * select(aR.x, a.x, uR > 0.0);
   let fwL = uL * select(a.x, aL.x, uL > 0.0);
@@ -385,14 +402,14 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   // in carry their components.
   let keep = 1.0 - p.dt * (max(uR, 0.0) + max(-uL, 0.0) + max(vD, 0.0) + max(-vU, 0.0));
   for (var k = 0; k < 4; k++) { if (gi.amt[k] > 0.0) { addCand(gi.id[k], gi.amt[k] * keep); } }
-  for (var k = 0; k < 4; k++) {
+  if (VARIANT != 4u) { for (var k = 0; k < 4; k++) {
     if (uR < 0.0 && gR.amt[k] > 0.0) { addCand(gR.id[k], -p.dt * uR * gR.amt[k]); }
     if (uL > 0.0 && gL.amt[k] > 0.0) { addCand(gL.id[k],  p.dt * uL * gL.amt[k]); }
     if (vD < 0.0 && gD.amt[k] > 0.0) { addCand(gD.id[k], -p.dt * vD * gD.amt[k]); }
     if (vU > 0.0 && gU.amt[k] > 0.0) { addCand(gU.id[k],  p.dt * vU * gU.amt[k]); }
-  }
+  } }
 
-  if (p.mixing > 0.5 || mag.anyMagnet > 0u) { mixPigments(x, y, a, gi, aL, aR, aU, aD, gL, gR, gU, gD); }
+  if (VARIANT != 2u && (p.mixing > 0.5 || mag.anyMagnet > 0u)) { mixPigments(x, y, a, gi, aL, aR, aU, aD, gL, gR, gU, gD); }
 
   var s = a.w;
 
@@ -570,7 +587,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   // settling also scales with 1/depth: pigment in a deep pool mostly stays
   // suspended and drops out as the water thins, which concentrates it at
   // drying edges. Global knobs multiply each pigment's own properties.
-  if (w > p.wEps) {
+  if (VARIANT != 3u && VARIANT != 4u && w > p.wEps) {
     // Deposited pigment can go back into suspension when there's room.
     for (var j = 0; j < 4; j++) {
       if (!dOcc[j]) { continue; }
@@ -862,12 +879,17 @@ fn valueNoise(x: f32, y: f32, seed: u32) -> f32 {
 fn flocNoise(fx: f32, fy: f32, seed: u32) -> f32 {
   return 0.65 * valueNoise(fx, fy, seed) + 0.35 * valueNoise(fx * 2.3 + 11.0, fy * 2.3 + 5.0, seed + 1u);
 }
-fn flocField(x: i32, y: i32, id: u32, bucket: u32) -> f32 {
+// The two parts of the field: each pigment's own, and the joint one all
+// pigments share. flocField = mix(own, joint, flocTogether). mixPigments
+// evaluates them once per cell and face and reuses them (noise is the
+// costliest part of the step).
+fn flocOwn(x: i32, y: i32, id: u32, bucket: u32) -> f32 {
   let sc = max(p.flocScale / 0.2, 1.0);   // mm -> cells
-  let fx = f32(x) / sc; let fy = f32(y) / sc;
-  let own = flocNoise(fx, fy, id * 7919u + bucket * 104729u + 17u);
-  let joint = flocNoise(fx, fy, bucket * 104729u + 5003u);
-  return mix(own, joint, clamp(p.flocTogether, 0.0, 1.0));
+  return flocNoise(f32(x) / sc, f32(y) / sc, id * 7919u + bucket * 104729u + 17u);
+}
+fn flocJoint(x: i32, y: i32, bucket: u32) -> f32 {
+  let sc = max(p.flocScale / 0.2, 1.0);
+  return flocNoise(f32(x) / sc, f32(y) / sc, bucket * 104729u + 5003u);
 }
 
 // ---------------------------------------------------------------- pigment mixing
@@ -884,9 +906,23 @@ fn flocField(x: i32, y: i32, id: u32, bucket: u32) -> f32 {
 // the outward flow that builds edge darkening. Each exchange uses the smaller
 // of the two cells' weights and a rate symmetric in the two cells, so it
 // conserves pigment. Capped at the explicit-scheme stability limit.
+// This cell's own clumping field per pigment, cached across its four faces
+// (reset per cell in mixPigments).
+var<private> ownId: array<u32, 4>;
+var<private> ownB: array<u32, 4>;
+var<private> ownV: array<f32, 4>;
+var<private> ownN: u32;
+fn ownHere(x: i32, y: i32, id: u32, bucket: u32) -> f32 {
+  for (var k = 0u; k < ownN; k++) { if (ownId[k] == id && ownB[k] == bucket) { return ownV[k]; } }
+  let v = flocOwn(x, y, id, bucket);
+  if (ownN < 4u) { ownId[ownN] = id; ownB[ownN] = bucket; ownV[ownN] = v; ownN++; }
+  return v;
+}
+
 fn mixPigments(x: i32, y: i32, a: vec4f, gi: Comp4,
        aL: vec4f, aR: vec4f, aU: vec4f, aD: vec4f, gL: Comp4, gR: Comp4, gU: Comp4, gD: Comp4) {
   if (a.x <= p.wEps) { return; }
+  ownN = 0u;
   let i = ix(x, y);
   let cT = a.y / a.x;
   let wi = smoothstep(p.mixEdgeLo, p.mixEdgeHi, aux[i].y);
@@ -934,6 +970,10 @@ fn mixPigments(x: i32, y: i32, a: vec4f, gi: Comp4,
     // the same flux, so it conserves pigment.
     let bucket = u32(max(floor(max(aux[i].w, aux[j].w) / 10.0), 0.0));
     let dPhi = magPhi[i] - magPhi[j];   // |B|^2, from magField
+    // Joint clumping field at both ends of this face, shared by all
+    // pigments; computed only if some pigment here flocculates.
+    let together = clamp(p.flocTogether, 0.0, 1.0);
+    var jointHere = 0.0; var jointThere = 0.0; var haveJoint = false;
     for (var m = 0; m < 8; m++) {
       var id = 0u; var here = 0.0; var there = 0.0;
       if (m < 4) {
@@ -946,7 +986,10 @@ fn mixPigments(x: i32, y: i32, a: vec4f, gi: Comp4,
       var v = 0.0;   // drift velocity from the neighbour into this cell
       let chiF = p.flocculation * pig[id].phys.w * p.flocDrift;
       if (face > 0.0 && chiF > 0.0) {
-        v += face * chiF * (flocField(x, y, id, bucket) - flocField(nx, ny, id, bucket));
+        if (!haveJoint) { jointHere = flocJoint(x, y, bucket); jointThere = flocJoint(nx, ny, bucket); haveJoint = true; }
+        let fHere = mix(ownHere(x, y, id, bucket), jointHere, together);
+        let fThere = mix(flocOwn(nx, ny, id, bucket), jointThere, together);
+        v += face * chiF * (fHere - fThere);
       }
       if (magOn) { v += p.magnetism * pig[id].phys2.w * dPhi; }
       if (v == 0.0) { continue; }

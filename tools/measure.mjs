@@ -47,6 +47,7 @@ try {
   const page = await browser.newPage();
   await page.setViewport({ width: 1500, height: 900, deviceScaleFactor: 1 });
   page.on('console', m => { if (m.type() === 'error' && !m.text().includes('404')) console.error('[page]', m.text()); });
+  if (process.env.PRE_JS) await page.evaluateOnNewDocument(process.env.PRE_JS);   // page JS before the app loads
   await page.goto(APP_URL);
   await page.waitForFunction(() => window.__sim?.headless, { timeout: 20_000 });
   await page.evaluate(await readFile(new URL('./probes.js', import.meta.url), 'utf8'));
