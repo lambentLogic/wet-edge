@@ -202,7 +202,9 @@ async function init() {
 
   // The sim advances in real time, independent of display refresh rate.
   // Fractional steps carry over; a stalled tab doesn't cause a catch-up burst.
-  const MAX_STEPS_PER_FRAME = 64;
+  // When the GPU can't keep up (a whole sheet wet), the sim runs slower than
+  // real time rather than cramming steps into each frame and stuttering.
+  const MAX_STEPS_PER_FRAME = 10;
   let stepDebt = 0, lastFrame = performance.now();
 
   const argsReset = new Uint32Array([0, 1, 1, 0]);

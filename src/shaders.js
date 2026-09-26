@@ -376,7 +376,10 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     // charge of extra water, which pushes outward: the wet-in-wet burst.
     // fr.charge decays after touchdown (the brush's reservoir is finite), so
     // dragging a stroke through its own wet trail doesn't keep flooding.
-    let charge = select(0.0, p.brushCharge * fr.charge * k, a.x > p.wEps);
+    // Charges from repeated touchdowns can't stack past the level edge
+    // pinning holds, or overlapping passes flood the paper.
+    let chargeRoom = max(p.pinning - max(w, p.brushWater), 0.0);
+    let charge = select(0.0, min(p.brushCharge * fr.charge * k, chargeRoom), a.x > p.wEps);
     if (fr.mode == 0u) {
       for (var b = 0; b < 4; b++) {
         let frac = fr.brushFrac[b];

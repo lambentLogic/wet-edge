@@ -55,6 +55,26 @@
   }
 
   const probes = {
+    // Flood: a dozen overlapping wet passes, each a fresh touchdown on wet
+    // paper, over a band 150-450. Fraction of wet cells outside the band
+    // (plus a brush-radius margin) after a few seconds. Should be ~0.
+    async flood(paper = 'coldPress') {
+      await fresh(paper);
+      h.setMode(1);
+      await withValues({ brushRadius: 40, brushWater: 0.32 }, async () => {
+        for (let y = 150; y <= 450; y += 30) { h.lift(); await h.paint(100, y, 920, y, 20); }
+        await h.wait(6);
+      });
+      h.setMode(0);
+      h.end();
+      const a = await S.read();
+      let wet = 0, out = 0;
+      for (let y = 0; y < 768; y++) for (let x = 0; x < W; x++) {
+        if (a[(y * W + x) * 4] > 0.004) { wet++; if (y < 100 || y > 500 || x < 50 || x > 970) out++; }
+      }
+      return +(out / Math.max(wet, 1)).toFixed(3);
+    },
+
     // Magnet shapes: one of each under a pale Mars black wash. Screenshot.
     async shapes(paper = 'hotPress') {
       await fresh(paper);
