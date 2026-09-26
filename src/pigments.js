@@ -123,9 +123,11 @@ const PANS = [
     ...organic, staining: STAIN.high, mobility: 1.5 },
   { name: 'Perylene Violet', code: 'PV29', masstone: '#4A2331', tint: '#B08090', opacity: 'semitransparent',
     ...organic, staining: STAIN.medium, mobility: 1.2 },
-  { name: 'Quinacridone Magenta', code: 'PR122', masstone: '#B0206A', tint: '#E07AB5', opacity: 'transparent',
+  // Painter (2026-09-26): quin rose and magenta didn't get as dark as
+  // rubine at the same load; heavy quinacridone is deep. Masstones deepened.
+  { name: 'Quinacridone Magenta', code: 'PR122', masstone: '#861A5C', tint: '#E07AB5', opacity: 'transparent',
     ...organic, staining: STAIN.high, mobility: 1.7 },
-  { name: 'Quinacridone Rose', code: 'PV19', masstone: '#C8285A', tint: '#EF8FA8', opacity: 'transparent',
+  { name: 'Quinacridone Rose', code: 'PV19', masstone: '#A3164A', tint: '#EF8FA8', opacity: 'transparent',
     ...organic, staining: STAIN.high, mobility: 1.7 },
   // Painter: "a lil less ruby-dark than I'd expect and more pink" with the
   // tint at #E07090 (2026-09-26): deeper ruby masstone, raspberry-red tint.

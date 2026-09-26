@@ -56,6 +56,8 @@ estimate, not profiled.
   three runs each, the whole sheet ran at 0.37-0.41x real time versus
   0.38-0.39x, and part of the sheet at 1.24-1.37x versus 1.41-1.68x. So
   occupancy doesn't look like the limit, which leaves bandwidth. Reverted.
+  Unconfirmed: the painter was painting in Chrome during the runs, on the
+  same GPU. Rerun on an idle machine.
 
 ## Ideas not yet tried
 
@@ -74,7 +76,8 @@ estimate, not profiled.
 `node tools/measure.mjs stateHash` paints a fixed scene and returns the
 SHA-256 of every state buffer. A change that shouldn't alter results must
 leave these identical. Speed varies from run to run, so compare several
-runs.
+runs, on an idle machine: anything else using the GPU (a painting tab,
+say) skews timings, though never the hashes or probe results.
 
 ```
 python3 tools/serve.py 8765 &          # no-cache dev server
