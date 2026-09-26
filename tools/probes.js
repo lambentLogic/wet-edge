@@ -55,6 +55,32 @@
   }
 
   const probes = {
+    // Leak: the live sky wash. One continuous back-and-forth stroke of clean
+    // water over y 30-400 with a big brush, then a few seconds. Fraction of
+    // wet cells below y 470 (brush radius past the band). Should be ~0.
+    async leak(paper = 'coldPress') {
+      await fresh(paper);
+      h.setMode(1);
+      await withValues({ brushRadius: 46, brushWater: 0.3 }, async () => {
+        h.lift();
+        let dir = 1;
+        for (let y = 30; y <= 400; y += 40, dir = -dir) {
+          const xs = dir > 0 ? [-30, 1060] : [1060, -30];
+          await h.paint(xs[0], y, xs[1], y, 36);
+          await h.paint(xs[1], y, xs[1], y + 40, 2);
+        }
+        for (const t of [2, 4, 8]) { await h.wait(t === 2 ? 2 : t / 2); }
+      });
+      h.setMode(0);
+      h.end();
+      const a = await S.read();
+      let wet = 0, out = 0;
+      for (let y = 0; y < 768; y++) for (let x = 0; x < W; x++) {
+        if (a[(y * W + x) * 4] > 0.004) { wet++; if (y > 470) out++; }
+      }
+      return { outside: +(out / Math.max(wet, 1)).toFixed(3), wetCells: wet };
+    },
+
     // Overflow lift: four pigments dried in layers, then Mars black across
     // them (a fifth pigment in those cells), then the Lift brush. Fraction of
     // the Mars black band's extra pigment removed where the lift passed,

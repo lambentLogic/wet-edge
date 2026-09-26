@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "serve": "python3 -m http.server 8765 --bind 127.0.0.1",
+    "serve": "python3 tools/serve.py 8765",
     "measure": "node tools/measure.mjs"
   },
   "devDependencies": {

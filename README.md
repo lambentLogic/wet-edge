@@ -9,7 +9,7 @@ See [docs/SPEC.md](docs/SPEC.md).
 Needs a WebGPU browser (Chrome/Edge/Safari 26+). Serve the folder and open it:
 
 ```
-python3 -m http.server 8765
+python3 tools/serve.py        # no-cache dev server
 # http://127.0.0.1:8765/
 ```
 
