@@ -49,7 +49,9 @@ export const PARAMS = [
   { key: 'staining',    v: 1,    min: 0, max: 10,  group: 'Pigment', target: 'sim' },
   { key: 'granulation', v: 0.6,  min: 0, max: 2,   group: 'Pigment', target: 'sim' },
   { key: 'rewetLift',   v: 0.002, min: 0, max: 1,   group: 'Pigment', target: 'sim', label: 'dried paint rewets' },
-  { key: 'bindTime',    v: 1,     min: 0, max: 10,  group: 'Pigment', target: 'sim', label: 'gum sets (s)' },
+  { key: 'stainCapacity', v: 0.015, min: 0, max: 0.2, group: 'Pigment', target: 'sim', label: 'fibres hold (stain capacity)' },
+  { key: 'thickRewet',  v: 0.1,   min: 0, max: 1,   group: 'Pigment', target: 'sim', label: 'thick dried paint rewets' },
+  { key: 'bindTime',    v: 3,     min: 0, max: 30,  group: 'Pigment', target: 'sim', label: 'gum sets (s, gradually)' },
   // Workable fixative (like SpectraFix: casein in alcohol). Sprayed over
   // dry paint, it commits it (it won't rewet or lift much), partly reverses
   // the lightening paint shows as it dries, fills some of the paper's tooth

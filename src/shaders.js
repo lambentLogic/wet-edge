@@ -458,18 +458,23 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   }
 
   // Wetting and drying. aux.w > 0: when this cell's current wetting began.
-  // aux.w <= 0: the cell is dry, since -aux.w. Gum arabic binds the pigment
-  // once the paper has stayed dry for bindTime; rewetting after that marks
-  // everything deposited here as bound (it rewets slowly). A rim that
-  // flickers dry for a moment between dabs is still the same wetting.
+  // aux.w <= 0: the cell is dry, since -aux.w. Gum arabic sets gradually
+  // while the paper stays dry: rewetted after d seconds, a fraction
+  // smoothstep(0, bindTime, d) of what's deposited here has set (it rewets
+  // slowly) and the rest dissolves freely. A rim that flickers dry for a
+  // moment between dabs has barely set at all. (All-or-nothing setting made
+  // a rigger line half melt and half hold under a water brush: it dries at
+  // different moments along its length.)
   var wetStart = aux[i].w;
   // Dry means the paper itself has nearly dried out, not just lost its shine.
   let dryNow = a.x <= p.wEps && a.w < 0.25 * p.dampThreshold;
   var bindNow = false;
+  var setFrac = 0.0;
   // (Paper wicking ahead of a wet front counts as wetting too.)
   if (dryNow && wetStart > 0.0) { wetStart = -fr.time; }
   if (!dryNow && wetStart <= 0.0) {
-    bindNow = fr.time + wetStart >= p.bindTime;
+    setFrac = smoothstep(0.0, max(p.bindTime, 1e-3), fr.time + wetStart);
+    bindNow = setFrac > 0.001;
     wetStart = max(fr.time, 1e-3);
   }
   if (wetStart != aux[i].w) { aux[i].w = wetStart; }
@@ -491,12 +496,26 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   let depIn = dep;
   var dOcc = vec4<bool>(dep.amt.x > 0.0, dep.amt.y > 0.0, dep.amt.z > 0.0, dep.amt.w > 0.0);
   if (bindNow) {
-    // Everything here dried and set: bind it, and merge bound layers of the
-    // same pigment so the next wash has free components to settle into.
-    for (var k = 0; k < 4; k++) { if (dep.stamp[k] >= 0.0) { dep.stamp[k] = -dep.stamp[k] - 1.0; } }
+    // The set fraction of each free deposit becomes bound, split off into
+    // a spare component (if none is free, the whole deposit goes whichever
+    // way most of it would). Then bound layers of the same pigment merge,
+    // so the next wash has free components to settle into.
+    for (var k = 0; k < 4; k++) {
+      if (!dOcc[k] || dep.stamp[k] < 0.0) { continue; }
+      let boundStamp = -dep.stamp[k] - 1.0;
+      if (setFrac >= 0.999) { dep.stamp[k] = boundStamp; continue; }
+      var spare = -1;
+      for (var m = 0; m < 4; m++) { if (!dOcc[m] && spare < 0) { spare = m; } }
+      if (spare >= 0) {
+        dOcc[spare] = true; dep.id[spare] = dep.id[k]; dep.stamp[spare] = boundStamp;
+        dep.amt[spare] = dep.amt[k] * setFrac; dep.amt[k] *= 1.0 - setFrac;
+      } else if (setFrac > 0.5) {
+        dep.stamp[k] = boundStamp;
+      }
+    }
     for (var k = 0; k < 4; k++) {
       for (var m = k + 1; m < 4; m++) {
-        if (dOcc[k] && dOcc[m] && dep.id[m] == dep.id[k]) {
+        if (dOcc[k] && dOcc[m] && dep.id[m] == dep.id[k] && dep.stamp[k] < 0.0 && dep.stamp[m] < 0.0) {
           let t = (stampTime(dep.stamp[k]) * dep.amt[k] + stampTime(dep.stamp[m]) * dep.amt[m]) / max(dep.amt[k] + dep.amt[m], 1e-12);
           dep.amt[k] += dep.amt[m]; dep.stamp[k] = -t - 1.0;
           dep.amt[m] = 0.0; dOcc[m] = false;
@@ -567,9 +586,12 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
       }
       // Pigment that dried before this wetting began is bound by its gum
       // arabic and rewets slowly: only a fraction goes back into suspension.
-      let lift = max(1.0 + (h - 1.0) * gam, 0.0) * rho / omega * p.dt;
-      let bound = select(select(1.0, p.rewetLift, dep.stamp[j] < 0.0), p.rewetLift * p.fixRewet, isFixed(dep.stamp[j], fixT));
-      let up = min(dep.amt[j] * lift * bound, dep.amt[j]);
+      // Staining is the grip of the first layer on the paper fibres (up to
+      // stainCapacity); pigment piled on top rewets like any paint, so even
+      // a thick staining line reactivates under a wet brush.
+      let liftFree = max(1.0 + (h - 1.0) * gam, 0.0) * rho * p.dt;
+      let lift = liftFree / omega;
+      let up = min(rewetUp(dep.amt[j], dep.stamp[j], fixT, lift, liftFree), dep.amt[j]);
       gAmt[k] += up - down;
       dep.stamp[j] = stampMix(dep.stamp[j], dep.amt[j], down);
       dep.amt[j] += down - up;
@@ -577,7 +599,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
       // fresh deposit, rewets slowly too.
       for (var m = 0; m < 4; m++) {
         if (m != j && dOcc[m] && dep.id[m] == id && dep.stamp[m] < 0.0) {
-          let upB = min(dep.amt[m] * lift * p.rewetLift * select(1.0, p.fixRewet, isFixed(dep.stamp[m], fixT)), dep.amt[m]);
+          let upB = min(rewetUp(dep.amt[m], dep.stamp[m], fixT, lift, liftFree), dep.amt[m]);
           gAmt[k] += upB; dep.amt[m] -= upB;
         }
       }
@@ -659,6 +681,20 @@ fn stampMix(stamp: f32, amt: f32, added: f32) -> f32 {
 }
 
 fn stampTime(stamp: f32) -> f32 { return select(stamp, -stamp - 1.0, stamp < 0.0); }
+
+// How much of a deposited component goes back into suspension this step:
+// the part within the fibres' stain capacity lifts at the pigment's own
+// (staining-limited) rate, the part piled above it as freely as any paint;
+// both slowed if the gum has set (rewetLift for the fibre layer, thickRewet
+// for the pile) and slowed further under fixative.
+fn rewetUp(amt: f32, stamp: f32, fixT: f32, lift: f32, liftFree: f32) -> f32 {
+  let cap = max(p.stainCapacity, 0.0);
+  let low = min(amt, cap);
+  let high = max(amt - cap, 0.0);
+  if (stamp >= 0.0) { return low * lift + high * liftFree; }
+  let fx = select(1.0, p.fixRewet, isFixed(stamp, fixT));
+  return (low * lift * p.rewetLift + high * liftFree * p.thickRewet) * fx;
+}
 
 // Is a deposited component under fixative (bound, and dried before the
 // cell was last fixed at time fixT; 0 = never fixed)?
