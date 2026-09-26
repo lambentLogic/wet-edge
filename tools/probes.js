@@ -55,6 +55,34 @@
   }
 
   const probes = {
+    // Flocculation: mm-scale mottling of a pale wash on hot press with paper
+    // granulation off. Coefficient of variation of 1 mm block averages of
+    // deposited pigment in the interior, for a flocculating pigment
+    // (ultramarine) and a non-flocculating control (quinacridone rose).
+    async floc(paper = 'hotPress') {
+      const cv = async (name) => {
+        await fresh(paper);
+        h.setBrush(name);
+        await withValues({ granulation: 0, brushRadius: 20, brushPigment: 0.3 }, async () => {
+          for (let y = 250; y <= 520; y += 18) { h.lift(); await h.paint(250, y, 780, y, 24); }
+          await h.wait(30); await h.wait(10, { dry: true }); await h.wait(2);
+        });
+        const a = await S.read();
+        const blocks = [];
+        for (let by = 300; by < 470; by += 5) for (let bx = 320; bx < 700; bx += 5) {
+          let acc = 0;
+          for (let y = by; y < by + 5; y++) for (let x = bx; x < bx + 5; x++) acc += a[(y * W + x) * 4 + 2];
+          blocks.push(acc / 25);
+        }
+        const m = blocks.reduce((s, v) => s + v, 0) / blocks.length;
+        const sd = Math.sqrt(blocks.reduce((s, v) => s + (v - m) ** 2, 0) / blocks.length);
+        return +(sd / m).toFixed(3);
+      };
+      const out = { ultramarine: await cv('French Ultramarine'), rose: await cv('Quinacridone Rose') };
+      h.end();
+      return out;
+    },
+
     // Debug: water depth (w) and deposited pigment (d) along x at the wash's
     // middle row, sampled every 1 mm from outside the right edge inward,
     // at several times while it dries.

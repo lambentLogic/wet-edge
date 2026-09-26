@@ -47,6 +47,9 @@ export const PARAMS = [
   { key: 'staining',    v: 1,    min: 0, max: 10,  group: 'Pigment', target: 'sim' },
   { key: 'granulation', v: 0.6,  min: 0, max: 2,   group: 'Pigment', target: 'sim' },
   { key: 'rewetLift',   v: 0.002, min: 0, max: 1,   group: 'Pigment', target: 'sim', label: 'dried paint rewets' },
+  { key: 'flocculation', v: 1,   min: 0, max: 3,   group: 'Pigment', target: 'sim', label: 'flocculation' },
+  { key: 'flocDrift',   v: 0.5,    min: 0, max: 20,  group: 'Pigment', target: 'sim', label: 'floc clumping speed' },
+  { key: 'flocScale',   v: 1.2,  min: 0.2, max: 5, group: 'Pigment', target: 'sim', label: 'floc size (mm)' },
   { key: 'valleyFill',  v: 3,    min: 0, max: 20,  group: 'Pigment', target: 'sim', label: 'valleys fill up' },
   { key: 'settleDepth', v: 0.05, min: 0, max: 0.5, group: 'Pigment', target: 'sim', label: 'settles below depth' },
 

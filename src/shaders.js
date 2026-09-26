@@ -524,6 +524,38 @@ fn depositInto(dep: ptr<function, Dep>, occ: ptr<function, vec4<bool>>, id: u32,
   (*dep).stainS += vec4f(pig[id].S.rgb * a, 0.0);
 }
 
+// ---------------------------------------------------------------- flocculation
+// Flocculating pigments (ultramarine above all) clump in suspension: their
+// particles attract and gather into flocs. On the grid this is a drift of
+// each flocculating pigment up a smooth random clumping field at mm scale,
+// so while the paint stays wet it gathers into mottles. The field differs
+// per pigment (in a mix, ultramarine mottles on its own pattern while a
+// non-flocculating pigment stays smooth) and is re-rolled per wetting,
+// bucketed by wetting time so a whole wash shares one field.
+fn hash2(x: i32, y: i32, seed: u32) -> f32 {
+  var h = bitcast<u32>(x) * 374761393u + bitcast<u32>(y) * 668265263u + seed * 2246822519u;
+  h = (h ^ (h >> 13u)) * 1274126177u;
+  h = h ^ (h >> 16u);
+  return f32(h & 0xffffffu) / 16777216.0;
+}
+
+fn valueNoise(x: f32, y: f32, seed: u32) -> f32 {
+  let ix0 = i32(floor(x)); let iy0 = i32(floor(y));
+  var fx = x - floor(x); var fy = y - floor(y);
+  fx = fx * fx * (3.0 - 2.0 * fx); fy = fy * fy * (3.0 - 2.0 * fy);
+  let a = hash2(ix0, iy0, seed);     let b = hash2(ix0 + 1, iy0, seed);
+  let c = hash2(ix0, iy0 + 1, seed); let d = hash2(ix0 + 1, iy0 + 1, seed);
+  return mix(mix(a, b, fx), mix(c, d, fx), fy);
+}
+
+// Clumping field for pigment id at cell (x, y), in [0, 1].
+fn flocField(x: i32, y: i32, id: u32, bucket: u32) -> f32 {
+  let seed = id * 7919u + bucket * 104729u + 17u;
+  let sc = max(p.flocScale / 0.2, 1.0);   // mm -> cells
+  let fx = f32(x) / sc; let fy = f32(y) / sc;
+  return 0.65 * valueNoise(fx, fy, seed) + 0.35 * valueNoise(fx * 2.3 + 11.0, fy * 2.3 + 5.0, seed + 1u);
+}
+
 // ---------------------------------------------------------------- pigment mixing
 // Pigment also moves between touching wet cells without net water flow:
 //  - diffusion down each pigment's concentration gradient, and
@@ -544,7 +576,9 @@ fn mixPigments(x: i32, y: i32, a: vec4f, gi: Comp4,
   let i = ix(x, y);
   let cT = a.y / a.x;
   let wi = smoothstep(p.mixEdgeLo, p.mixEdgeHi, aux[i].y);
-  let cap = 0.24 / max(p.dt, 1e-6);
+  // Mixing and flocculation drift share the explicit-scheme stability budget
+  // (4 neighbours), half each, so together they can't overdraw a cell.
+  let cap = 0.12 / max(p.dt, 1e-6);
   for (var k = 0; k < 4; k++) {
     var nx = x; var ny = y; var n = a; var gn = gi;
     if (k == 0) { nx = x - 1; n = aL; gn = gL; } else if (k == 1) { nx = x + 1; n = aR; gn = gR; }
@@ -573,6 +607,26 @@ fn mixPigments(x: i32, y: i32, a: vec4f, gi: Comp4,
       let id = gi.id[m];
       let rate = min(base * pig[id].phys2.x, cap);
       addCand(id, -p.dt * face * rate * wmin * gi.amt[m] / a.x);
+    }
+    // Flocculation drift up each pigment's clumping field, upwind in
+    // concentration. Both cells compute the same flux (same bucket, same
+    // field values), so it conserves pigment.
+    let bucket = u32(max(floor(max(aux[i].w, aux[ix(nx, ny)].w) / 10.0), 0.0));
+    for (var m = 0; m < 8; m++) {
+      var id = 0u; var here = 0.0; var there = 0.0;
+      if (m < 4) {
+        if (gi.amt[m] <= 0.0) { continue; }
+        id = gi.id[m]; here = gi.amt[m]; there = amtOf(gn, id);
+      } else {
+        if (gn.amt[m - 4] <= 0.0 || amtOf(gi, gn.id[m - 4]) > 0.0) { continue; }
+        id = gn.id[m - 4]; here = 0.0; there = gn.amt[m - 4];
+      }
+      let chi = p.flocculation * pig[id].phys.w * p.flocDrift;
+      if (chi <= 0.0) { continue; }
+      let dn = flocField(x, y, id, bucket) - flocField(nx, ny, id, bucket);
+      let cUp = select(here / a.x, there / n.x, dn > 0.0);
+      let drift = min(chi * abs(dn), cap);
+      addCand(id, p.dt * face * drift * sign(dn) * wmin * cUp);
     }
   }
 }
