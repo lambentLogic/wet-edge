@@ -503,7 +503,8 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     for (var k = 0; k < 4; k++) {
       if (!dOcc[k] || dep.stamp[k] < 0.0) { continue; }
       let boundStamp = -dep.stamp[k] - 1.0;
-      if (setFrac >= 0.999) { dep.stamp[k] = boundStamp; continue; }
+      if (setFrac >= 0.999 || dep.amt[k] * (1.0 - setFrac) < 1e-5) { dep.stamp[k] = boundStamp; continue; }
+      if (dep.amt[k] * setFrac < 1e-5) { continue; }
       var spare = -1;
       for (var m = 0; m < 4; m++) { if (!dOcc[m] && spare < 0) { spare = m; } }
       if (spare >= 0) {
@@ -580,8 +581,12 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
       let gam = p.granulation * pig[id].phys.z;
       let down = min(max(gAmt[k] * (1.0 - h * gam), 0.0) * rho * thin * p.dt, gAmt[k]);
       if (j < 0) {
-        // The most staining pigment here: it goes into the stain layer.
-        gAmt[k] -= down; stainDep(&dep, id, down);
+        // No room among the deposits and it's the most staining pigment
+        // here: while the paper is wet, it just stays in suspension (it
+        // goes into the stain layer only if it's still homeless when the
+        // water dries). Settling it straight into the stain layer every step
+        // made a sink it could never lift out of, piling up ten times the
+        // pigment into flat dark patches.
         continue;
       }
       // Pigment that dried before this wetting began is bound by its gum
@@ -654,7 +659,9 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     gOut.id[k] = gId[k]; gOut.amt[k] = am;
   }
   for (var k = 0; k < 4; k++) {
-    dep.amt[k] = finite(select(0.0, dep.amt[k], dOcc[k] && dep.amt[k] > 1e-12));
+    // Components down to a trace free their slot (a near-empty one held
+    // a slot and helped push other pigments out).
+    dep.amt[k] = finite(select(0.0, dep.amt[k], dOcc[k] && dep.amt[k] > 1e-7));
   }
   dep.stainK += vec4f(stK, stA);
   dep.stainS += vec4f(stS, stL);
@@ -733,6 +740,21 @@ fn depSlot(dep: ptr<function, Dep>, occ: ptr<function, vec4<bool>>, id: u32) -> 
     if (!(*occ)[m]) { (*occ)[m] = true; (*dep).id[m] = id; (*dep).amt[m] = 0.0; (*dep).stamp[m] = fr.time; return m; }
   }
   for (var m = 0; m < 4; m++) { if ((*occ)[m] && (*dep).id[m] == id) { return m; } }
+  // Full: before pushing any pigment out, make room by merging a pigment's
+  // set and unset parts (they're one pigment; the merged part keeps the
+  // state of the larger).
+  for (var m = 0; m < 4; m++) {
+    for (var n = m + 1; n < 4; n++) {
+      if ((*dep).id[m] == (*dep).id[n]) {
+        let am = (*dep).amt[m]; let an = (*dep).amt[n];
+        let t = (stampTime((*dep).stamp[m]) * am + stampTime((*dep).stamp[n]) * an) / max(am + an, 1e-12);
+        let bound = select((*dep).stamp[n] < 0.0, (*dep).stamp[m] < 0.0, am >= an);
+        (*dep).amt[m] = am + an; (*dep).stamp[m] = select(t, -t - 1.0, bound);
+        (*dep).id[n] = id; (*dep).amt[n] = 0.0; (*dep).stamp[n] = fr.time;
+        return n;
+      }
+    }
+  }
   var e = 0;
   for (var m = 1; m < 4; m++) { if (stainOmega((*dep).id[m]) > stainOmega((*dep).id[e])) { e = m; } }
   if (stainOmega((*dep).id[e]) <= stainOmega(id)) { return -1; }
