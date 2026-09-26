@@ -27,7 +27,7 @@
 //   magnetic     magnetic susceptibility relative to Mars black (magnetite);
 //                0 for everything else. Not used by the physics yet.
 
-import { upsampleSigmoid, upsampleNear, hexToLinear, spectrumToLinear, NB } from './spectral.js';
+import { upsampleSigmoid, hexToLinear, spectrumToLinear, srgbToLinear, NB } from './spectral.js';
 import { MEASURED } from './spectra-data.js';
 
 const PAPER_WHITE = 0.97;
@@ -167,7 +167,9 @@ const PANS = [
   { name: 'Indian Red', code: 'PR101', masstone: '#7A2E24', tint: '#C08070', opacity: 'semiopaque',
     ...mineral, density: 1.5, staining: STAIN.lowmed, granulation: GRAN.moderate },
   // Sub-micron oxide, but granulates "in threads" in DS's formulation.
-  { name: 'Transparent Red Oxide', code: 'PR101', masstone: '#9A3A1A', tint: '#D88050', opacity: 'transparent',
+  // Painter (2026-09-26): seemed weak, and with ultramarine should go to
+  // grey. Deep brown-red masstone, strong tinter (was #9A3A1A / #D88050).
+  { name: 'Transparent Red Oxide', code: 'PR101', masstone: '#6A2412', tint: '#C86A3E', opacity: 'transparent',
     ...mineral, scatter: 0.04, density: 0.9, staining: STAIN.low, granulation: GRAN.moderate, flocculation: 0.5 },
   { name: 'Transparent Yellow Oxide', code: 'PY42', masstone: '#B37A1E', tint: '#E0B060', opacity: 'transparent',
     ...mineral, scatter: 0.04, density: 0.9, staining: STAIN.low, granulation: GRAN.moderate, flocculation: 0.3 },
@@ -193,74 +195,82 @@ const PANS = [
     ...mineral, density: 1.6, staining: STAIN.low, granulation: GRAN.slight, flocculation: 0, mobility: 0.7 },
 ];
 
-// Spectral K and S (16 bands, see spectral.js), fitted the same way to
-// masstone and tint spectra. Until measured spectra are in, those spectra
-// are the smoothest ones with the swatch colours (in linear light, as
-// physics wants; the RGB fit works on the sRGB-coded numbers directly).
-//
-// Where a published spectrum exists (src/spectra-data.js, acrylic paints),
-// its shape is kept and bent smoothly to the swatch colour (upsampleNear):
-// the pigment absorbs where it really does. Transparent pigments' acrylic
-// masstones are dark and flattened by surface glare, so their tint's shape
-// (squared, i.e. deeper) stands in for the masstone's.
-// A reflectance spectrum at another concentration: K/S per band from
-// R = 1 + K/S - sqrt((K/S)^2 + 2 K/S) (opaque layer), scaled by c, with c
-// chosen so the result's luminance matches the target colour's.
-function diluteTo(R, targetLin) {
-  const ks = R.map(v => { const r = Math.min(Math.max(v, 1e-3), 0.999); return (1 - r) ** 2 / (2 * r); });
-  const at = c => ks.map(k => { const q = k * c; return 1 + q - Math.sqrt(q * q + 2 * q); });
-  const Y = rgb => 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
-  const target = Y(targetLin);
-  let lo = Math.log(1e-3), hi = Math.log(1e3);
-  for (let it = 0; it < 50; it++) {   // luminance falls as c grows
-    const mid = (lo + hi) / 2;
-    if (Y(spectrumToLinear(at(Math.exp(mid)))) > target) lo = mid; else hi = mid;
-  }
-  return at(Math.exp((lo + hi) / 2));
-}
-
-// The measurements include the surface's own gloss (specular included,
-// about 3-4% of light bounced straight back), which puts a floor under
-// every dark band and flattens the absorption contrast. Saunderson's
-// correction takes it out (k1, k2 as the sources give them).
+// Measured spectra (src/spectra-data.js; data/spectra/sources.md) are
+// acrylic paints and one printing ink. They include the surface's own gloss
+// (specular included, about 3-4% of light bounced straight back), which puts
+// a floor under every dark band and flattens the absorption contrast;
+// Saunderson's correction takes it out (k1, k2 as the sources give them).
 const saunderson = R => R.map(v => Math.max((v - 0.03) / (1 - 0.03 - 0.65 + 0.65 * v), 1e-3));
 
-// Only samples with a tint are used: a lone masstone is saturated in the
-// bands where the pigment absorbs, so it can't tell how much more it
-// absorbs in one than another. (PY110 from a masstone alone mixed with
-// phthalo blue to olive; the painter's is a very warm green.)
+// Only samples with a tint (or a film over paper) are used: a lone masstone
+// is saturated in the bands where the pigment absorbs, so it can't tell how
+// much more it absorbs in one than another.
 function measuredFor(name) {
   const m = MEASURED[name];
-  // A transparent film over paper (process cyan ink): already a glaze's
-  // shape, no gloss in the measurement.
-  if (m?.film) return { masstone: m.film, tint: m.film };
+  // A transparent film over paper (process cyan ink): measured without
+  // gloss, already a glaze's shape.
+  if (m?.film) return { film: m.film };
   if (!m || !m.tint) return null;
-  return { masstone: saunderson(m.masstone), tint: m.tint ? saunderson(m.tint) : null };
+  return { masstone: saunderson(m.masstone), tint: saunderson(m.tint) };
 }
 
+// Absorption spectrum shape from a measurement, up to a scale factor:
+// - a transparent film over paper (process cyan): T^2 = film / paper, so
+//   K is proportional to -ln T^2;
+// - a tint in titanium white (opaque): K/S of the mix = (1 - R)^2 / 2R, and
+//   white dominates S, so K is proportional to K/S(tint) - K/S(white);
+// - an opaque masstone: K/S of the pigment itself (times its S).
+const ksOf = R => R.map(v => { const r = Math.min(Math.max(v, 1e-3), 0.999); return (1 - r) ** 2 / (2 * r); });
+const WHITE_KS = ksOf(saunderson(MEASURED['White Gouache'].masstone));
+// Where a sample saturates, its K/S runs away; cap the shape's range at
+// 50:1, which is about what a single pigment spans across the visible.
+function kShape(m, opaque) {
+  let sh;
+  if (m.film) sh = m.film.map(v => -Math.log(Math.max(v, 1e-3)));
+  else if (opaque || !m.tint) sh = ksOf(m.masstone);
+  else sh = ksOf(m.tint).map((v, k) => Math.max(v - WHITE_KS[k], 1e-4));
+  const top = Math.max(...sh);
+  return sh.map(v => Math.max(v, top / 50));
+}
+
+// Spectral K and S. With a measurement, the measured absorption shape is
+// kept as is (it decides hue and how the pigment mixes) and only its
+// overall strength and the tint's thickness are fitted, in colour, to the
+// painter's masstone and tint. (Fitting every band freely to the masstone
+// forced absorption into phthalo blue's own blue, since the swatch is dark
+// there in linear light, and greyed its mixes; spectral mixing should make
+// blue + yellow greener, not duller.) Without one, the swatch colours'
+// sigmoid spectra are fitted band by band. Scattering is kept from the RGB
+// fit: it carries the painter's calibration of which pigments show body
+// on dark grounds, and the acrylic data says nothing reliable about S in
+// watercolour.
 function fitSpectral(p, rgbFit) {
+  const S = rgbFit.S[0];
   const m = measuredFor(p.name);
   const lin = hex => hexToLinear(hex);
-  let Rm, Rt;
   if (m) {
-    const clear = p.opacity === 'transparent' || p.opacity === 'semitransparent';
-    // The measured sample nearest in kind, diluted or concentrated (KM:
-    // K/S scales with concentration) to about the swatch's lightness, then
-    // bent to its colour. A heavy masstone's shape isn't a light wash's:
-    // a yellow's absorption edge moves toward the blue as it thins.
-    const base = clear && m.tint ? m.tint : m.masstone;
-    Rm = upsampleNear(lin(p.masstone), clear && m.tint ? diluteTo(m.tint, lin(p.masstone)) : m.masstone);
-    Rt = p.tint ? upsampleNear(lin(p.tint), diluteTo(m.tint ?? base, lin(p.tint))) : null;
-  } else {
-    Rm = upsampleSigmoid(lin(p.masstone));
-    Rt = p.tint ? upsampleSigmoid(lin(p.tint)) : null;
+    const opaque = !m.film && (p.opacity === 'opaque' || p.opacity === 'semiopaque');
+    const shape = kShape(m, opaque).map(v => (opaque ? v * S : v));
+    const mean = shape.reduce((a, v) => a + v, 0) / NB, unit = shape.map(v => v / mean);
+    // Strength: match the lightness of washes of this pigment as the RGB
+    // render (the one the painter has calibrated by eye) paints them, at a
+    // light, a medium and a heavy thickness. The spectrum decides hue and
+    // mixing; this keeps each pigment as strong a mixer as it was.
+    const Y = rgb => 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+    const rgbWash = x => Y([0, 1, 2].map(c => srgbToLinear(Math.min(1, kmReflect(rgbFit.K[c], rgbFit.S[c], x, PAPER_WHITE)))));
+    const specWash = (K, x) => Y(spectrumToLinear(K.map(k => kmReflect(k, S, x, PAPER_WHITE))));
+    const XS = [0.1, 0.4, 1.2], targets = XS.map(rgbWash);
+    let best = Infinity, bestA = 1;
+    for (let la = Math.log(1e-3); la <= Math.log(100); la += 0.02) {
+      const K = unit.map(v => v * Math.exp(la));
+      const e = XS.reduce((a, x, i) => a + Math.log(specWash(K, x) / targets[i]) ** 2, 0);
+      if (e < best) { best = e; bestA = Math.exp(la); }
+    }
+    return { Kspec: unit.map(v => +(v * bestA).toFixed(5)), Sspec: new Array(NB).fill(S) };
   }
-  // Scattering is kept from the RGB fit (it carries the painter's
-  // calibration of which pigments show body on dark grounds; the acrylic
-  // data says nothing reliable about S in watercolour): only absorption is
-  // fitted per band.
-  const { K, S } = fitChannels(Rm, Rt, p.opacity, rgbFit.S[0]);
-  return { Kspec: K, Sspec: S };
+  const Rm = upsampleSigmoid(lin(p.masstone)), Rt = p.tint ? upsampleSigmoid(lin(p.tint)) : null;
+  const { K } = fitChannels(Rm, Rt, p.opacity, S);
+  return { Kspec: K, Sspec: new Array(NB).fill(S) };
 }
 
 export const PIGMENTS = PANS.map(p => { const rgb = fitKM(p.masstone, p.tint, p.opacity, p.scatter); return { ...p, ...rgb, ...fitSpectral(p, rgb) }; });

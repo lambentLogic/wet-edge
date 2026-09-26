@@ -1,7 +1,9 @@
 // Builds src/spectra-data.js from the measured spectra in data/spectra
 // (see data/spectra/sources.md): for each pan with data, a masstone and a
 // tint reflectance spectrum resampled to the renderer's 16 bands
-// (400-700 nm, each band the mean of the source over +-10 nm).
+// (400-700 nm, each band the mean of the source over +-10 nm). Tints are
+// the lightest available: darker ones saturate where the pigment absorbs,
+// which exaggerates its absorption shape.
 //
 //   node tools/spectra.mjs
 //
@@ -17,23 +19,23 @@ const BANDS = Array.from({ length: 16 }, (_, k) => 400 + 20 * k);
 
 // Pan name -> [masstone file, tint file or null, note].
 const PICK = {
-  'Phthalo Green': ['PG7_masstone_Berns2016', 'PG7_tint040_RIT-Okumura', 'Golden acrylic'],
+  'Phthalo Green': ['PG7_masstone_Berns2016', 'PG7_tint010_RIT-Okumura', 'Golden acrylic'],
   // Process cyan (ISO 2846, PB15:3) printed solid on coated paper, divided
   // by the bare paper: the film's own filtering, like a glaze. Measured
   // without gloss (no Saunderson correction needed).
   'Phthalo Blue (GS)': [['PB15-3_solid_FOGRA51', 'substrate-paper-PC1_FOGRA51'], null, 'Process cyan ink film over paper (FOGRA51)', 'film'],
-  'French Ultramarine': ['PB29_masstone_Berns2016', 'PB29_tint040_RIT-Okumura', 'Golden acrylic'],
-  'Dioxazine Violet': ['PV23_masstone_Berns2016', 'PV23_tint040_RIT-Okumura', 'Golden acrylic'],
-  'Quinacridone Magenta': ['PR122_masstone_Berns2016', 'PR122_tint040_RIT-Okumura', 'Golden acrylic'],
+  'French Ultramarine': ['PB29_masstone_Berns2016', 'PB29_tint020_RIT-Okumura', 'Golden acrylic'],
+  'Dioxazine Violet': ['PV23_masstone_Berns2016', 'PV23_tint020_RIT-Okumura', 'Golden acrylic'],
+  'Quinacridone Magenta': ['PR122_masstone_Berns2016', 'PR122_tint010_RIT-Okumura', 'Golden acrylic'],
   'Quinacridone Rose': ['PV19_masstone_Berns2016', 'PV19_tint035_Berns2016', 'Golden Quinacridone Red (PV19), acrylic'],
   'Pyrrole Rubine': ['PR264_masstone_CHSOS-modern', null, 'Kremer pigment in acrylic on card, thin'],
   'Pyrrole Scarlet': ['PR255_masstone_CHSOS-modern', null, 'Kremer pigment in acrylic on card, thin'],
   'Perylene Maroon': ['PR179_masstone_CHSOS-modern', null, 'Kremer pigment in acrylic on card, thin'],
   'Isoindolinone Yellow': ['PY110_masstone_CHSOS-modern', null, 'Kremer pigment in acrylic on card, thin'],
   'Bismuth Vanadate Yellow': ['PY184_masstone_Berns2016', 'PY184_tint054_Berns2016', 'Golden acrylic'],
-  'Indian Red': ['PR101_masstone_RIT-Okumura', 'PR101_tint040_RIT-Okumura', 'Golden Red Oxide (opaque PR101), acrylic'],
-  'Raw Umber': ['PBr7_masstone_RIT-Okumura', 'PBr7_tint040_RIT-Okumura', 'Golden acrylic'],
-  'Titanium Buff': ['PW6-1_TitanBuff_masstone_RIT-Okumura', 'PW6-1_TitanBuff_tint040_RIT-Okumura', 'Golden Titan Buff, acrylic'],
+  'Indian Red': ['PR101_masstone_RIT-Okumura', 'PR101_tint020_RIT-Okumura', 'Golden Red Oxide (opaque PR101), acrylic'],
+  'Raw Umber': ['PBr7_masstone_RIT-Okumura', 'PBr7_tint020_RIT-Okumura', 'Golden acrylic'],
+  'Titanium Buff': ['PW6-1_TitanBuff_masstone_RIT-Okumura', 'PW6-1_TitanBuff_tint020_RIT-Okumura', 'Golden Titan Buff, acrylic'],
   'White Gouache': ['PW6_masstone_Berns2016', null, 'Golden Titanium White, acrylic'],
 };
 
