@@ -78,6 +78,10 @@
   </div>
   <label class="row hint" style="align-items:center; margin:0 0 4px" title="How much pigment the brush picks up: a pale wash to thick paint (same as the Brush knob 'pigment concentration')">Paint strength
     <input id="strength" type="range" min="0.02" max="1.5" step="0.01" style="flex:1"></label>
+  <label class="row hint" style="align-items:center; margin:0 0 4px" title="Mouse and trackpad pressure: hold Option to lighten, Command to press harder; it stays where you leave it">Touch
+    <input id="touch" type="range" min="0.02" max="1" step="0.01" style="flex:1"></label>
+  <label class="row hint" style="align-items:center; margin:0 0 4px" title="How much water a dip brush picks up each time: turn it down for a blotted, dry-ish brush (dry-brush skips)">Wetness
+    <input id="wetness" type="range" min="0.05" max="1" step="0.01" style="flex:1"></label>
   <div id="loadWrap" title="Water in the brush"><div id="loadBar"></div></div>
   <div id="pigWrap" title="Pigment in the brush"><div id="pigBar"></div></div>
   <div class="row"><select id="paperType" title="Paper texture and physics"></select><select id="tone" title="Paper tone" style="flex:0 0 auto"></select></div>
@@ -101,7 +105,7 @@
     <button id="restorePainting" hidden>Restore</button>
   </div>
   <div id="knobs"></div>
-  <p class="hint">Keys: 1 paint · 2 water · 3 lift · Shift-drag side of brush · Option-drag light touch (skims dry paper) · 4 magnet (R / scroll to rotate; double-click or drag off to remove) · F flip poles · [ ] pigment · hold D to dry · space pause · C clear.
+  <p class="hint">Keys: 1 paint · 2 water · 3 lift · Shift-drag side of brush · hold Option / Cmd for a lighter / heavier touch · 4 magnet (R / scroll to rotate; double-click or drag off to remove) · F flip poles · [ ] pigment · hold D to dry · space pause · C clear.
     Number boxes are unclamped.</p>
 </aside>
 <script type="module" src="src/main.js"></script>

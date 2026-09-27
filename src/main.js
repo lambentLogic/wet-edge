@@ -242,9 +242,10 @@ async function init() {
 
   const pointerBrush = () => {
     const ptr = state.pointer;
+    // Mouse and trackpad: the Touch dial (Option lighter, Command heavier).
     if (!ptr.down) return null;
     const age = (performance.now() - ptr.downAt) / 1000;
-    let pressure = ptr.pressure;
+    let pressure = ptr.pen ? ptr.pressure : values.mouseTouch;
     // Without a pen: strokes ease in from a light touch at touchdown.
     if (!ptr.pen) pressure *= Math.min(1, 0.3 + 0.7 * age / Math.max(values.touchdownEase, 1e-3));
     // Hand input: the brush trails the pointer smoothly instead of jumping to
@@ -270,7 +271,13 @@ async function init() {
       const pr = Math.min(Math.max(brush.pressure ?? 1, 0), 1);
       const load = values.brushCapacity > 0 ? state.reservoir : 1;
       frameF32[8] = pr;
-      frameF32[24] = Math.max((1 - pr) * (1 - 0.6 * load), side * 0.8 * (1 - load));
+      // Dry-brush (how lightly the brush skims the tooth on dry paper): a
+      // light touch, the side of a drying belly, or speed, a fast stroke
+      // skimming, much more so with a dry-ish brush (Wetness down).
+      const segNow = Math.hypot(brush.x1 - brush.x0, brush.y1 - brush.y0);
+      state.smoothSeg = !state.brushActive ? segNow : state.smoothSeg * 0.6 + segNow * 0.4;
+      const speed = Math.min(1, state.smoothSeg / Math.max(4 * values.brushRadius, 1e-3));
+      frameF32[24] = Math.max((1 - pr) * (1 - 0.6 * load), side * 0.8 * (1 - load), values.speedSkim * speed * (1 - 0.7 * load));
       // Taper: width follows pressure; the side of the brush is wider.
       frameF32[13] = values.brushRadius * (values.taperMin + (1 - values.taperMin) * pr) * (1 + 0.8 * side);
       // Wet-in-wet charge: strongest at touchdown, then the reservoir is spent.
@@ -283,8 +290,6 @@ async function init() {
     // read as the brush resting, and dot the stroke).
     let dwell = 1;
     if (brush) {
-      const seg = Math.hypot(brush.x1 - brush.x0, brush.y1 - brush.y0);
-      state.smoothSeg = !state.brushActive ? seg : state.smoothSeg * 0.6 + seg * 0.4;
       // A brush releases paint as it travels: every spot it crosses gets
       // the same dose however fast it moves (brushDose frames' worth; a
       // quick stroke isn't paler), and a brush that lingers adds a frame's
@@ -516,7 +521,7 @@ async function init() {
     // reloaded) unless lift() is called in between.
     lift() { strokeFrame = 0; state.strokeStart = state.simTime; },
     async paint(x0, y0, x1, y1, frames = 24) {
-      if (strokeFrame === 0 && state.brushType === 'dip') state.reservoir = 1;   // a fresh dip stroke: reloaded
+      if (strokeFrame === 0 && state.brushType === 'dip') state.reservoir = values.dipLoad;   // a fresh dip stroke: reloaded
       const at = f => {
         const t0 = f / frames, t1 = (f + 1) / frames;
         return { x0: x0 + (x1 - x0) * t0, y0: y0 + (y1 - y0) * t0, x1: x0 + (x1 - x0) * t1, y1: y0 + (y1 - y0) * t1,
@@ -565,7 +570,7 @@ async function init() {
     ptr.x = ptr.px = x0; ptr.y = ptr.py = y0; ptr.pressure = 1; ptr.downAt = performance.now(); ptr.down = true;
     state.strokeStart = state.simTime;
     ptr.pen = true; ptr.side = 0; ptr.scripted = true;
-    if (state.brushType === 'dip') state.reservoir = 1;
+    if (state.brushType === 'dip') state.reservoir = values.dipLoad;
     const step = () => {
       f++;
       ptr.x = x0 + (x1 - x0) * f / frames; ptr.y = y0 + (y1 - y0) * f / frames;
@@ -598,7 +603,7 @@ async function init() {
     ptr.x = ptr.px = x0; ptr.y = ptr.py = y0; ptr.pressure = p0; ptr.downAt = performance.now(); ptr.down = true;
     state.strokeStart = state.simTime;   // a new stroke
     ptr.pen = true; ptr.side = s0; ptr.scripted = true;   // scripted strokes use their exact pressure and path
-    if (state.brushType === 'dip') state.reservoir = 1;
+    if (state.brushType === 'dip') state.reservoir = values.dipLoad;
     let seg = 1, f = 0;
     const step = () => {
       if (seg >= points.length) { ptr.down = false; done(); return; }
@@ -867,23 +872,10 @@ function bindPointer(canvas) {
     const r = canvas.getBoundingClientRect();
     return [(e.clientX - r.left) / r.width * W, (e.clientY - r.top) / r.height * H];
   };
-  // Touch: a pen's pressure. With a mouse or trackpad, full pressure, or a
-  // light touch while Option is held (the brush skims: on dry paper it
-  // catches only the tooth). Speed can lighten the touch too (knob
-  // speedTouch; off by default, as it made fast strokes break up into
-  // dots unexpectedly). Side of the brush from Shift or pen tilt.
-  let lastMove = null, smoothSpeed = 0;
-  const pressureOf = e => {
-    if (e.pointerType === 'pen') return Math.max(e.pressure, 0.05) * 1.5;
-    const now = performance.now(), [x, y] = toGrid(e);
-    if (lastMove) {
-      const dt = Math.max(now - lastMove.t, 1), v = Math.hypot(x - lastMove.x, y - lastMove.y) / dt;
-      smoothSpeed = smoothSpeed * 0.7 + v * 0.3;
-    }
-    lastMove = { t: now, x, y };
-    const light = e.altKey ? values.lightTouch : 1;
-    return light / (1 + values.speedTouch * smoothSpeed);
-  };
+  // Touch: a pen's pressure; with a mouse or trackpad, the Touch dial
+  // (values.mouseTouch: hold Option lighter, Command heavier). Side of the
+  // brush from Shift or pen tilt.
+  const pressureOf = e => (e.pointerType === 'pen' ? Math.max(e.pressure, 0.05) * 1.5 : values.mouseTouch);
   const sideOf = e => {
     if (e.shiftKey) return 1;
     if (e.pointerType === 'pen' && (e.tiltX || e.tiltY)) return Math.min(Math.max((Math.hypot(e.tiltX, e.tiltY) - 30) / 40, 0), 1);
@@ -932,7 +924,7 @@ function bindPointer(canvas) {
   });
   canvas.addEventListener('contextmenu', e => { if (state.mode === 3) e.preventDefault(); });
   canvas.addEventListener('pointerdown', e => {
-    if (state.brushType === 'dip') state.reservoir = 1;   // a dip brush is reloaded each stroke
+    if (state.brushType === 'dip') state.reservoir = values.dipLoad;   // a dip brush is reloaded each stroke (Wetness: how full)
     if (state.mode === 3) {
       const [x, y] = toGrid(e);
       const hit = magnetAt(x, y);
@@ -952,7 +944,6 @@ function bindPointer(canvas) {
     try { canvas.setPointerCapture(e.pointerId); } catch {}
     [ptr.x, ptr.y] = toGrid(e);
     ptr.px = ptr.x; ptr.py = ptr.y;
-    lastMove = null; smoothSpeed = 0;
     ptr.scripted = false;
     ptr.pressure = pressureOf(e);
     ptr.side = sideOf(e);
@@ -968,6 +959,20 @@ function bindPointer(canvas) {
     ptr.side = sideOf(e);
     ptr.pen = e.pointerType === 'pen';
   });
+  // The Touch dial: hold Option to lighten the touch, Command to press
+  // harder; it glides while held and stays where it's left.
+  const held = { alt: false, meta: false };
+  window.addEventListener('keydown', e => { if (e.key === 'Alt') held.alt = true; if (e.key === 'Meta') held.meta = true; });
+  window.addEventListener('keyup', e => { if (e.key === 'Alt') held.alt = false; if (e.key === 'Meta') held.meta = false; });
+  window.addEventListener('blur', () => { held.alt = held.meta = false; });
+  let lastTick = performance.now();
+  const tick = () => {
+    const now = performance.now(), dt = Math.min((now - lastTick) / 1000, 0.1); lastTick = now;
+    const dir = (held.meta ? 1 : 0) - (held.alt ? 1 : 0);
+    if (dir) inputs_mouseTouch(Math.min(1, Math.max(0.02, values.mouseTouch + dir * values.touchRate * dt)));
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
   const up = () => {
     ptr.down = false;
     // A magnet dragged off the paper is removed.
@@ -981,6 +986,7 @@ function bindPointer(canvas) {
 // Set by buildUI: refresh knob inputs and menus from the current state
 // (after opening a saved painting).
 let uiSync = () => {};
+let inputs_mouseTouch = v => {};   // set by buildUI
 
 function buildUI({ clear, newPaper }) {
   const panel = document.getElementById('knobs');
@@ -1005,7 +1011,9 @@ function buildUI({ clear, newPaper }) {
     const set = v => {
       if (!Number.isFinite(v)) return;
       values[p.key] = v; range.value = v; num.value = +v.toPrecision(4);
-      if (p.key === 'brushPigment') document.getElementById('strength').value = v;   // the panel's Paint strength slider
+      if (p.key === 'brushPigment') document.getElementById('strength').value = v;   // the panel's sliders
+      if (p.key === 'mouseTouch') document.getElementById('touch').value = v;
+      if (p.key === 'dipLoad') document.getElementById('wetness').value = v;
     };
     range.addEventListener('input', () => set(parseFloat(range.value)));
     num.addEventListener('change', () => set(parseFloat(num.value)));
@@ -1200,11 +1208,17 @@ function buildUI({ clear, newPaper }) {
     for (const [k, v] of Object.entries(PAPERS[state.paper].knobs)) inputs[k](v);
   };
   const strength = document.getElementById('strength');
+  const touchEl = document.getElementById('touch'), wetEl = document.getElementById('wetness');
+  touchEl.value = values.mouseTouch; wetEl.value = values.dipLoad;
+  touchEl.addEventListener('input', () => { inputs.mouseTouch(+touchEl.value); });
+  wetEl.addEventListener('input', () => { inputs.dipLoad(+wetEl.value); });
   strength.value = values.brushPigment;
   strength.addEventListener('input', () => { values.brushPigment = +strength.value; inputs.brushPigment(values.brushPigment); });
+  inputs_mouseTouch = v => inputs.mouseTouch(v);
   uiSync = () => {
     for (const p of PARAMS) inputs[p.key](values[p.key]);
     strength.value = values.brushPigment;
+    touchEl.value = values.mouseTouch; wetEl.value = values.dipLoad;
     document.getElementById('paperType').value = state.paper;
     document.getElementById('tone').value = state.tone;
   };

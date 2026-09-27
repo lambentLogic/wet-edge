@@ -553,7 +553,8 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     // passes compose exactly (two half-doses = one full dose), so a fast
     // stroke's few big passes match a slow one's many small ones; for small
     // doses it's the same as brushRate * amt.
-    let k = 1.0 - pow(max(1.0 - clamp(p.brushRate * fall * fr.pressure, 0.0, 0.999), 1e-4), fr.brushScale);
+    // Pressure sets the width (taper) only, not how strong the paint is.
+    let k = 1.0 - pow(max(1.0 - clamp(p.brushRate * fall, 0.0, 0.999), 1e-4), fr.brushScale);
     // Touching an already-wet surface, a freshly loaded brush also releases a
     // charge of extra water, which pushes outward: the wet-in-wet burst.
     // fr.charge decays after touchdown (the brush's reservoir is finite), so
