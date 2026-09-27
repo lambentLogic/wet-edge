@@ -284,8 +284,9 @@ export function makeMinds(sim) {
     if (mist) {
       const mode0 = h.mode();
       h.setMode(4);
+      const reach0 = V.mistRadius;
       for (const [mistR, step] of [[40, 16], [Math.max(tipR * 3, 8), 6]]) {
-        V.brushRadius = mistR;
+        V.brushRadius = mistR; V.mistRadius = mistR;   // the spray has its own reach; keep it this size
         for (let y = mistR * 0.6, dirx = 1; y < H; y += mistR * 1.1, dirx = -dirx) {
           let run = [];
           const flush = async () => { if (run.length > 1) { h.lift(); await sim.path(run, 1); } run = []; };
@@ -297,28 +298,39 @@ export function makeMinds(sim) {
           await flush();
         }
       }
-      h.setMode(mode0); V.brushRadius = bigR;
+      h.setMode(mode0); V.brushRadius = bigR; V.mistRadius = reach0;
     }
     // Inner rings first where they start at the same height (a painter
     // cuts in, then works outward).
     const todo = lines.map(({ l, L }) => ({ l, L, top: Math.min(...l.map(p => p[1])) })).sort((p, q) => p.top - q.top || p.L - q.L);
-    let cut = 0, rows = 0;
-    for (let y = rowStep / 2, dirx = 1; y < H + rowStep; y += rowStep, dirx = -dirx) {
-      while (todo.length && todo[0].top < y + rowStep) {
-        const { l } = todo.shift();
-        V.brushRadius = bigR; setLoad(l[0][0], l[0][1]);
-        h.lift(); await sim.path(l.map(([x, yy]) => [x, yy, 0]), framesPerSeg); cut++;
-      }
-      if (y >= H) continue;
+    // Rows: in the open (where the whole brush fits) at full width every
+    // rowStep; in the band near a shape, where the brush narrows to fit,
+    // rows closer together (fineStep), so the narrowed strokes still meet
+    // (at one spacing they left gaps: stripes beside each shape).
+    const openAt = margin + bigR, fineStep = Math.max(2, tipR * 2.5);
+    let cut = 0, rows = 0, nextCoarse = rowStep / 2, dirx = 1;
+    const row = async (y, near) => {
       V.brushRadius = bigR;
       let run = [];
       const flush = async () => { if (run.length > 1) { setLoad(run[0][0], y); h.lift(); await sim.path(run, framesPerSeg); rows++; } run = []; };
       for (let k = 0; k <= Math.ceil(W / 10); k++) {
         const x = dirx > 0 ? k * 10 : W - k * 10;
         const d = at(x, y);
-        if (d > clearOf) run.push([x, y, pressFor(d - margin)]); else await flush();
+        const ok = near ? d > clearOf && d <= openAt : d > openAt;
+        if (ok) run.push([x, y, near ? pressFor(d - margin) : 1]); else await flush();
       }
       await flush();
+      dirx = -dirx;
+    };
+    for (let y = fineStep / 2; y < H + rowStep; y += fineStep) {
+      while (todo.length && todo[0].top < y + rowStep) {
+        const { l } = todo.shift();
+        V.brushRadius = bigR; setLoad(l[0][0], l[0][1]);
+        h.lift(); await sim.path(l.map(([x, yy]) => [x, yy, 0]), framesPerSeg); cut++;
+      }
+      if (y >= H) continue;
+      await row(y, true);
+      if (y >= nextCoarse) { await row(nextCoarse, false); nextCoarse += rowStep; }
     }
     V.brushRadius = bigR; V.brushPigment = pig0;
     log(`washAround: ${cut} cut-in ${cut === 1 ? 'contour' : 'contours'}, ${rows} fill strokes`);
