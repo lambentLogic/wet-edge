@@ -590,22 +590,27 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     } else if (fr.mode == 1u) {
       w = max(w, mix(w, p.brushWater, k)) + charge;
     } else if (fr.mode == 4u) {
-      // Mist: a spray bottle's fine droplets, scattered over a wide soft
-      // footprint, and the paper under them dampened. Painters mist an area
-      // so strokes laid into it melt together instead of each drying with
-      // its own edge.
-      // Droplets are beads a few cells across: each pass, some 4 x 4 blocks
-      // get one, centred at a random point with a random size.
-      let seedM = u32(fr.time * 600.0) + 7u;
-      let bx = x / 4; let by = y / 4;
-      // A spray bottle's cone, not the brush: fr.radius is the spray's reach
-      // (mistRadius), droplets densest in the middle and thinning out.
+      // Mist: a spray bottle, not the brush. fr.radius is the spray's reach
+      // (mistRadius); droplets are densest in the middle and thin out, and
+      // the paper under them is dampened. Painters mist an area so strokes
+      // laid into it melt together instead of each drying with its own edge.
+      // Droplets are round beads about 0.4-1.2 mm across (real spray on
+      // sized paper): each pass, some 8 x 8 blocks get one at a random point
+      // and size. A cell checks its own and the neighbouring blocks, so beads
+      // near a block's edge stay round (only its own block clipped them).
       let cone = exp(-3.0 * (dist / max(r, 1.0)) * (dist / max(r, 1.0)));
       let kM = cone * fr.brushScale;
-      if (hash2(bx, by, seedM + u32(kSub) * 13u) < p.mistDensity * kM) {
-        let c = vec2f(f32(bx * 4) + 4.0 * hash2(bx, by, seedM + 1u), f32(by * 4) + 4.0 * hash2(bx, by, seedM + 2u));
-        let rad = 0.8 + 2.2 * hash2(bx, by, seedM + 3u);
-        if (length(vec2f(f32(x) + 0.5, f32(y) + 0.5) - c) < rad) { w = max(w, p.mistWater * (0.7 + 0.6 * hash2(by, bx, seedM))); }
+      let seedS = u32(fr.time * 600.0) + 7u + u32(kSub) * 13u;
+      for (var oy = -1; oy <= 1; oy++) {
+        for (var ox = -1; ox <= 1; ox++) {
+          let bx = x / 8 + ox; let by = y / 8 + oy;
+          if (hash2(bx, by, seedS) >= p.mistDensity * kM) { continue; }
+          let c = vec2f(f32(bx * 8) + 8.0 * hash2(bx, by, seedS + 1u), f32(by * 8) + 8.0 * hash2(bx, by, seedS + 2u));
+          let rad = 2.0 + 4.0 * pow(hash2(bx, by, seedS + 3u), 2.0);
+          let dd = length(vec2f(f32(x) + 0.5, f32(y) + 0.5) - c);
+          let bead = smoothstep(rad + 0.6, rad - 0.9, dd);   // soft rim
+          if (bead > 0.0) { w = max(w, p.mistWater * bead * (0.7 + 0.6 * hash2(bx, by, seedS + 4u))); }
+        }
       }
       s = min(s + p.mistDamp * kM, max(s, p.capacityMax));
     } else if (fr.mode == 5u) {
