@@ -298,6 +298,8 @@ async function init() {
       frameF32[24] = dryness * Math.max(1 - pr, side * 0.8, values.speedSkim * speed);
       // Taper: width follows pressure; the side of the brush is wider.
       frameF32[13] = values.brushRadius * (values.taperMin + (1 - values.taperMin) * pr) * (1 + 0.8 * side);
+      // The mist is a spray bottle: its own reach, whatever brush is loaded.
+      if (state.mode === 4) frameF32[13] = values.mistRadius;
       // Wet-in-wet charge: strongest at touchdown, then the reservoir is spent.
       const dur = Math.max(values.chargeDuration, 1e-3);
       frameF32[11] = Math.exp(-(brush.age ?? 0) / dur);

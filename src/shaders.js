@@ -538,7 +538,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     // and, on the side of the brush, a drying belly.
     let touch = fr.touch;
     let dryPaper = a.x <= p.wEps && a.w < p.dampThreshold;
-    if (fr.mode != 2u && dryPaper && touch > 0.0) {
+    if (fr.mode != 2u && fr.mode != 4u && dryPaper && touch > 0.0) {
       let cut = p.skipAmount * touch;
       fall *= smoothstep(cut - 0.15, cut + 0.15, aux[i].x);
     }
@@ -598,8 +598,10 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
       // get one, centred at a random point with a random size.
       let seedM = u32(fr.time * 600.0) + 7u;
       let bx = x / 4; let by = y / 4;
-      // Per pass under the spray, independent of the brush's flow rate.
-      let kM = fall * fr.brushScale;
+      // A spray bottle's cone, not the brush: fr.radius is the spray's reach
+      // (mistRadius), droplets densest in the middle and thinning out.
+      let cone = exp(-3.0 * (dist / max(r, 1.0)) * (dist / max(r, 1.0)));
+      let kM = cone * fr.brushScale;
       if (hash2(bx, by, seedM + u32(kSub) * 13u) < p.mistDensity * kM) {
         let c = vec2f(f32(bx * 4) + 4.0 * hash2(bx, by, seedM + 1u), f32(by * 4) + 4.0 * hash2(bx, by, seedM + 2u));
         let rad = 0.8 + 2.2 * hash2(bx, by, seedM + 3u);

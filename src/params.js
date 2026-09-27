@@ -99,6 +99,7 @@ export const PARAMS = [
   { key: 'squeezeRate',   v: 0.6,  min: 0, max: 3,   group: 'Brush', target: 'js',  label: 'water brush squeeze (per s)' },
   { key: 'thicken',       v: 1.5,  min: 0, max: 5,   group: 'Brush', target: 'sim', label: 'paint thickens as it empties' },
   { key: 'skipAmount',    v: 0.9,  min: 0, max: 1.5, group: 'Brush', target: 'sim', label: 'dry-brush skip' },
+  { key: 'mistRadius',  v: 110,  min: 10, max: 400, group: 'Brush', target: 'sim', label: 'mist: spray reach (cells)' },
   { key: 'mistWater',   v: 0.14, min: 0, max: 0.5, group: 'Brush', target: 'sim', label: 'mist: droplet water' },
   { key: 'mistDensity', v: 0.25, min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'mist: droplets per pass' },
   { key: 'mistDamp',    v: 0.04, min: 0, max: 0.5, group: 'Brush', target: 'sim', label: 'mist: dampens the paper' },
