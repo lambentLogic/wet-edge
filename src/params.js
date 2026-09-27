@@ -108,6 +108,7 @@ export const PARAMS = [
   { key: 'liftStrength',  v: 0.24,  min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'lift strength' },
 
   // --- Render (Kubelka-Munk) ---
+  { key: 'undoDepth',       v: 4,    min: 1, max: 20, group: 'Render', target: 'js', label: 'undo levels (~145 MB each)' },
   { key: 'thickness',       v: 8,    min: 0, max: 40, group: 'Render', target: 'render', label: 'pigment thickness' },
   { key: 'wetDarken',       v: 0.5,  min: 0, max: 3,  group: 'Render', target: 'render', label: 'wet sheen' },
   { key: 'dampDarken',      v: 0.8,  min: 0, max: 3,  group: 'Render', target: 'render', label: 'damp paper shows' },

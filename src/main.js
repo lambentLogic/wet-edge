@@ -138,6 +138,7 @@ async function init() {
     device.queue.writeBuffer(auxBuf, 0, aux);
   };
   const clear = () => {
+    window.__sim?.checkpoint?.();
     const z = new Float32Array(N * 4);
     for (const b of [...A, ...B]) device.queue.writeBuffer(b, 0, z);
     // A cleared sheet starts its clock again (deposit timestamps and
@@ -655,9 +656,56 @@ async function init() {
   });
   window.__sim.setDrying = on => { state.drying = on; document.getElementById('dry').classList.toggle('on', on); };
   // Spray workable fixative over the whole sheet (applied on the next step).
-  window.__sim.fix = () => { state.fixPending = true; state.lastEdit = performance.now(); };
+  // ---- undo: full snapshots of the paper on the GPU (about 145 MB each;
+  // a copy takes a few milliseconds), taken at the start of every stroke and
+  // before sprays, fixative, peeling the mask, clearing and opening. Undo
+  // restores the paper exactly, wet paint mid-flow included (velocities
+  // restart at rest). undoDepth levels; redo until the next change.
+  const SNAP = [['A', N * 16], ['G', N * GB], ['D', N * DB], ['aux', N * 16]];
+  const undoPool = [], undoStack = [], redoStack = [];
+  const allocSnap = () => undoPool.pop() ?? Object.fromEntries(SNAP.map(([k, size]) => [k, device.createBuffer({ size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC })]));
+  function takeSnap() {
+    const snap = allocSnap(), enc = device.createCommandEncoder();
+    enc.copyBufferToBuffer(A[parity], 0, snap.A, 0, N * 16);
+    enc.copyBufferToBuffer(G[parity], 0, snap.G, 0, N * GB);
+    enc.copyBufferToBuffer(Dbuf, 0, snap.D, 0, N * DB);
+    enc.copyBufferToBuffer(auxBuf, 0, snap.aux, 0, N * 16);
+    device.queue.submit([enc.finish()]);
+    snap.simTime = state.simTime; snap.magnets = JSON.parse(JSON.stringify(state.magnets));
+    return snap;
+  }
+  function putSnap(snap) {
+    const enc = device.createCommandEncoder();
+    for (const b of A) enc.copyBufferToBuffer(snap.A, 0, b, 0, N * 16);
+    for (const b of G) enc.copyBufferToBuffer(snap.G, 0, b, 0, N * GB);
+    enc.copyBufferToBuffer(snap.D, 0, Dbuf, 0, N * DB);
+    enc.copyBufferToBuffer(snap.aux, 0, auxBuf, 0, N * 16);
+    device.queue.submit([enc.finish()]);
+    for (const b of B) device.queue.writeBuffer(b, 0, new Float32Array(N * 4));
+    device.queue.writeBuffer(tilesBuf, 32, new Uint32Array(TX * TY).fill(4));   // wake every tile
+    state.simTime = snap.simTime; state.magnets = snap.magnets; state.magDirty = true; drawMagnets();
+    state.lastEdit = performance.now();
+  }
+  window.__sim.checkpoint = () => {
+    while (undoStack.length >= Math.max(1, values.undoDepth)) undoPool.push(undoStack.shift());
+    undoPool.push(...redoStack.splice(0));
+    undoStack.push(takeSnap());
+  };
+  window.__sim.undo = () => {
+    if (!undoStack.length) return false;
+    redoStack.push(takeSnap());
+    const snap = undoStack.pop(); putSnap(snap); undoPool.push(snap);
+    return true;
+  };
+  window.__sim.redo = () => {
+    if (!redoStack.length) return false;
+    undoStack.push(takeSnap());
+    const snap = redoStack.pop(); putSnap(snap); undoPool.push(snap);
+    return true;
+  };
+  window.__sim.fix = () => { window.__sim.checkpoint(); state.fixPending = true; state.lastEdit = performance.now(); };
   // Peel off all masking fluid (applied on the next step).
-  window.__sim.unmask = () => { state.unmaskPending = true; state.lastEdit = performance.now(); };
+  window.__sim.unmask = () => { window.__sim.checkpoint(); state.unmaskPending = true; state.lastEdit = performance.now(); };
 
   // ---- save / open
   async function readBuffer(src, size, offset = 0) {
@@ -781,6 +829,7 @@ async function init() {
   })();
 
   async function openPainting(file) {
+    window.__sim.checkpoint?.();
     const raw = await new Response(file.stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
     const len = new Uint32Array(raw, 0, 1)[0];
     const meta = JSON.parse(new TextDecoder().decode(new Uint8Array(raw, 4, len)));
@@ -961,6 +1010,7 @@ function bindPointer(canvas) {
   });
   canvas.addEventListener('contextmenu', e => { if (state.mode === 3) e.preventDefault(); });
   canvas.addEventListener('pointerdown', e => {
+    if (state.mode !== 3) window.__sim.checkpoint();   // each stroke can be undone
     if (state.brushType === 'dip') state.reservoir = values.dipLoad;   // a dip brush is reloaded each stroke (Wetness: how full)
     if (state.mode === 3) {
       const [x, y] = toGrid(e);
@@ -1002,6 +1052,7 @@ function bindPointer(canvas) {
   const typing = e => e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT';
   window.addEventListener('keydown', e => {
     if (typing(e)) return;
+    if (e.metaKey || e.ctrlKey) return;   // Cmd+Z is undo
     if (e.key === 'Alt' || e.key === 'z' || e.key === 'Z') held.light = true;
     if (e.key === 'x' || e.key === 'X') held.heavy = true;
   });
@@ -1231,6 +1282,8 @@ function buildUI({ clear, newPaper }) {
   setMode(0);
 
   document.getElementById('fix').addEventListener('click', () => window.__sim.fix());
+  document.getElementById('undo').addEventListener('click', () => window.__sim.undo());
+  document.getElementById('redo').addEventListener('click', () => window.__sim.redo());
   document.getElementById('unmask').addEventListener('click', () => window.__sim.unmask());
   const dryBtn = document.getElementById('dry');
   const setDry = on => { state.drying = on; dryBtn.classList.toggle('on', on); };
@@ -1288,6 +1341,11 @@ function buildUI({ clear, newPaper }) {
 
   window.addEventListener('keydown', e => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z')) {
+      e.preventDefault();
+      if (e.shiftKey) window.__sim.redo(); else window.__sim.undo();
+      return;
+    }
     if (e.key >= '1' && e.key <= '4') setMode(+e.key - 1);
     if (e.key === '5') setMode(4);
     if (e.key === '6') setMode(5);
