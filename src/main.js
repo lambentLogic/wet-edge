@@ -242,16 +242,6 @@ async function init() {
 
   const pointerBrush = () => {
     const ptr = state.pointer;
-    // Follow-through: let go mid-stroke and the brush carries on a little in
-    // the direction it was moving, lifting off to its tip, so the stroke
-    // ends tapered rather than in a round cap.
-    if (!ptr.down && ptr.liftOut) {
-      const lo = ptr.liftOut, e = (performance.now() - lo.t0) / 1000, dur = Math.max(values.liftOut, 1e-3);
-      if (e > dur) { ptr.liftOut = null; return null; }
-      ptr.nx = ptr.px + (lo.tx - ptr.px) * 0.5;
-      ptr.ny = ptr.py + (lo.ty - ptr.py) * 0.5;
-      return { x0: ptr.px, y0: ptr.py, x1: ptr.nx, y1: ptr.ny, pressure: lo.p * (1 - e / dur) ** 2, side: ptr.side ?? 0, age: 1 };
-    }
     if (!ptr.down) return null;
     const age = (performance.now() - ptr.downAt) / 1000;
     let pressure = ptr.pressure;
@@ -295,16 +285,14 @@ async function init() {
     if (brush) {
       const seg = Math.hypot(brush.x1 - brush.x0, brush.y1 - brush.y0);
       state.smoothSeg = !state.brushActive ? seg : state.smoothSeg * 0.6 + seg * 0.4;
-      // Contact length: how much hair trails along the paper feeding paint
-      // to the line (a rigger's long hairs), else about the brush's width.
-      const contact = values.contactLength > 0 ? values.contactLength : 2 * frameF32[13];
-      // Each substep stamps only its slice of the frame's segment (see the
-      // shader), so a spot is under the brush for (2r) / (2r + travel) as
-      // long as when every substep stamped the whole segment, the swept
-      // shape everything was calibrated with (which also doubled the paint
-      // at a fast stroke's joints). Scaled back up to the same totals.
-      const seg1 = Math.max(state.smoothSeg, 1e-3), w2 = 2 * frameF32[13];
-      dwell = Math.max(0.3, Math.min(1, contact / seg1)) * (w2 + seg1) / Math.max(w2, 1e-3);
+      // A brush releases paint as it travels: every spot it crosses gets
+      // the same dose however fast it moves (brushDose frames' worth; a
+      // quick stroke isn't paler), and a brush that lingers adds a frame's
+      // worth per frame, so slow strokes and dabs build up. A spot is under
+      // a moving brush for (2r / travel) frames (each substep stamps only its
+      // slice of the segment, see the shader).
+      const seg1 = Math.max(state.smoothSeg, 1e-3), w2 = Math.max(2 * frameF32[13], 1e-3);
+      dwell = Math.max(1, values.brushDose * seg1 / w2);
     }
     frameF32[29] = substeps;
     frameF32[9] = dwell / substeps;
@@ -314,17 +302,8 @@ async function init() {
     frameF32[15] = concMul();
     if (!brush) { frameF32[13] = values.brushRadius; frameF32[24] = 0; }
     frameF32[25] = values.fixTooth;
-    // Landing: how far the brush has travelled since it touched down, for
-    // its contact patch widening from the tip (reset with each new stroke).
-    let tipS0 = -1, ageFrac = 1;
-    if (brush) {
-      if (!state.brushActive) { state.brushTravel = 0; state.strokeStart = state.simTime; }
-      const seg = Math.hypot(brush.x1 - brush.x0, brush.y1 - brush.y0);
-      const L = values.brushRadius * values.tipLength * 1.5;
-      if (state.brushTravel < L) { tipS0 = state.brushTravel; ageFrac = Math.min(1, (brush.age ?? 1) / Math.max(values.tipLanding, 1e-3)); }
-      state.brushTravel += seg;
-    }
-    frameF32[26] = tipS0; frameF32[27] = ageFrac; frameF32[28] = state.strokeStart ?? 0;
+    if (brush && !state.brushActive) state.strokeStart = state.simTime;
+    frameF32[28] = state.strokeStart ?? 0;
     state.brushActive = !!brush;
     // Brush load: pigment ids at u32 16..19, fractions at f32 20..23.
     const total = state.brush.reduce((t, b) => t + b.frac, 0) || 1;
@@ -463,7 +442,7 @@ async function init() {
     if (!state.paused && !state.headless && substeps > 0) {
       rbk = encodeSim(enc, substeps);
       // Only consume the brush segment once the sim has actually stamped it.
-      if (state.pointer.down || state.pointer.liftOut) { state.pointer.px = state.pointer.nx; state.pointer.py = state.pointer.ny; }
+      if (state.pointer.down) { state.pointer.px = state.pointer.nx; state.pointer.py = state.pointer.ny; }
     }
     const rp = enc.beginRenderPass({
       colorAttachments: [{ view: ctx.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: [1, 1, 1, 1] }],
@@ -535,7 +514,7 @@ async function init() {
     // A stroke from (x0,y0) to (x1,y1) over `frames` simulated frames.
     // Consecutive paint() calls continue one stroke (the brush isn't
     // reloaded) unless lift() is called in between.
-    lift() { strokeFrame = 0; state.brushTravel = 0; state.strokeStart = state.simTime; },
+    lift() { strokeFrame = 0; state.strokeStart = state.simTime; },
     async paint(x0, y0, x1, y1, frames = 24) {
       if (strokeFrame === 0 && state.brushType === 'dip') state.reservoir = 1;   // a fresh dip stroke: reloaded
       const at = f => {
@@ -584,7 +563,7 @@ async function init() {
     const ptr = state.pointer;
     let f = 0;
     ptr.x = ptr.px = x0; ptr.y = ptr.py = y0; ptr.pressure = 1; ptr.downAt = performance.now(); ptr.down = true;
-    state.brushTravel = 0; state.strokeStart = state.simTime;
+    state.strokeStart = state.simTime;
     ptr.pen = true; ptr.side = 0; ptr.scripted = true;
     if (state.brushType === 'dip') state.reservoir = 1;
     const step = () => {
@@ -617,7 +596,7 @@ async function init() {
     const ptr = state.pointer;
     const [x0, y0, p0 = 1, s0 = 0] = points[0];
     ptr.x = ptr.px = x0; ptr.y = ptr.py = y0; ptr.pressure = p0; ptr.downAt = performance.now(); ptr.down = true;
-    state.brushTravel = 0; state.strokeStart = state.simTime;   // a new stroke
+    state.strokeStart = state.simTime;   // a new stroke
     ptr.pen = true; ptr.side = s0; ptr.scripted = true;   // scripted strokes use their exact pressure and path
     if (state.brushType === 'dip') state.reservoir = 1;
     let seg = 1, f = 0;
@@ -980,7 +959,7 @@ function bindPointer(canvas) {
     ptr.pen = e.pointerType === 'pen';
     ptr.downAt = performance.now();
     ptr.down = true;
-    state.brushTravel = 0; state.strokeStart = state.simTime;   // a new stroke
+    state.strokeStart = state.simTime;   // a new stroke
   });
   canvas.addEventListener('pointermove', e => {
     if (dragMagnet) { [dragMagnet.x, dragMagnet.y] = toGrid(e); drawMagnets(); return; }
@@ -990,15 +969,6 @@ function bindPointer(canvas) {
     ptr.pen = e.pointerType === 'pen';
   });
   const up = () => {
-    // Hand strokes follow through (see pointerBrush): toward a point ahead
-    // along the last direction of travel, if the brush was moving.
-    if (ptr.down && !ptr.scripted && state.mode !== 3) {
-      const dx = ptr.x - ptr.px, dy = ptr.y - ptr.py, len = Math.hypot(dx, dy);
-      if (len > 1) {
-        const L = values.brushRadius * values.tipLength * 0.6;
-        ptr.liftOut = { t0: performance.now(), tx: ptr.x + dx / len * L, ty: ptr.y + dy / len * L, p: ptr.pressure };
-      }
-    }
     ptr.down = false;
     // A magnet dragged off the paper is removed.
     if (dragMagnet && (dragMagnet.x < 0 || dragMagnet.y < 0 || dragMagnet.x > W || dragMagnet.y > H)) removeMagnet(dragMagnet);

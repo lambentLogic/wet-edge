@@ -43,8 +43,7 @@ struct Frame {
   brushFrac: vec4f,   // ... and their fractions of the load (sum 1)
   touch: f32,         // how lightly the brush skims (0 = full contact), from the CPU
   fixTooth: f32,      // how much a fixative spray fills the paper's tooth
-  tipS0: f32,         // distance travelled since landing, at this frame's segment start (-1 = past the landing)
-  ageFrac: f32,       // time since landing / tipLanding, capped at 1
+  _t0: f32, _t1: f32,
   strokeStart: f32,   // sim time this stroke touched down
   substeps: f32,      // sim steps this frame (the brush's segment is split among them)
   _f2: f32, _f3: f32,
@@ -508,19 +507,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     let t = clamp(dot(P - A, AB) / max(dot(AB, AB), 1e-6), 0.0, 1.0);
     let dist = length(P - (A + AB * t));
     let r = fr.radius;
-    // Contact patch: a real round brush doesn't touch in a circle. The tip
-    // touches down first, at the landing point, and the belly spreads ahead
-    // of it as the stroke moves, so a stroke starts from a point and widens
-    // to full over its first tipLength radii (more when pressed harder). A
-    // dab pressed in place widens with time instead (fr.ageFrac), so it
-    // ends up round. fr.tipS0 < 0: past the landing, full width.
     var cover = r - dist;
-    if (fr.tipS0 >= 0.0) {
-      let L = max(r * p.tipLength * (0.5 + 0.5 * clamp(fr.pressure, 0.0, 1.5)), 1e-3);
-      let sAlong = fr.tipS0 + (max(kSub, 0.0) + t) * length(AB);
-      let grow = clamp(max(sAlong / L, fr.ageFrac), 0.0, 1.0);
-      cover = r * sqrt(grow) - dist;
-    }
     var soft = r * p.brushSoftness;
     // A flat brush: a thin rectangle (its chisel edge flatThickness of its
     // width) held at flatAngle, swept along the path. Pulled broadside it
@@ -555,14 +542,18 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
       let cut = p.skipAmount * touch;
       fall *= smoothstep(cut - 0.15, cut + 0.15, aux[i].x);
     }
-    // fr.brushScale includes the dwell (computed on the CPU from smoothed
-    // stroke speed): a fast stroke spends less time over each spot.
+    // fr.brushScale is this substep's share of the frame, scaled by the
+    // dwell (see writeUniforms): every spot the brush crosses gets the same
+    // dose at any speed, and lingering adds more.
     let amt = fall * fr.brushScale * fr.pressure;
     let wBefore = w;
     var gAdded = 0.0;
-    // The brush tops the paper up toward its own water level and
-    // pigment concentration rather than adding a fixed amount per frame.
-    let k = clamp(p.brushRate * amt, 0.0, 1.0);
+    // The brush tops the paper up toward its own water level and pigment
+    // concentration rather than adding a fixed amount per frame. Written so
+    // passes compose exactly (two half-doses = one full dose), so a fast
+    // stroke's few big passes match a slow one's many small ones; for small
+    // doses it's the same as brushRate * amt.
+    let k = 1.0 - pow(max(1.0 - clamp(p.brushRate * fall * fr.pressure, 0.0, 0.999), 1e-4), fr.brushScale);
     // Touching an already-wet surface, a freshly loaded brush also releases a
     // charge of extra water, which pushes outward: the wet-in-wet burst.
     // fr.charge decays after touchdown (the brush's reservoir is finite), so
@@ -610,7 +601,8 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
       // Its edge follows the paper's tooth a little, as liquid latex does.
       if (a.x <= p.wEps) { maskNew = max(maskNew, step(0.45 + 0.2 * (0.5 - aux[i].x), fall)); }
     } else {
-      let kl = clamp(p.liftStrength * amt * 8.0, 0.0, 1.0);
+      // Lifting works by time: scrubbing longer lifts more.
+      let kl = clamp(p.liftStrength * fall * fr.pressure * 8.0 / nSub, 0.0, 1.0);
       w *= 1.0 - kl;
       for (var j = 0u; j < cn; j++) { camt[j] *= 1.0 - kl; }
       s *= 1.0 - kl;

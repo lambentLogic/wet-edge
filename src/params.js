@@ -83,12 +83,9 @@ export const PARAMS = [
   { key: 'brushShape',    v: 0,    min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'shape (0 round, 1 flat)' },
   { key: 'flatAngle',     v: 0,    min: -180, max: 180, group: 'Brush', target: 'sim', label: 'flat: angle (deg; R / scroll)' },
   { key: 'flatThickness', v: 0.18, min: 0.02, max: 1, group: 'Brush', target: 'sim', label: 'flat: edge thickness (x width)' },
-  { key: 'tipLanding',    v: 0.12, min: 0, max: 1,   group: 'Brush', target: 'js',  label: 'tip trails for (s after landing)' },
-  { key: 'liftOut',       v: 0.12, min: 0, max: 1,   group: 'Brush', target: 'js',  label: 'follow-through on release (s)' },
-  { key: 'tipLength',     v: 1.6,  min: 0, max: 6,   group: 'Brush', target: 'sim', label: 'tip trails (x radius)' },
+  { key: 'brushDose',     v: 2.1,  min: 0, max: 10,  group: 'Brush', target: 'js',  label: 'dose per spot crossed (frames)' },
   { key: 'taperMin',      v: 0.15, min: 0, max: 1,   group: 'Brush', target: 'js',  label: 'taper (width at no pressure)' },
   { key: 'brushCapacity', v: 5000, min: 0, max: 30000, group: 'Brush', target: 'js', label: 'reservoir (0 = endless)' },
-  { key: 'contactLength', v: 0,    min: 0, max: 120, group: 'Brush', target: 'js',  label: 'contact length (cells, 0 = 2×radius)' },
   { key: 'lightTouch',    v: 0.3,  min: 0, max: 1,   group: 'Brush', target: 'js',  label: 'Option: light touch pressure' },
   { key: 'speedTouch',    v: 0,  min: 0, max: 5,   group: 'Brush', target: 'js',  label: 'mouse: faster = lighter' },
   { key: 'touchdownEase', v: 0.12, min: 0, max: 1,   group: 'Brush', target: 'js',  label: 'mouse: ease-in (s)' },
@@ -102,7 +99,7 @@ export const PARAMS = [
   { key: 'mistDamp',    v: 0.04, min: 0, max: 0.5, group: 'Brush', target: 'sim', label: 'mist: dampens the paper' },
   { key: 'maskTear',    v: 0.15, min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'mask peel lifts paint under it' },
   { key: 'liftDry',       v: 0.05, min: 0, max: 2,   group: 'Brush', target: 'sim', label: 'lifts dried paint' },
-  { key: 'liftStrength',  v: 0.2,  min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'lift strength' },
+  { key: 'liftStrength',  v: 0.24,  min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'lift strength' },
 
   // --- Render (Kubelka-Munk) ---
   { key: 'thickness',       v: 8,    min: 0, max: 40, group: 'Render', target: 'render', label: 'pigment thickness' },
