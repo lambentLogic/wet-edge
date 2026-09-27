@@ -55,7 +55,7 @@ function packOldG(old, version) {
 
 const values = Object.fromEntries(PARAMS.map(p => [p.key, p.v]));
 const state = {
-  mode: 0,          // 0 paint, 1 water, 2 lift
+  mode: 0,          // 0 paint, 1 water, 2 lift, 3 magnet, 4 mist
   // What the brush is loaded with: up to 4 pigments (PIGMENTS indices) and
   // their fractions of the load. One pigment straight from a pan, or a mix.
   brush: [{ pigment: 0, frac: 1 }],
@@ -1227,6 +1227,7 @@ function buildUI({ clear, newPaper }) {
   window.addEventListener('keydown', e => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
     if (e.key >= '1' && e.key <= '4') setMode(+e.key - 1);
+    if (e.key === '5') setMode(4);
     else if (e.key === 'f') flipMagnets();
     else if (e.key === '[' || e.key === ']') {
       const n = PIGMENTS.length;

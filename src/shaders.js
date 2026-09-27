@@ -553,6 +553,14 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
       w = max(w, mix(w, level, k)) + charge;
     } else if (fr.mode == 1u) {
       w = max(w, mix(w, p.brushWater, k)) + charge;
+    } else if (fr.mode == 4u) {
+      // Mist: a spray bottle's fine droplets, scattered over a wide soft
+      // footprint, and the paper under them dampened. Painters mist an area
+      // so strokes laid into it melt together instead of each drying with
+      // its own edge.
+      let drop = hash2(x, y, u32(fr.time * 600.0) + 7u);
+      if (drop < p.mistDensity * k) { w = max(w, p.mistWater * (0.6 + 0.8 * hash2(y, x, 3u))); }
+      s = min(s + p.mistDamp * k, max(s, p.capacityMax));
     } else {
       let kl = clamp(p.liftStrength * amt * 8.0, 0.0, 1.0);
       w *= 1.0 - kl;

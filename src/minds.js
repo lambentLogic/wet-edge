@@ -12,6 +12,10 @@
 //   soften(line, out)    find where the wet paint ends along a line and run
 //                        a clean damp brush half over that edge, so it fades
 //                        out instead of stopping hard
+//   washAround(area)     a wash that goes around whatever is already painted:
+//                        senses the sheet, cuts in along each shape with a
+//                        small brush a sliver away from it, and fills the
+//                        open areas with the big brush, top to bottom
 //   waitDry(points)      wait until the paper there is bone dry
 //   waitDamp(points)     wait until it has lost its shine (for soft drop-ins)
 
@@ -185,5 +189,140 @@ export function makeMinds(sim) {
     }
   }
 
-  return { mark, fill, soften, waitDry, waitDamp, spans };
+  // A wash that goes around what's already on the sheet, as a painter
+  // cuts in around a flower before laying the background. The sheet is
+  // sensed once: every cell holding paint (above threshold) is a shape to
+  // keep clear of, by margin cells of white paper. A distance map from
+  // those shapes gives, by marching squares, contour lines at margin +
+  // cutRadius, which are painted with a small brush (the cut-in); the big
+  // brush (the current radius) fills rows only where its whole footprint
+  // stays farther off, overlapping the cut-in band so the two merge wet.
+  // Top to bottom, each contour just before the rows reach it, so the
+  // cut-in is still wet when the fill joins it.
+  //   area       polygon to wash (default: the whole sheet)
+  //   pigmentAt  optional (x, y) => brushPigment, for a graded wash
+  //   brushAt    optional (x, y) => brush load, for a variegated wash
+  async function washAround(area = null, { margin = 3, cutRadius = 6, threshold = 0.004, pigmentAt = null, brushAt = null, mist = true, framesPerSeg = 2, log = () => {} } = {}) {
+    const W = 1024, a = await sim.read(), H = a.length / 4 / W, N = W * H;
+    const bigR = V.brushRadius, pig0 = V.brushPigment;
+    // Inside the area?
+    const inside = new Uint8Array(N);
+    if (area) {
+      for (let y = 0; y < H; y++) for (const [x0, x1] of spans(area, y + 0.5)) {
+        for (let x = Math.max(0, Math.ceil(x0)); x <= Math.min(W - 1, Math.floor(x1)); x++) inside[y * W + x] = 1;
+      }
+    } else inside.fill(1);
+    // Distance (cells) to the nearest painted cell: two-pass chamfer.
+    const INF = 1e9, dist = new Float32Array(N);
+    for (let c = 0; c < N; c++) dist[c] = a[c * 4 + 1] + a[c * 4 + 2] > threshold ? 0 : INF;
+    const D1 = 1, D2 = Math.SQRT2;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const c = y * W + x; let d = dist[c];
+      if (x > 0) d = Math.min(d, dist[c - 1] + D1);
+      if (y > 0) { d = Math.min(d, dist[c - W] + D1); if (x > 0) d = Math.min(d, dist[c - W - 1] + D2); if (x < W - 1) d = Math.min(d, dist[c - W + 1] + D2); }
+      dist[c] = d;
+    }
+    for (let y = H - 1; y >= 0; y--) for (let x = W - 1; x >= 0; x--) {
+      const c = y * W + x; let d = dist[c];
+      if (x < W - 1) d = Math.min(d, dist[c + 1] + D1);
+      if (y < H - 1) { d = Math.min(d, dist[c + W] + D1); if (x < W - 1) d = Math.min(d, dist[c + W + 1] + D2); if (x > 0) d = Math.min(d, dist[c + W - 1] + D2); }
+      dist[c] = d;
+    }
+    const at = (x, y) => { const xi = Math.min(W - 1, Math.max(0, Math.round(x))), yi = Math.min(H - 1, Math.max(0, Math.round(y))); return inside[yi * W + xi] ? dist[yi * W + xi] : -1; };
+    // Contours by marching squares on a coarse grid: the cut-in at margin +
+    // cutRadius, then rings farther out, overlapping, until they meet the
+    // zone the big brush fills (its soft edge covers well short of its
+    // radius, so one cut-in line left a white band between them).
+    const rowStep = Math.max(4, bigR * 0.9), clearOf = margin + bigR * 0.95 + cutRadius * 0.3;
+    const levels = [];
+    for (let Lk = margin + cutRadius; Lk < clearOf + cutRadius; Lk += cutRadius * 1.5) levels.push(Lk);
+    const lines = [];
+    for (const L of levels) lines.push(...contours(L).map(l => ({ l, L })));
+
+    function contours(L) {
+    const g = 3, segs = [];
+    const f = (x, y) => { const d = at(x, y); return d < 0 ? null : d - L; };
+    for (let y = 0; y + g < H; y += g) for (let x = 0; x + g < W; x += g) {
+      const v = [f(x, y), f(x + g, y), f(x + g, y + g), f(x, y + g)];
+      if (v.some(q => q === null)) continue;
+      const P = [[x, y], [x + g, y], [x + g, y + g], [x, y + g]], pts = [];
+      for (let e = 0; e < 4; e++) {
+        const p0 = v[e], p1 = v[(e + 1) % 4];
+        if ((p0 < 0) !== (p1 < 0)) { const t = p0 / (p0 - p1), A = P[e], B = P[(e + 1) % 4]; pts.push([A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t]); }
+      }
+      if (pts.length >= 2) segs.push([pts[0], pts[1]]);
+      if (pts.length === 4) segs.push([pts[2], pts[3]]);
+    }
+    // Chain segments into polylines.
+    const key = p => `${Math.round(p[0] * 4)},${Math.round(p[1] * 4)}`, ends = new Map(), used = new Uint8Array(segs.length);
+    segs.forEach((sg, i) => { for (const p of sg) { const k = key(p); if (!ends.has(k)) ends.set(k, []); ends.get(k).push(i); } });
+    const out = [];
+    for (let i = 0; i < segs.length; i++) {
+      if (used[i]) continue;
+      used[i] = 1; const poly = [segs[i][0], segs[i][1]];
+      for (const dir of [1, 0]) {
+        for (;;) {
+          const tip = dir ? poly[poly.length - 1] : poly[0], cand = (ends.get(key(tip)) ?? []).find(j => !used[j]);
+          if (cand === undefined) break;
+          used[cand] = 1;
+          const [p, q] = segs[cand], next = key(p) === key(tip) ? q : p;
+          if (dir) poly.push(next); else poly.unshift(next);
+        }
+      }
+      if (poly.length >= 3) out.push(poly.filter((_, k) => k % 3 === 0 || k === poly.length - 1));
+    }
+    return out;
+    }
+    const setLoad = (x, y) => { if (brushAt) h.setBrush(brushAt(x, y)); V.brushPigment = pigmentAt ? pigmentAt(x, y) : pig0; };
+    // Sweep top to bottom: rows of the big brush where it stays clear, and
+    // each contour cut in just before the rows reach it.
+    // Mist the open area first, so the cut-in rings and the fill strokes
+    // land on damp paper and melt together instead of each drying with its
+    // own edge (a painter's spray bottle). Kept a little off the shapes.
+    // A wide spray over the open area, then a fine one close in around the
+    // shapes (where the cut-in rings go), each kept its own reach off them.
+    if (mist) {
+      const mode0 = h.mode();
+      h.setMode(4);
+      for (const [mistR, step] of [[40, 16], [cutRadius * 1.5, 6]]) {
+        V.brushRadius = mistR;
+        for (let y = mistR * 0.6, dirx = 1; y < H; y += mistR * 1.1, dirx = -dirx) {
+          let run = [];
+          const flush = async () => { if (run.length > 1) { h.lift(); await sim.path(run, 1); } run = []; };
+          for (let k = 0; k <= Math.ceil(W / step); k++) {
+            const x = dirx > 0 ? k * step : W - k * step;
+            const d = at(x, y);
+            if (d > margin + mistR * 0.9 && (mistR >= 40 || d < clearOf + mistR)) run.push([x, y, 0.9]); else await flush();
+          }
+          await flush();
+        }
+      }
+      h.setMode(mode0); V.brushRadius = bigR;
+    }
+    // Inner rings first where they start at the same height (a painter
+    // cuts in, then works outward).
+    const todo = lines.map(({ l, L }) => ({ l, L, top: Math.min(...l.map(p => p[1])) })).sort((p, q) => p.top - q.top || p.L - q.L);
+    let cut = 0, rows = 0;
+    for (let y = rowStep / 2, dirx = 1; y < H + rowStep; y += rowStep, dirx = -dirx) {
+      while (todo.length && todo[0].top < y + rowStep) {
+        const { l } = todo.shift();
+        V.brushRadius = cutRadius; setLoad(l[0][0], l[0][1]);
+        h.lift(); await sim.path(l.map(([x, yy]) => [x, yy, 0.9]), framesPerSeg); cut++;
+      }
+      if (y >= H) continue;
+      V.brushRadius = bigR;
+      let run = [];
+      const flush = async () => { if (run.length > 1) { setLoad(run[0][0], y); h.lift(); await sim.path(run, framesPerSeg); rows++; } run = []; };
+      for (let k = 0; k <= Math.ceil(W / 10); k++) {
+        const x = dirx > 0 ? k * 10 : W - k * 10;
+        if (at(x, y) > clearOf) run.push([x, y, 0.9]); else await flush();
+      }
+      await flush();
+    }
+    V.brushRadius = bigR; V.brushPigment = pig0;
+    log(`washAround: ${cut} cut-in ${cut === 1 ? 'contour' : 'contours'}, ${rows} fill strokes`);
+    return { cut, rows };
+  }
+
+  return { mark, fill, soften, washAround, waitDry, waitDamp, spans };
 }

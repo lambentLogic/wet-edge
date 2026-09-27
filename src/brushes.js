@@ -15,27 +15,28 @@ export const BRUSHES = {
   round: {
     name: 'Synthetic round',
     type: 'dip',
-    knobs: { brushShape: 0, brushRadius: 14, brushSoftness: 0.4, taperMin: 0.15, brushCapacity: 5000, brushRate: 0.4, brushWater: 0.3, thicken: 1.5, contactLength: 0 },
+    knobs: { brushShape: 0, tipLength: 1.6, brushRadius: 14, brushSoftness: 0.4, taperMin: 0.15, brushCapacity: 5000, brushRate: 0.4, brushWater: 0.3, thicken: 1.5, contactLength: 0 },
   },
   mop: {
     // A squirrel mop's belly holds a huge amount of water and lets it go
-    // gently; soft hair, and a surprisingly fine point.
+    // gently; soft hair, and a surprisingly fine point: it's tapered, so it
+    // lands long and pointed (tipLength), and narrows sharply as it lifts.
     name: 'Squirrel mop',
     type: 'dip',
-    knobs: { brushShape: 0, brushRadius: 30, brushSoftness: 0.8, taperMin: 0.08, brushCapacity: 30000, brushRate: 0.22, brushWater: 0.4, thicken: 0.8, contactLength: 0 },
+    knobs: { brushShape: 0, tipLength: 3.2, brushRadius: 30, brushSoftness: 0.8, taperMin: 0.08, brushCapacity: 30000, brushRate: 0.22, brushWater: 0.4, thicken: 0.8, contactLength: 0 },
   },
   water: {
     // Water in the handle, a little pigment at the tip.
     name: 'Water brush',
     type: 'water',
-    knobs: { brushShape: 0, brushRadius: 12, brushSoftness: 0.5, taperMin: 0.2, brushCapacity: 15000, brushRate: 0.4, brushWater: 0.28, thicken: 0, contactLength: 0 },
+    knobs: { brushShape: 0, tipLength: 1.6, brushRadius: 12, brushSoftness: 0.5, taperMin: 0.2, brushCapacity: 15000, brushRate: 0.4, brushWater: 0.28, thicken: 0, contactLength: 0 },
   },
   rigger: {
     // Long hair trails along the paper feeding paint to the line, so even
     // a quick flick leaves a full mark.
     name: 'Rigger',
     type: 'dip',
-    knobs: { brushShape: 0, brushRadius: 4, brushSoftness: 0.3, taperMin: 0.05, brushCapacity: 1500, brushRate: 0.5, brushWater: 0.3, thicken: 1.5, contactLength: 45 },
+    knobs: { brushShape: 0, tipLength: 2.5, brushRadius: 4, brushSoftness: 0.3, taperMin: 0.05, brushCapacity: 1500, brushRate: 0.5, brushWater: 0.3, thicken: 1.5, contactLength: 45 },
   },
   flat: {
     // A half-inch flat: square ends and a chisel edge, for cutting crisp

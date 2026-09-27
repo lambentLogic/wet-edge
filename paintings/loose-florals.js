@@ -89,31 +89,13 @@ window.__paintDone = (async () => {
   }
   log(`leaves dry after ${(await M.waitDry(LEAVES.map(lf => [lf.x + Math.cos(lf.a * Math.PI / 180) * 60, lf.y + Math.sin(lf.a * Math.PI / 180) * 60]))).toFixed(1)}s`);
 
-  log('background: a pale graded wash painted around the flowers and leaves');
-  // Rows of short strokes; each stops a little short of a flower or leaf,
-  // so the wash goes around them rather than over.
-  const nearLeaf = (x, y) => LEAVES.some(lf => {
-    const a = lf.a * Math.PI / 180, dx = Math.cos(a), dy = Math.sin(a), px = x - lf.x, py = y - lf.y;
-    const t = px * dx + py * dy, d = Math.abs(-px * dy + py * dx);
-    return t > -6 && t < lf.l + 6 && d < lf.w * 0.4 * Math.sin(Math.PI * Math.min(Math.max(t / lf.l, 0), 1)) + 10;
+  log('background: a graded wash around the flowers and leaves (washAround senses them)');
+  h.setBrushPreset('mop'); V.brushCapacity = 0; V.brushRadius = 26;
+  await M.washAround(null, {
+    margin: 3, cutRadius: 6, log,
+    brushAt: (x, y) => (y < 380 ? [['French Ultramarine', 2], ['Quinacridone Rose', 1]] : [['French Ultramarine', 1], ['Perylene Green', 1], ['Raw Umber', 1]]),
+    pigmentAt: (x, y) => 0.12 + 0.12 * Math.abs(y / 760 - 0.45) * 2,
   });
-  // Stroke centres may come within about half a brush of a shape: the soft
-  // edge of the stroke meets it with only a sliver of white paper between.
-  const clear = (x, y) => !inRose(x, y, 8) && !nearLeaf(x, y);
-  h.setBrushPreset('mop'); V.brushCapacity = 0; V.brushRadius = 16;
-  for (let y = 16, row = 0; y < 768; y += 20, row++) {
-    const t = y / 760;
-    h.setBrush(t < 0.5 ? [['French Ultramarine', 2], ['Quinacridone Rose', 1]] : [['French Ultramarine', 1], ['Perylene Green', 1], ['Raw Umber', 1]]);
-    V.brushPigment = 0.12 + 0.12 * Math.abs(t - 0.45) * 2;
-    let run = [];
-    const xs = Array.from({ length: 105 }, (_, k) => (row % 2 ? 1034 - k * 10 : -10 + k * 10));
-    for (const x of xs) {
-      if (clear(x, y)) { run.push([x, y + (rnd() - 0.5) * 4, 0.9]); continue; }
-      if (run.length > 1) { h.lift(); await S.path(run, 2); }
-      run = [];
-    }
-    if (run.length > 1) { h.lift(); await S.path(run, 2); }
-  }
   log(`background dry after ${(await M.waitDry([[100, 100], [900, 100], [100, 700], [900, 700]])).toFixed(1)}s`);
 
   log('dark accents and stems with the rigger');
