@@ -13,5 +13,6 @@ window.__paintDone = (async () => {
   V.dipLoad = 1;
   await S.path(line(80, y, 480, y, 12, 1), 3);       // full pressure
   await S.path(line(560, y, 960, y, 12, 0.25), 3);   // light pressure: thinner
+  y += 110; await S.path(line(560, y, 960, y, 3, 0.25), 1);   // light and fast, full brush
   S.setDrying(true); await new Promise(r => setTimeout(r, 6000)); S.setDrying(false);
 })();

@@ -86,7 +86,7 @@ export const PARAMS = [
   { key: 'brushDose',     v: 2.1,  min: 0, max: 10,  group: 'Brush', target: 'js',  label: 'dose per spot crossed (frames)' },
   { key: 'taperMin',      v: 0.15, min: 0, max: 1,   group: 'Brush', target: 'js',  label: 'taper (width at no pressure)' },
   { key: 'brushCapacity', v: 5000, min: 0, max: 30000, group: 'Brush', target: 'js', label: 'reservoir (0 = endless)' },
-  { key: 'mouseTouch',    v: 1,    min: 0.02, max: 1, group: 'Brush', target: 'js',  label: 'mouse: touch (Option lighter, Cmd heavier)' },
+  { key: 'mouseTouch',    v: 1,    min: 0.02, max: 1, group: 'Brush', target: 'js',  label: 'mouse: touch (Z / Option lighter, X heavier)' },
   { key: 'touchRate',     v: 0.8,  min: 0, max: 5,   group: 'Brush', target: 'js',  label: 'mouse: touch glides per second' },
   { key: 'dipLoad',       v: 1,    min: 0.05, max: 1, group: 'Brush', target: 'js',  label: 'wetness (dip brush reload)' },
   { key: 'speedSkim',     v: 0.6,  min: 0, max: 2,   group: 'Brush', target: 'js',  label: 'fast strokes skim the tooth' },

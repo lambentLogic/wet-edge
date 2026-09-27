@@ -242,7 +242,7 @@ async function init() {
 
   const pointerBrush = () => {
     const ptr = state.pointer;
-    // Mouse and trackpad: the Touch dial (Option lighter, Command heavier).
+    // Mouse and trackpad: the Touch dial (Z / Option lighter, X heavier).
     if (!ptr.down) return null;
     const age = (performance.now() - ptr.downAt) / 1000;
     let pressure = ptr.pen ? ptr.pressure : values.mouseTouch;
@@ -272,12 +272,14 @@ async function init() {
       const load = values.brushCapacity > 0 ? state.reservoir : 1;
       frameF32[8] = pr;
       // Dry-brush (how lightly the brush skims the tooth on dry paper): a
-      // light touch, the side of a drying belly, or speed, a fast stroke
-      // skimming, much more so with a dry-ish brush (Wetness down).
+      // light touch, the side of the brush, or speed, but only as far as the
+      // brush is dry (Wetness down, or running out): a full brush lays solid
+      // lines at any touch or speed.
       const segNow = Math.hypot(brush.x1 - brush.x0, brush.y1 - brush.y0);
       state.smoothSeg = !state.brushActive ? segNow : state.smoothSeg * 0.6 + segNow * 0.4;
       const speed = Math.min(1, state.smoothSeg / Math.max(4 * values.brushRadius, 1e-3));
-      frameF32[24] = Math.max((1 - pr) * (1 - 0.6 * load), side * 0.8 * (1 - load), values.speedSkim * speed * (1 - 0.7 * load));
+      const dryness = Math.min(1, Math.max(0, 1 - load) * 1.5);
+      frameF32[24] = dryness * Math.max(1 - pr, side * 0.8, values.speedSkim * speed);
       // Taper: width follows pressure; the side of the brush is wider.
       frameF32[13] = values.brushRadius * (values.taperMin + (1 - values.taperMin) * pr) * (1 + 0.8 * side);
       // Wet-in-wet charge: strongest at touchdown, then the reservoir is spent.
@@ -873,7 +875,7 @@ function bindPointer(canvas) {
     return [(e.clientX - r.left) / r.width * W, (e.clientY - r.top) / r.height * H];
   };
   // Touch: a pen's pressure; with a mouse or trackpad, the Touch dial
-  // (values.mouseTouch: hold Option lighter, Command heavier). Side of the
+  // (values.mouseTouch: hold Z or Option lighter, X heavier). Side of the
   // brush from Shift or pen tilt.
   const pressureOf = e => (e.pointerType === 'pen' ? Math.max(e.pressure, 0.05) * 1.5 : values.mouseTouch);
   const sideOf = e => {
@@ -959,16 +961,24 @@ function bindPointer(canvas) {
     ptr.side = sideOf(e);
     ptr.pen = e.pointerType === 'pen';
   });
-  // The Touch dial: hold Option to lighten the touch, Command to press
+  // The Touch dial: hold Z (or Option) to lighten the touch, X to press
   // harder; it glides while held and stays where it's left.
-  const held = { alt: false, meta: false };
-  window.addEventListener('keydown', e => { if (e.key === 'Alt') held.alt = true; if (e.key === 'Meta') held.meta = true; });
-  window.addEventListener('keyup', e => { if (e.key === 'Alt') held.alt = false; if (e.key === 'Meta') held.meta = false; });
-  window.addEventListener('blur', () => { held.alt = held.meta = false; });
+  const held = { light: false, heavy: false };
+  const typing = e => e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT';
+  window.addEventListener('keydown', e => {
+    if (typing(e)) return;
+    if (e.key === 'Alt' || e.key === 'z' || e.key === 'Z') held.light = true;
+    if (e.key === 'x' || e.key === 'X') held.heavy = true;
+  });
+  window.addEventListener('keyup', e => {
+    if (e.key === 'Alt' || e.key === 'z' || e.key === 'Z') held.light = false;
+    if (e.key === 'x' || e.key === 'X') held.heavy = false;
+  });
+  window.addEventListener('blur', () => { held.light = held.heavy = false; });
   let lastTick = performance.now();
   const tick = () => {
     const now = performance.now(), dt = Math.min((now - lastTick) / 1000, 0.1); lastTick = now;
-    const dir = (held.meta ? 1 : 0) - (held.alt ? 1 : 0);
+    const dir = (held.heavy ? 1 : 0) - (held.light ? 1 : 0);
     if (dir) inputs_mouseTouch(Math.min(1, Math.max(0.02, values.mouseTouch + dir * values.touchRate * dt)));
     requestAnimationFrame(tick);
   };
