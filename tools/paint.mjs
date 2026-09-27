@@ -2,6 +2,9 @@
 // so a scripted painting doesn't need (or disturb) a visible browser tab.
 //
 //   node tools/paint.mjs script.js [--open in.wcpaint] [--save out.wcpaint] [--shot out.png] [--layer prefix]
+//                              [--looks dir] [--replay strokes.json]
+//   --looks: sim.look('name') calls in the script save dir/NN-name.png
+//   --replay: replay a stroke recording (Record strokes in the app) after opening
 //   (--layer writes prefix-filter-multiply.png and prefix-body-add.png)
 //
 // The script is evaluated in the page (window.__sim, window.__minds) and
@@ -17,12 +20,14 @@ const CHROME = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Conte
 const APP_URL = process.env.APP_URL ?? 'http://127.0.0.1:8765/';
 
 const args = process.argv.slice(2);
-let script = null, open = null, save = null, shot = null, layer = null;
+let script = null, open = null, save = null, shot = null, layer = null, looks = null, replay = null;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--open') open = args[++i];
   else if (args[i] === '--save') save = args[++i];
   else if (args[i] === '--shot') shot = args[++i];
   else if (args[i] === '--layer') layer = args[++i];
+  else if (args[i] === '--looks') looks = args[++i];
+  else if (args[i] === '--replay') replay = args[++i];
   else script = args[i];
 }
 
@@ -40,6 +45,16 @@ try {
     else if (m.type() === 'error' && !t.includes('404')) console.error('[page]', t);
   });
   if (process.env.PRE_JS) await page.evaluateOnNewDocument(process.env.PRE_JS);
+  let lookN = 0;
+  if (looks) {
+    const { mkdir } = await import('node:fs/promises');
+    await mkdir(looks, { recursive: true });
+    await page.exposeFunction('__saveLook', async (name, b64) => {
+      const f = `${looks}/${String(++lookN).padStart(2, '0')}-${name}.png`;
+      await writeFile(f, Buffer.from(b64, 'base64'));
+      console.error(`look ${f}`);
+    });
+  }
   await page.goto(APP_URL);
   await page.waitForFunction(() => window.__sim?.open, { timeout: 20_000 });
   if (open) {
@@ -49,6 +64,11 @@ try {
       await window.__sim.open(new Blob([bytes]));
     }, b64);
     console.error(`opened ${open}`);
+  }
+  if (replay) {
+    const rec = JSON.parse(await readFile(replay, 'utf8'));
+    await page.evaluate(async rec => { await window.__sim.replay(rec); await new Promise(r => setTimeout(r, 500)); }, rec);
+    console.error(`replayed ${rec.events.length} events`);
   }
   if (script) {
     await page.evaluate(await readFile(script, 'utf8'));

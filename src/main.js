@@ -686,6 +686,17 @@ async function init() {
     state.simTime = snap.simTime; state.magnets = snap.magnets; state.magDirty = true; drawMagnets();
     state.lastEdit = performance.now();
   }
+  // A look at the painting mid-script: a PNG, handed to tools/paint.mjs if
+  // it's listening (saved under its --looks folder), else just returned.
+  window.__sim.look = async name => {
+    const blob = await new Promise(resolve => { renderNow(); canvas.toBlob(resolve, 'image/png'); });
+    if (window.__saveLook) {
+      const buf = new Uint8Array(await blob.arrayBuffer());
+      let bin = ''; for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+      await window.__saveLook(name, btoa(bin));
+    }
+    return blob;
+  };
   window.__sim.checkpoint = () => {
     while (undoStack.length >= Math.max(1, values.undoDepth)) undoPool.push(undoStack.shift());
     undoPool.push(...redoStack.splice(0));
@@ -958,6 +969,41 @@ function bindPointer(canvas) {
     const r = canvas.getBoundingClientRect();
     return [(e.clientX - r.left) / r.width * W, (e.clientY - r.top) / r.height * H];
   };
+  // Stroke recorder: while state.recording is an array, every pointer event
+  // on the canvas is kept (grid position, pressure, Touch dial, Shift/Option,
+  // pen tilt, timing), and each touchdown also keeps the mode, brush and all
+  // knobs, so sim.replay() can put the same strokes through the same code.
+  const record = e => {
+    if (!state.recording) return;
+    const [gx, gy] = toGrid(e);
+    const ev = { t: performance.now() - (state.recording.t0 ?? (state.recording.t0 = performance.now())), type: e.type, gx, gy,
+      pressure: e.pressure, pointerType: e.pointerType, shiftKey: e.shiftKey, altKey: e.altKey, button: e.button, buttons: e.buttons,
+      tiltX: e.tiltX, tiltY: e.tiltY, touch: values.mouseTouch };
+    if (e.type === 'pointerdown') Object.assign(ev, { mode: state.mode, brush: JSON.parse(JSON.stringify(state.brush)), brushType: state.brushType, values: { ...values } });
+    state.recording.push(ev);
+  };
+  for (const type of ['pointerdown', 'pointermove', 'pointerup']) canvas.addEventListener(type, record);
+  // Replay a recording: real PointerEvents on the canvas, at the recorded
+  // times (scaled by 1 / speed), with each stroke's settings restored.
+  window.__sim.replay = (rec, { speed = 1 } = {}) => new Promise(done => {
+    const events = Array.isArray(rec) ? rec : rec.events;
+    const t0 = performance.now();
+    let k = 0;
+    const tick = () => {
+      const now = (performance.now() - t0) * speed;
+      while (k < events.length && events[k].t <= now) {
+        const ev = events[k++];
+        if (ev.values) { Object.assign(values, ev.values); state.brush = ev.brush; state.brushType = ev.brushType; state.mode = ev.mode; }
+        values.mouseTouch = ev.touch;
+        const r = canvas.getBoundingClientRect();
+        canvas.dispatchEvent(new PointerEvent(ev.type, { clientX: r.left + ev.gx / W * r.width, clientY: r.top + ev.gy / H * r.height,
+          pressure: ev.pressure, pointerType: ev.pointerType, shiftKey: ev.shiftKey, altKey: ev.altKey, button: ev.button, buttons: ev.buttons,
+          tiltX: ev.tiltX, tiltY: ev.tiltY, pointerId: 1, bubbles: true }));
+      }
+      if (k < events.length) requestAnimationFrame(tick); else done();
+    };
+    requestAnimationFrame(tick);
+  });
   // Touch: a pen's pressure; with a mouse or trackpad, the Touch dial
   // (values.mouseTouch: hold Z or Option lighter, X heavier). Side of the
   // brush from Shift or pen tilt.
@@ -1283,6 +1329,16 @@ function buildUI({ clear, newPaper }) {
 
   document.getElementById('fix').addEventListener('click', () => window.__sim.fix());
   document.getElementById('undo').addEventListener('click', () => window.__sim.undo());
+  const recBtn = document.getElementById('record');
+  recBtn.addEventListener('click', () => {
+    if (state.recording) {
+      const rec = { version: 1, W, H, paper: state.paper, tone: state.tone, events: state.recording };
+      state.recording = null; recBtn.classList.remove('on'); recBtn.textContent = 'Record strokes';
+      if (rec.events.length) download(new Blob([JSON.stringify(rec)], { type: 'application/json' }), `strokes-${stamp()}.json`);
+    } else {
+      state.recording = []; recBtn.classList.add('on'); recBtn.textContent = 'Stop and save strokes';
+    }
+  });
   document.getElementById('redo').addEventListener('click', () => window.__sim.redo());
   document.getElementById('unmask').addEventListener('click', () => window.__sim.unmask());
   const dryBtn = document.getElementById('dry');
