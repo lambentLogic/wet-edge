@@ -56,7 +56,7 @@ function packOldG(old, version) {
 
 const values = Object.fromEntries(PARAMS.map(p => [p.key, p.v]));
 const state = {
-  mode: 0,          // 0 paint, 1 water, 2 lift, 3 magnet, 4 mist, 5 mask
+  mode: 0,          // 0 paint, 1 water, 2 lift, 3 magnet, 4 mist, 5 mask, 6 blot
   // What the brush is loaded with: up to 4 pigments (PIGMENTS indices) and
   // their fractions of the load. One pigment straight from a pan, or a mix.
   brush: [{ pigment: 0, frac: 1 }],
@@ -306,6 +306,7 @@ async function init() {
       frameF32[13] = values.brushRadius * (values.taperMin + (1 - values.taperMin) * pr) * (1 + 0.8 * side);
       // The mist is a spray bottle: its own reach, whatever brush is loaded.
       if (state.mode === 4) frameF32[13] = values.mistRadius;
+      if (state.mode === 6) frameF32[13] = values.blotRadius;   // the towel, not the brush
       // Wet-in-wet charge: strongest at touchdown, then the reservoir is spent.
       const dur = Math.max(values.chargeDuration, 1e-3);
       frameF32[11] = Math.exp(-(brush.age ?? 0) / dur);
@@ -1430,6 +1431,7 @@ function buildUI({ clear, newPaper }) {
     if (e.key >= '1' && e.key <= '4') setMode(+e.key - 1);
     if (e.key === '5') setMode(4);
     if (e.key === '6') setMode(5);
+    if (e.key === '7') setMode(6);
     else if (e.key === 'f') flipMagnets();
     else if (e.key === '[' || e.key === ']') {
       const n = PIGMENTS.length;

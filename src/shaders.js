@@ -566,7 +566,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     // and, on the side of the brush, a drying belly.
     let touch = fr.touch;
     let dryPaper = a.x <= p.wEps && a.w < p.dampThreshold;
-    if (fr.mode != 2u && fr.mode != 4u && dryPaper && touch > 0.0) {
+    if (fr.mode != 2u && fr.mode != 4u && fr.mode != 6u && dryPaper && touch > 0.0) {
       let cut = p.skipAmount * touch;
       fall *= smoothstep(cut - 0.15, cut + 0.15, aux[i].x);
     }
@@ -694,6 +694,26 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
         }
       }
       s = min(s + p.mistDamp * kM, max(s, p.capacityMax));
+    } else if (fr.mode == 6u) {
+      // Blotting with a crumpled paper towel: pressed down, it soaks up the
+      // water and the paint in it wherever a crease touches, in one quick
+      // press. The creases (a crumple pattern, new for each press) give the
+      // soft mottled texture of blotted clouds. fr.radius is the wad's size.
+      let seedB = u32(abs(fr.strokeStart) * 977.0) + 11u;
+      let q = vec2f(f32(x), f32(y)) / max(p.blotScale / 0.2, 1.0);
+      let crumple = 0.55 * valueNoise(q.x, q.y, seedB) + 0.3 * valueNoise(q.x * 2.3 + 7.0, q.y * 2.3 + 3.0, seedB + 1u)
+                  + 0.15 * valueNoise(q.x * 5.1 + 1.0, q.y * 5.1 + 9.0, seedB + 2u);
+      // The wad's edge follows its creases too (a round cut-off gave round
+      // blots): contact falls off toward the rim inside the crumple test.
+      let rr = dist / max(r, 1.0);
+      let touch = smoothstep(0.5 - 0.25 * fr.pressure, 0.6 - 0.25 * fr.pressure, crumple - 0.3 * rr * rr) * step(rr, 1.3);
+      // Soaks fast: most of it within a fraction of a second of pressing.
+      let kb = 1.0 - pow(max(1.0 - p.blotRate * touch, 1e-4), 1.0 / nSub);
+      let keep = 1.0 - kb;
+      w *= keep;
+      for (var j = 0u; j < cn; j++) { camt[j] *= keep; }
+      s *= 1.0 - kb * 0.3;       // the fibres stay damp
+      liftK = kb * 0.15;         // a little settled paint comes up too
     } else if (fr.mode == 5u) {
       // Masking fluid, on dry paper (or over dried paint): a rubbery film.
       // Its edge follows the paper's tooth a little, as liquid latex does.

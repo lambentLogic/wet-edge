@@ -12,21 +12,13 @@ window.__paintDone = (async () => {
   await M.fill([[-10, -10], [1034, -10], [1034, 520], [-10, 520]], { grade: [1.4, 0.4] });
   await S.look('sky-wet');
   // Clouds: clusters of small circular scrubs with a clean damp brush.
-  // Quickly, while the wash is still wet (lifting from paint that has
-  // dried leaves hard edges): a few quick swirls per cloud, soft mop.
-  const wetAt = async () => (await S.sense(500, 200, 20)).water.toFixed(3);
-  // Once the shine has gone (a flooded wash rushes back into a lift, or the
-  // lifted spot dries first and the wash rings it): the dryer, briefly.
-  await M.waitDamp([[300, 200], [700, 200]], { below: 0.12, maxS: 20 });
-  console.log('[paint] water before lifting ' + await wetAt());
-  h.setBrushPreset('mop'); h.setMode(2); V.brushRadius = 26;
-  for (const [cx, cy, w, n] of [[220, 150, 220, 4], [620, 110, 280, 5], [860, 260, 180, 3], [400, 330, 240, 4]]) {
-    for (let k = 0; k < n; k++) {
-      const x = cx + (rnd() - 0.5) * w, y = cy + (rnd() - 0.3) * w * 0.2 - Math.abs(x - cx) * 0.1, r = 12 + rnd() * 16;
-      await S.path(pts(s => [x + Math.cos(s * 9) * r, y + Math.sin(s * 9) * r * 0.6, 0.8], 10), 1);
-    }
+  // Blot clouds out while the wash is wet, as the painter does: a crumpled
+  // paper towel pressed down, a fresh crumple each press, rolled a little.
+  h.setMode(6);
+  for (const [x, y, sz] of [[200, 140, 60], [290, 160, 50], [600, 100, 70], [690, 120, 55], [540, 125, 45], [860, 250, 55], [930, 270, 45], [420, 320, 60], [500, 335, 45]]) {
+    V.blotRadius = sz;
+    await S.path([[x, y, 0.8], [x + 6, y + 2, 0.8], [x + 10, y + 1, 0.6]], 6);
   }
-  console.log('[paint] water after lifting ' + await wetAt());
   h.setMode(0);
   await S.look('clouds-lifted');
   await M.waitDry([[200, 100], [800, 300]]);
