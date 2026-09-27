@@ -114,7 +114,7 @@ async function init() {
   const Dbuf = buf(N * DB, S | CD);                      // deposited components + stain + stamps (DS in shaders.js)
   const paramBuf = buf(simParamBufferSize(), U | CD);
   const frameBuf = buf(128, U | CD);
-  const renderBuf = buf(48, U | CD);
+  const renderBuf = buf(64, U | CD);
   const pigBuf = buf(MAX_PIGMENTS * 64, U | CD);
   const specBuf = buf(SPEC_FLOATS * 4, S | CD);
   const magBuf = buf(16 + MAX_CHARGES * 32, U | CD);
@@ -213,7 +213,7 @@ async function init() {
   const paramData = new Float32Array(simParamBufferSize() / 4);
   const frameData = new ArrayBuffer(128);
   const frameU32 = new Uint32Array(frameData), frameF32 = new Float32Array(frameData);
-  const renderData = new ArrayBuffer(48);
+  const renderData = new ArrayBuffer(64);
   // The pigment table: colour and physical properties of every pigment in
   // the library. Constant, so it's uploaded once.
   const pigData = new Float32Array(MAX_PIGMENTS * 16);
@@ -348,6 +348,7 @@ async function init() {
     renderF32.set([...(state.ground ?? TONES[state.tone].color ?? PAPERS[state.paper].color), 1], 4);
     renderF32[8] = state.ground ? 0 : values.paperShade; renderF32[9] = values.suspendedWeight;
     renderF32[10] = values.fixDeepen; renderF32[11] = values.spectral;
+    renderF32[12] = values.dampDarken;
     if (values.spectral > 0.5) writeGround(state.ground ?? TONES[state.tone].color ?? PAPERS[state.paper].color);
     device.queue.writeBuffer(renderBuf, 0, renderData);
   }

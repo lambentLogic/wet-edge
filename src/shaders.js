@@ -594,9 +594,18 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
       // footprint, and the paper under them dampened. Painters mist an area
       // so strokes laid into it melt together instead of each drying with
       // its own edge.
-      let drop = hash2(x, y, u32(fr.time * 600.0) + 7u);
-      if (drop < p.mistDensity * k) { w = max(w, p.mistWater * (0.6 + 0.8 * hash2(y, x, 3u))); }
-      s = min(s + p.mistDamp * k, max(s, p.capacityMax));
+      // Droplets are beads a few cells across: each pass, some 4 x 4 blocks
+      // get one, centred at a random point with a random size.
+      let seedM = u32(fr.time * 600.0) + 7u;
+      let bx = x / 4; let by = y / 4;
+      // Per pass under the spray, independent of the brush's flow rate.
+      let kM = fall * fr.brushScale;
+      if (hash2(bx, by, seedM + u32(kSub) * 13u) < p.mistDensity * kM) {
+        let c = vec2f(f32(bx * 4) + 4.0 * hash2(bx, by, seedM + 1u), f32(by * 4) + 4.0 * hash2(bx, by, seedM + 2u));
+        let rad = 0.8 + 2.2 * hash2(bx, by, seedM + 3u);
+        if (length(vec2f(f32(x) + 0.5, f32(y) + 0.5) - c) < rad) { w = max(w, p.mistWater * (0.7 + 0.6 * hash2(by, bx, seedM))); }
+      }
+      s = min(s + p.mistDamp * kM, max(s, p.capacityMax));
     } else if (fr.mode == 5u) {
       // Masking fluid, on dry paper (or over dried paint): a rubbery film.
       // Its edge follows the paper's tooth a little, as liquid latex does.
@@ -1159,6 +1168,7 @@ struct R {
   W: u32, H: u32, thickness: f32, wetDarken: f32,
   paperColor: vec4f,
   paperShade: f32, suspendedWeight: f32, fixDeepen: f32, spectral: f32,
+  dampDarken: f32, _r1: f32, _r2: f32, _r3: f32,
 };
 struct Pigment { K: vec4f, S: vec4f, phys: vec4f, phys2: vec4f };
 // A cell's suspended pigment: up to NG components (pigment id, amount).
@@ -1312,7 +1322,7 @@ fn spectralColour(i: u32, wet: f32, h: f32) -> vec4f {
     }
   }
   var lin = vec3f(0.0);
-  let darken = 1.0 - clamp(wet * r.wetDarken, 0.0, 0.3);
+  let darken = (1.0 - clamp(wet * r.wetDarken, 0.0, 0.3)) * (1.0 - clamp(A[i].w * r.dampDarken, 0.0, 0.15));
   for (var j = 0u; j < 4u; j++) {
     let Rj = overLayer4(R[j], Kw[j], Sw[j], tw) * darken;
     lin += vec3f(dot(TO_R[j], Rj), dot(TO_G[j], Rj), dot(TO_B[j], Rj));
@@ -1385,6 +1395,8 @@ fn fs(@builtin(position) fc: vec4f) -> @location(0) vec4f {
   col = overLayer(col, Kw, Sw, tw);
 
   col *= 1.0 - clamp(a.x * r.wetDarken, 0.0, 0.3);
+  // Damp paper (water soaked into it) looks a little darker, until it dries.
+  col *= 1.0 - clamp(a.w * r.dampDarken, 0.0, 0.15);
   return vec4f(maskOver(clamp(col, vec3f(0.0), vec3f(1.0)), i), 1.0);
 }
 `;
