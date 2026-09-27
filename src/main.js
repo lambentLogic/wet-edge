@@ -68,6 +68,7 @@ const state = {
   simTime: 0,       // simulated seconds (deposit timestamps)
   lastEdit: -Infinity, // when the painting was last touched (for autosave)
   ground: null,     // render over this colour instead of the paper (layer export)
+  carry: null,      // pigment the brush has picked up from wet paint, by id (set up at start)
   fixPending: false, // spray fixative over the sheet on the next step
   unmaskPending: false, // peel off the masking fluid on the next step
   magnets: [],      // { shape, x, y, angle, moment } in grid cells (see magnets.js)
@@ -113,7 +114,7 @@ async function init() {
   const G = [buf(N * GB, S | CD), buf(N * GB, S | CD)];  // suspended components (packed, see GP in shaders.js)
   const Dbuf = buf(N * DB, S | CD);                      // deposited components + stain + stamps (DS in shaders.js)
   const paramBuf = buf(simParamBufferSize(), U | CD);
-  const frameBuf = buf(128, U | CD);
+  const frameBuf = buf(160, U | CD);
   const renderBuf = buf(64, U | CD);
   const pigBuf = buf(MAX_PIGMENTS * 64, U | CD);
   const specBuf = buf(SPEC_FLOATS * 4, S | CD);
@@ -126,7 +127,9 @@ async function init() {
   // Tiles struct: indirect args (16 bytes), then per-tile state, then list.
   // Tiles struct: indirect args (16 bytes), brush tallies (16), per-tile
   // state, then the list.
-  const tilesBuf = buf(32 + TX * TY * 8, S | CD);
+  state.carry = new Float64Array(MAX_PIGMENTS);
+  const CARRY_OFF = 32 + TX * TY * 8;   // tiles.carry, MAX_PIGMENTS u32 (x1e5)
+  const tilesBuf = buf(CARRY_OFF + MAX_PIGMENTS * 4, S | CD);
   // Indirect args are copied out of tilesBuf: a buffer can't be both bound as
   // writable storage and used for an indirect dispatch.
   const argsBuf = buf(16, CD | GPUBufferUsage.INDIRECT);
@@ -147,6 +150,8 @@ async function init() {
     for (const b of G) device.queue.writeBuffer(b, 0, new Float32Array(N * GB / 4));
     device.queue.writeBuffer(Dbuf, 0, new Float32Array(N * DB / 4));
     device.queue.writeBuffer(tilesBuf, 32, new Uint32Array(TX * TY));
+    device.queue.writeBuffer(tilesBuf, CARRY_OFF, new Uint32Array(MAX_PIGMENTS));   // a clean brush
+    state.carry?.fill(0);
   };
   newPaper();
 
@@ -212,7 +217,7 @@ async function init() {
 
   // ---- uniforms
   const paramData = new Float32Array(simParamBufferSize() / 4);
-  const frameData = new ArrayBuffer(128);
+  const frameData = new ArrayBuffer(160);
   const frameU32 = new Uint32Array(frameData), frameF32 = new Float32Array(frameData);
   const renderData = new ArrayBuffer(64);
   // The pigment table: colour and physical properties of every pigment in
@@ -334,8 +339,18 @@ async function init() {
     frameF32[15] = concMul();
     if (!brush) { frameF32[13] = values.brushRadius; frameF32[24] = 0; }
     frameF32[25] = values.fixTooth;
-    if (newStroke) state.strokeStart = state.simTime;
+    if (newStroke) {
+      state.strokeStart = state.simTime;
+      // A new stroke: the brush has been reloaded or rinsed, mostly clean.
+      state.rinsePending = true;
+      for (let id = 0; id < state.carry.length; id++) state.carry[id] *= values.carryKeep;
+    }
     frameF32[28] = state.strokeStart ?? 0;
+    // What the brush carries (picked up from wet paint): the four largest,
+    // as concentrations in its water (carryVolume).
+    // Diluted in the water in the brush's tip (its footprint's worth).
+    const carryVol = Math.max(values.carryVolume * Math.PI * values.brushRadius ** 2 * values.brushWater, 1e-3);
+    frameF32[36] = 1 / carryVol;
     state.brushActive = !!brush;
     // Brush load: pigment ids at u32 16..19, fractions at f32 20..23.
     const total = state.brush.reduce((t, b) => t + b.frac, 0) || 1;
@@ -392,7 +407,7 @@ async function init() {
   // Brush reservoir: the GPU tallies the water each frame's stamp actually
   // left on the paper (wet paper takes little, dry paper a lot); it comes
   // back a frame or so later and drains the reservoir.
-  const brushRB = [0, 1, 2].map(() => device.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }));
+  const brushRB = [0, 1, 2].map(() => device.createBuffer({ size: 16 + MAX_PIGMENTS * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }));
   const rbBusy = [false, false, false];
   function queueBrushReadback(enc) {
     if (!state.brushActive) return -1;
@@ -400,6 +415,7 @@ async function init() {
     if (k < 0) return -1;
     rbBusy[k] = true;
     enc.copyBufferToBuffer(tilesBuf, 16, brushRB[k], 0, 16);
+    enc.copyBufferToBuffer(tilesBuf, CARRY_OFF, brushRB[k], 16, MAX_PIGMENTS * 4);
     return k;
   }
   async function collectBrush(k) {
@@ -408,6 +424,9 @@ async function init() {
     const u = new Uint32Array(brushRB[k].getMappedRange().slice(0));
     brushRB[k].unmap();
     rbBusy[k] = false;
+    // What the brush holds (kept on the GPU; this copy sets how strongly
+    // it lays it back down).
+    for (let id = 0; id < MAX_PIGMENTS; id++) state.carry[id] = u[4 + id] / 1e5;
     if (values.brushCapacity > 0 && state.brushType === 'water') {
       state.reservoir = Math.max(0, state.reservoir - u[0] / 1e4 / values.brushCapacity);
       // A dab is a fixed amount of pigment, whatever the brush's water holds.
@@ -422,6 +441,11 @@ async function init() {
   function encodeSim(enc, substeps) {
     state.simTime += substeps / Math.max(values.simSpeed, 1);
     device.queue.writeBuffer(tilesBuf, 0, argsReset);
+    // Rinsed between strokes: keep carryKeep of what the brush held.
+    if (state.rinsePending) {
+      device.queue.writeBuffer(tilesBuf, CARRY_OFF, new Uint32Array([...state.carry].map(v => Math.floor(v * values.carryKeep * 1e5))));
+      state.rinsePending = false;
+    }
     const pass = enc.beginComputePass();
     pass.setBindGroup(0, simBG[parity]);
     pass.setPipeline(pipes.blurH); pass.dispatchWorkgroups(gx, gy);
@@ -920,6 +944,7 @@ async function init() {
     return { A: [...await f(A[parity], 4)], aux: [...await f(auxBuf, 4)], stain: d[3], dep: [...Array(ND).keys()].filter(k => d[10 + k] > 0).map(k => ({ pig: PIGMENTS[dId(du, 0, k)]?.name, amt: d[10 + k], stamp: d[18 + k] })), time: state.simTime };
   };
   window.__sim.open = blob => openPainting(blob);
+  window.__sim.carry = () => [...state.carry];
   // SHA-256 of each state buffer, to check that an optimisation leaves the
   // simulation bit-identical.
   window.__sim.stateHashes = async () => {

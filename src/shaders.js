@@ -47,6 +47,8 @@ struct Frame {
   strokeStart: f32,   // sim time this stroke touched down
   substeps: f32,      // sim steps this frame (the brush's segment is split among them)
   _f2: f32, _f3: f32,
+  _cid: vec4u,
+  carryConc: vec4f,   // x: 1 / the water the brush's carried paint is diluted in
 };
 
 // Per-pigment physical properties, each relative to French ultramarine (1).
@@ -125,6 +127,7 @@ struct Tiles {
   brushAcc: array<atomic<u32>, 4>,    // water, pigment the brush laid down this frame (x1e4)
   state: array<u32, ${NTILES}>,       // frames left active
   list: array<u32, ${NTILES}>,        // active tiles this frame
+  carry: array<atomic<u32>, ${MAXP}>, // pigment the brush holds, picked up from wet paint, by id (x1e5)
 };
 @group(0) @binding(7) var<storage, read_write> tiles: Tiles;
 
@@ -339,6 +342,27 @@ fn waveCap(i: i32, j: i32) -> f32 {
 fn uAt(x: i32, y: i32) -> f32 { if (!inb(x, y)) { return 0.0; } return Bin[ix(x, y)].x; }
 fn vAt(x: i32, y: i32) -> f32 { if (!inb(x, y)) { return 0.0; } return Bin[ix(x, y)].y; }
 
+// The brush drags wet paint: its hairs push the surface water along with
+// them. Returns, for a velocity face centred at q, the brush's velocity
+// this substep (its slice of the frame's segment per step, in the units u
+// and v use) and how strongly it holds the water there (0 outside the
+// footprint). Pulling the face velocity toward it moves water and pigment
+// through the ordinary conservative transport.
+fn brushDragAt(q: vec2f) -> vec4f {
+  if (fr.brushOn != 1u || (fr.mode != 0u && fr.mode != 1u) || p.brushDrag <= 0.0) { return vec4f(0.0); }
+  let nSub = max(fr.substeps, 1.0);
+  let kSub = min(f32(atomicLoad(&tiles.brushAcc[2])) - 1.0, nSub - 1.0);
+  let F0 = vec2f(fr.bx0, fr.by0);
+  let FB = vec2f(fr.bx1, fr.by1) - F0;
+  let A = F0 + FB * (max(kSub, 0.0) / nSub);
+  let AB = FB / nSub;
+  let t = clamp(dot(q - A, AB) / max(dot(AB, AB), 1e-6), 0.0, 1.0);
+  let dist = length(q - (A + AB * t));
+  let r = max(fr.radius, 0.5);
+  let hold = smoothstep(r, r * 0.5, dist) * clamp(p.brushDrag, 0.0, 1.0);
+  return vec4f(AB / max(p.dt, 1e-6), hold, 0.0);
+}
+
 @compute @workgroup_size(16, 16)
 fn velocity(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) lid: vec3u) {
   let c = tileCell(wid, lid);
@@ -356,6 +380,8 @@ fn velocity(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) lid
       let lap = uAt(x - 1, y) + uAt(x + 1, y) + uAt(x, y - 1) + uAt(x, y + 1) - 4.0 * u0;
       let acc = -(pres(j) - pres(i)) * waveCap(i, j) + p.viscosity * lap + p.tiltX;
       u = (u0 + p.dt * acc) / (1.0 + p.dt * dragAt(i, j));
+      let bd = brushDragAt(vec2f(f32(x) + 1.0, f32(y) + 0.5));
+      u = mix(u, clamp(bd.x, -vmax, vmax), bd.z);
     }
   }
   if (y < H() - 1) {
@@ -365,6 +391,8 @@ fn velocity(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) lid
       let lap = vAt(x - 1, y) + vAt(x + 1, y) + vAt(x, y - 1) + vAt(x, y + 1) - 4.0 * v0;
       let acc = -(pres(j) - pres(i)) * waveCap(i, j) + p.viscosity * lap + p.tiltY;
       v = (v0 + p.dt * acc) / (1.0 + p.dt * dragAt(i, j));
+      let bd = brushDragAt(vec2f(f32(x) + 0.5, f32(y) + 1.0));
+      v = mix(v, clamp(bd.y, -vmax, vmax), bd.z);
     }
   }
   Bout[i] = vec4f(clamp(finite(u), -vmax, vmax), clamp(finite(v), -vmax, vmax), 0.0, 0.0);
@@ -570,6 +598,59 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     let charge = select(0.0, min(p.brushCharge * fr.charge * k, chargeRoom), wetBefore);
     // Water the brush can still lay down falls as its reservoir empties.
     let level = p.brushWater * mix(p.emptyLevel, 1.0, clamp(fr.load, 0.0, 1.0));
+    // The brush drags wet paint the way a real one does: where it passes
+    // over wet paint, the paint in the paper's water and in the brush's
+    // hairs trade toward the same concentration. Where the paper's is
+    // stronger the brush picks some up; where the brush's is stronger (it
+    // carries colour from earlier in the stroke) it lays some down. So it
+    // smears, pulls colour into clear water and softens an edge brushed
+    // across while wet, and it can't run away: the trade stops as the two
+    // even out. Tallied by pigment, so the brush holds exactly what it
+    // took. A loaded paint brush trades only pigments it isn't loaded with
+    // (its own load is laid as usual).
+    if ((fr.mode == 0u || fr.mode == 1u) && a.x > p.wEps) {
+      // By time under the brush (like lifting), not the paint dose: a quick
+      // pass picks up a little, lingering more.
+      let kx = clamp(p.brushPickup * fall / nSub, 0.0, 0.5);
+      let wx = min(w, p.brushWater);
+      for (var j = 0u; j < cn; j++) {
+        let id = cid[j];
+        var loaded = false;
+        for (var b = 0; b < 4; b++) { if (fr.mode == 0u && fr.brushFrac[b] > 0.0 && fr.brushId[b] == id) { loaded = true; } }
+        if (loaded) { continue; }
+        // The brush's own concentration, straight from what it holds (on the
+        // GPU, so there's no lag on a fast stroke).
+        let cb = f32(atomicLoad(&tiles.carry[id])) * 1e-5 * fr.carryConc.x;
+        let tk = kx * (camt[j] / w - cb) * wx;
+        // Moved in whole tally units, so the brush's count is exact.
+        let n = floor(min(tk, camt[j]) * 1e5);
+        if (n >= 1.0) { camt[j] -= n * 1e-5; atomicAdd(&tiles.carry[id], u32(n)); }
+      }
+      // Carried pigment: laid down toward the brush's concentration where
+      // the paper's is weaker.
+      for (var cid2 = 0u; cid2 < ${MAXP}u; cid2++) {
+        let held = atomicLoad(&tiles.carry[cid2]);
+        if (held == 0u) { continue; }
+        let id = cid2;
+        var loaded = false;
+        for (var bb = 0; bb < 4; bb++) { if (fr.mode == 0u && fr.brushFrac[bb] > 0.0 && fr.brushId[bb] == id) { loaded = true; } }
+        if (loaded) { continue; }
+        let cb = f32(held) * 1e-5 * fr.carryConc.x;
+        let ci = candIndex(id);
+        let cur = select(0.0, camt[max(ci, 0)], ci >= 0);
+        let tk = kx * (cb - cur / w) * wx;
+        let n = floor(tk * 1e5);
+        // Compare-and-swap, so two cells drawing at once can't overdraw.
+        if (n >= 1.0) {
+          let nn = u32(n);
+          for (var tries = 0; tries < 8; tries++) {
+            let have = atomicLoad(&tiles.carry[id]);
+            if (have < nn) { break; }
+            if (atomicCompareExchangeWeak(&tiles.carry[id], have, have - nn).exchanged) { addCand(id, n * 1e-5); break; }
+          }
+        }
+      }
+    }
     if (fr.mode == 0u) {
       for (var b = 0; b < 4; b++) {
         let frac = fr.brushFrac[b];
