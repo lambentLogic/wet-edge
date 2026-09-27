@@ -269,7 +269,7 @@ async function init() {
       // classic dry-brush drag).
       const side = Math.min(Math.max(brush.side ?? 0, 0), 1);
       const pr = Math.min(Math.max(brush.pressure ?? 1, 0), 1);
-      const load = values.brushCapacity > 0 ? state.reservoir : 1;
+      const load = brushLoad();
       frameF32[8] = pr;
       // Dry-brush (how lightly the brush skims the tooth on dry paper): a
       // light touch, the side of the brush, or speed, but only as far as the
@@ -307,7 +307,7 @@ async function init() {
     frameF32[9] = dwell / substeps;
     frameF32[10] = drying ? values.dryerStrength : 1;
     frameF32[12] = state.simTime;
-    frameF32[14] = values.brushCapacity > 0 ? state.reservoir : 1;
+    frameF32[14] = brushLoad();
     frameF32[15] = concMul();
     if (!brush) { frameF32[13] = values.brushRadius; frameF32[24] = 0; }
     frameF32[25] = values.fixTooth;
@@ -351,8 +351,16 @@ async function init() {
   // Paint concentration relative to the recipe. Dip brush: its pigment stays
   // in the bristles as the water goes, so paint thickens as it empties.
   // Water brush: the ratio of the two stores.
+  // How full of water the brush is. A dip brush is as wet as its Wetness
+  // says, every stroke and all through it (a hidden reservoir draining
+  // mid-stroke made dry-brushing unpredictable); the water brush has real
+  // stores: squeezed in (Q), drawn down as it paints.
+  function brushLoad() {
+    if (state.brushType === 'dip') return values.dipLoad;
+    return values.brushCapacity > 0 ? state.reservoir : 1;
+  }
   function concMul() {
-    const w = values.brushCapacity > 0 ? state.reservoir : 1;
+    const w = brushLoad();
     if (state.brushType === 'water') return Math.min(state.pigStore / Math.max(w, 0.05), 4);
     return 1 + values.thicken * (1 - w);
   }
@@ -376,7 +384,7 @@ async function init() {
     const u = new Uint32Array(brushRB[k].getMappedRange().slice(0));
     brushRB[k].unmap();
     rbBusy[k] = false;
-    if (values.brushCapacity > 0) {
+    if (values.brushCapacity > 0 && state.brushType === 'water') {
       state.reservoir = Math.max(0, state.reservoir - u[0] / 1e4 / values.brushCapacity);
       // A dab is a fixed amount of pigment, whatever the brush's water holds.
       if (state.brushType === 'water') state.pigStore = Math.max(0, state.pigStore - u[1] / 1e4 / Math.max(values.dabSize, 1e-6));
@@ -463,7 +471,7 @@ async function init() {
     device.queue.submit([enc.finish()]);
     collectBrush(rbk);
     if (state.squeezing) state.reservoir = Math.min(1, state.reservoir + values.squeezeRate * elapsed);
-    loadBar.style.width = `${Math.round((values.brushCapacity > 0 ? state.reservoir : 1) * 100)}%`;
+    loadBar.style.width = `${Math.round(brushLoad() * 100)}%`;
     pigBar.style.width = `${Math.round(Math.min(state.brushType === 'water' ? state.pigStore : 1, 1) * 100)}%`;
     pigBar.style.background = state.brush.length ? swatchColor(PIGMENTS[state.brush[0].pigment]) : 'transparent';
 
