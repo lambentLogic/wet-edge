@@ -20,15 +20,18 @@ const ridgeY = (r, x) => {
   for (let k = 1; k < r.length; k++) if (x <= r[k][0]) { const [x0, y0] = r[k - 1], [x1, y1] = r[k]; return y0 + (y1 - y0) * (x - x0) / (x1 - x0); }
   return r[r.length - 1][1];
 };
-async function fillBelow(r, base, { dx = 22, grade = [1, 1] } = {}) {
-  const pig = V.brushPigment;
-  for (let x = -10, dir = 1; x <= 1034; x += dx, dir = -dir) {
-    const top = ridgeY(r, x) + 4;
-    V.brushPigment = pig * grade[0];
-    const pts = [[x, top, 0.9], [x + (rnd() - 0.5) * 6, (top + base) / 2, 0.9], [x, base, 0.9]];
-    h.lift(); await S.path(dir > 0 ? pts : pts.reverse(), 2);
+// With a flat brush, tilted to follow the ridge, so each stroke's square
+// top lies along it (a round brush's round tops made scallops).
+async function fillBelow(r, base, { dx = 22 } = {}) {
+  for (let x = -10; x <= 1034; x += dx) {
+    const top = ridgeY(r, x);
+    V.flatAngle = Math.atan((ridgeY(r, x + 6) - ridgeY(r, x - 6)) / 12) * 180 / Math.PI;
+    h.lift(); await S.path([[x, top + 2, 0.9], [x + (rnd() - 0.5) * 4, (top + base) / 2, 0.9], [x, base - 20, 0.9]], 2);
   }
-  V.brushPigment = pig;
+  // Square off the slanted bottoms with one pass of the flat along the
+  // base, turned so it lays a band with straight edges.
+  V.flatAngle = 90;
+  h.lift(); await S.path([[-40, base - 14, 0.9], [512, base - 14, 0.9], [1064, base - 14, 0.9]], 6);
 }
 
 window.__paintDone = (async () => {
@@ -63,15 +66,15 @@ window.__paintDone = (async () => {
   const far = ridge(HORIZON - 10, 70, 0.006, 1.2);
   h.setBrushPreset('mop'); h.setMode(0);
   h.setBrush([['French Ultramarine', 2], ['Quinacridone Rose', 1], ['Raw Umber', 0.5]]); V.brushPigment = 0.18;
-  V.brushRadius = 14; h.lift(); await S.path(far.map(([x, y]) => [x, y + 6, 0.8]), 2);
-  await fillBelow(far, HORIZON + 16, { dx: 20 });
+  h.setBrushPreset('flat'); V.brushCapacity = 0;
+  await fillBelow(far, HORIZON + 16, { dx: 26 });
   log(`far hills dry after ${(await M.waitDry([[200, HORIZON - 40], [800, HORIZON - 40]])).toFixed(1)}s`);
 
   log('near hills: perylene green and raw umber, darker, rising at the left');
   const near = ridge(HORIZON + 4, 55, 0.009, 4.0).map(([x, y]) => [x, y - Math.max(0, 300 - x) * 0.25]);
   h.setBrush([['Perylene Green', 2], ['Raw Umber', 1], ['French Ultramarine', 0.5]]); V.brushPigment = 0.35;
-  V.brushRadius = 14; h.lift(); await S.path(near.map(([x, y]) => [x, y + 6, 0.8]), 2);
-  await fillBelow(near, HORIZON + 16, { dx: 20 });
+  await fillBelow(near, HORIZON + 16, { dx: 26 });
+  h.setBrushPreset('round'); V.brushCapacity = 0; V.brushRadius = 14;
   // A little warmth dropped into the near hills while wet: the last light.
   h.setBrush([['Transparent Red Oxide', 1], ['Raw Umber', 1]]); V.brushPigment = 0.3;
   for (let k = 0; k < 7; k++) { const x = 60 + rnd() * 900, y = ridgeY(near, x) + 14; h.lift(); await S.path(line(x - 40, y, x + 40, y + 6, 0, 3, 0.6, 0.6), 2); }
@@ -131,9 +134,9 @@ window.__paintDone = (async () => {
   h.setBrushPreset('mop'); V.brushRadius = 30;
   h.setBrush([['Raw Umber', 2], ['Perylene Green', 1], ['Transparent Red Oxide', 0.5]]); V.brushPigment = 0.35;
   const bank = Array.from({ length: 27 }, (_, k) => { const x = -10 + k * 40; return [x, 692 - 10 * Math.sin(x * 0.011 + 1) - 6 * Math.sin(x * 0.031)]; });
-  V.brushRadius = 16; h.lift(); await S.path(bank.map(([x, y]) => [x, y + 5, 0.8]), 2);
-  V.brushRadius = 24;
+  h.setBrushPreset('flat'); V.brushCapacity = 0;
   await fillBelow(bank, 790, { dx: 26 });
+  h.setBrushPreset('round'); V.brushCapacity = 0; V.brushRadius = 14;
   // Variety dropped in wet: greener and redder patches.
   for (const [mix, n] of [[[['Perylene Green', 2], ['Transparent Yellow Oxide', 1]], 6], [[['Transparent Red Oxide', 1], ['Raw Umber', 1]], 5]]) {
     h.setBrush(mix); V.brushPigment = 0.4;
