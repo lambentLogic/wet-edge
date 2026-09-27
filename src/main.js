@@ -278,7 +278,9 @@ async function init() {
       const segNow = Math.hypot(brush.x1 - brush.x0, brush.y1 - brush.y0);
       state.smoothSeg = !state.brushActive ? segNow : state.smoothSeg * 0.6 + segNow * 0.4;
       const speed = Math.min(1, state.smoothSeg / Math.max(4 * values.brushRadius, 1e-3));
-      const dryness = Math.min(1, Math.max(0, 1 - load) * 1.5);
+      // Dry only once it's well down (below dryBelow full): a brush that's
+      // used a little water still lays a solid line at a light touch.
+      const dryness = Math.min(1, Math.max(0, (values.dryBelow - load) / Math.max(values.dryBelow, 1e-3)));
       frameF32[24] = dryness * Math.max(1 - pr, side * 0.8, values.speedSkim * speed);
       // Taper: width follows pressure; the side of the brush is wider.
       frameF32[13] = values.brushRadius * (values.taperMin + (1 - values.taperMin) * pr) * (1 + 0.8 * side);

@@ -89,6 +89,7 @@ export const PARAMS = [
   { key: 'mouseTouch',    v: 1,    min: 0.02, max: 1, group: 'Brush', target: 'js',  label: 'mouse: touch (Z / Option lighter, X heavier)' },
   { key: 'touchRate',     v: 0.8,  min: 0, max: 5,   group: 'Brush', target: 'js',  label: 'mouse: touch glides per second' },
   { key: 'dipLoad',       v: 1,    min: 0.05, max: 1, group: 'Brush', target: 'js',  label: 'wetness (dip brush reload)' },
+  { key: 'dryBelow',      v: 0.7,  min: 0.05, max: 1, group: 'Brush', target: 'js',  label: 'brush skips below (fraction full)' },
   { key: 'speedSkim',     v: 0.6,  min: 0, max: 2,   group: 'Brush', target: 'js',  label: 'fast strokes skim the tooth' },
   { key: 'touchdownEase', v: 0.12, min: 0, max: 1,   group: 'Brush', target: 'js',  label: 'mouse: ease-in (s)' },
   { key: 'emptyLevel',    v: 0.35, min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'water left when empty' },
