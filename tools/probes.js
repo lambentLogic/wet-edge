@@ -23,6 +23,7 @@
     h.setPaper(paper);
     h.setTone('natural');
     h.setBrushPreset('round');    // don't inherit another probe's brush
+    S.values.dipLoad = 1;          // nor its Wetness
     h.setBrush('French Ultramarine');
     S.values.brushCapacity = 0;   // probes use an endless reservoir unless they say otherwise
     Object.assign(S.values, active);
@@ -118,7 +119,7 @@
       h.setMode(1);
       for (let y = 330; y <= 430; y += 25) { h.lift(); await h.paint(80, y, 920, y, 60); }
       await h.wait(15); await h.wait(20, { dry: true }); await h.wait(3);
-      h.setMode(2);
+      h.setMode(2); S.values.dipLoad = 0;   // lifting with a thirsty brush
       for (let y = 360; y <= 400; y += 10) { h.lift(); await h.paint(80, y, 920, y, 60); }
       await h.wait(3);
       h.setMode(0);
@@ -139,7 +140,7 @@
         h.setBrush(name); h.lift(); await h.paint(200, y, 820, y + 30, 20);
       }
       await h.wait(4);
-      h.setMode(2); h.lift(); await h.paint(300, 200, 700, 560, 20); h.setMode(0);
+      h.setMode(2); S.values.dipLoad = 0;   // lifting with a thirsty brush h.lift(); await h.paint(300, 200, 700, 560, 20); h.setMode(0);
       await h.wait(10); await h.wait(10, { dry: true }); await h.wait(1);
       h.end();
       return await S.stateHashes();
@@ -274,7 +275,7 @@
         // Reference: Mars black laid on clean paper the same way (deposited
         // amount), to see how much ended up fixed in the stain layer.
         const identifiable = withBlack;
-        h.setMode(2);
+        h.setMode(2); S.values.dipLoad = 0;   // lifting with a thirsty brush
         await withValues({ brushRadius: 25 }, async () => {
           for (let pass = 0; pass < 3; pass++) { h.lift(); await h.paint(510, 300, 510, 470, 30); }
           await h.wait(5);
@@ -306,7 +307,7 @@
       });
       const band = async (y0) => { const a = await S.read(); let v = 0; for (let y = y0; y < y0 + 40; y++) for (let x = 470; x < 530; x++) v += a[(y * W + x) * 4 + 2]; return v; };
       const before = []; for (let k = 0; k < 4; k++) before.push(await band(120 + k * 150));
-      h.setMode(2);
+      h.setMode(2); S.values.dipLoad = 0;   // lifting with a thirsty brush
       await withValues({ brushRadius: 25 }, async () => {
         for (let pass = 0; pass < 3; pass++) { h.lift(); await h.paint(500, 80, 500, 700, 40); }
         await h.wait(5);

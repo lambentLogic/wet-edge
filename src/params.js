@@ -111,7 +111,7 @@ export const PARAMS = [
   { key: 'blotRadius',  v: 70,   min: 10, max: 300, group: 'Brush', target: 'sim', label: 'blot: towel wad size (cells)' },
   { key: 'blotScale',   v: 2.5,  min: 0.5, max: 10, group: 'Brush', target: 'sim', label: 'blot: crease size (mm)' },
   { key: 'blotRate',    v: 0.9,  min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'blot: how much it soaks up per press' },
-  { key: 'liftWater',   v: 0.35, min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'lifting takes this much of the water' },
+  { key: 'liftWater',   v: 0.35, min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'lift: how much a thirsty brush takes (Wetness down = thirstier)' },
   { key: 'liftLeaves',  v: 0.04, min: 0, max: 0.3, group: 'Brush', target: 'sim', label: 'lifting leaves wet paper damp (water)' },
   { key: 'liftDry',       v: 0.05, min: 0, max: 2,   group: 'Brush', target: 'sim', label: 'lifts dried paint' },
   { key: 'liftStrength',  v: 0.24,  min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'lift strength' },

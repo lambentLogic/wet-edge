@@ -725,15 +725,17 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
       // film still joined to the wash around it (taking it all left a dry
       // hole, and the wash's edge pinned and darkened around it).
       // It takes paint and water together (the paint's strength in the
-      // water stays the same) and only part of the water each pass
-      // (liftWater), so the spot stays wet and joined to the wash.
-      let kw = kl * clamp(p.liftWater, 0.0, 1.0);
+      // water stays the same), as much as the brush is thirsty: Wetness
+      // (fr.load) down, it soaks up a lot; full, it barely lifts. Only part
+      // of the water each pass, so the spot stays wet and joined to the wash.
+      let thirst = 1.0 - clamp(fr.load, 0.0, 1.0);
+      let kw = kl * clamp(p.liftWater * 2.0 * thirst, 0.0, 1.0);
       let wNew = max(w * (1.0 - kw), min(w, p.liftLeaves));
       let keepFrac = select(1.0, wNew / w, w > 1e-6);
       w = wNew;
       for (var j = 0u; j < cn; j++) { camt[j] *= keepFrac; }
       s *= 1.0 - kw;   // the fibres stay damp too (drying them pinned a ring)
-      liftK = kl;
+      liftK = kl * (0.3 + 0.7 * thirst);   // scrubbing lifts some settled paint even with a wet brush
     }
     // Tally what the brush laid down, for its reservoir (read back on the CPU).
     let dw = max(w - wBefore, 0.0);
