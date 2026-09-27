@@ -19,7 +19,8 @@ const gId = (gu, c, k) => (gu[c * 10 + (k >> 2)] >>> (8 * (k & 3))) & 255;
 const gAmt = (gf, c, k) => gf[c * 10 + 2 + k];
 // Deposits (D): bytes per cell, stored packed (DS in shaders.js): stainK,
 // stainS (4 f32 each), 8 pigment ids as bytes in 2 u32, 8 f32 amounts,
-// 8 f32 stamps, padding. As floats: 0-3, 4-7, 8-9, 10-17, 18-25.
+// 8 f32 stamps, masking fluid (0/1), padding. As floats: 0-3, 4-7, 8-9,
+// 10-17, 18-25, 26. (Older saves have 0 in the padding: no mask.)
 const ND = 8, DB = 112;
 const dId = (du, c, k) => (du[c * 28 + 8 + (k >> 2)] >>> (8 * (k & 3))) & 255;
 // Older saves: id vec4u, amt, stainK, stainS, stamp (vec4 each, 80 bytes).
@@ -55,7 +56,7 @@ function packOldG(old, version) {
 
 const values = Object.fromEntries(PARAMS.map(p => [p.key, p.v]));
 const state = {
-  mode: 0,          // 0 paint, 1 water, 2 lift, 3 magnet, 4 mist
+  mode: 0,          // 0 paint, 1 water, 2 lift, 3 magnet, 4 mist, 5 mask
   // What the brush is loaded with: up to 4 pigments (PIGMENTS indices) and
   // their fractions of the load. One pigment straight from a pan, or a mix.
   brush: [{ pigment: 0, frac: 1 }],
@@ -68,6 +69,7 @@ const state = {
   lastEdit: -Infinity, // when the painting was last touched (for autosave)
   ground: null,     // render over this colour instead of the paper (layer export)
   fixPending: false, // spray fixative over the sheet on the next step
+  unmaskPending: false, // peel off the masking fluid on the next step
   magnets: [],      // { shape, x, y, angle, moment } in grid cells (see magnets.js)
   magnetShape: 'disc',
   magDirty: true,   // magnet field needs recomputing
@@ -111,7 +113,7 @@ async function init() {
   const G = [buf(N * GB, S | CD), buf(N * GB, S | CD)];  // suspended components (packed, see GP in shaders.js)
   const Dbuf = buf(N * DB, S | CD);                      // deposited components + stain + stamps (DS in shaders.js)
   const paramBuf = buf(simParamBufferSize(), U | CD);
-  const frameBuf = buf(112, U | CD);
+  const frameBuf = buf(128, U | CD);
   const renderBuf = buf(48, U | CD);
   const pigBuf = buf(MAX_PIGMENTS * 64, U | CD);
   const specBuf = buf(SPEC_FLOATS * 4, S | CD);
@@ -171,7 +173,7 @@ async function init() {
     blurH: compute('blurH'), blurV: compute('blurV'),
     velocity: compute('velocity'), transport: compute('transport'),
     markTiles: compute('markTiles'), compactTiles: compute('compactTiles'),
-    magField: compute('magField'), fixSheet: compute('fixSheet'),
+    magField: compute('magField'), fixSheet: compute('fixSheet'), bumpStep: compute('bumpStep'), unmaskSheet: compute('unmaskSheet'),
   };
 
   // Parity k reads A[k], B[k], G[k] and writes A[1-k], B[1-k], G[1-k].
@@ -209,7 +211,7 @@ async function init() {
 
   // ---- uniforms
   const paramData = new Float32Array(simParamBufferSize() / 4);
-  const frameData = new ArrayBuffer(112);
+  const frameData = new ArrayBuffer(128);
   const frameU32 = new Uint32Array(frameData), frameF32 = new Float32Array(frameData);
   const renderData = new ArrayBuffer(48);
   // The pigment table: colour and physical properties of every pigment in
@@ -240,6 +242,16 @@ async function init() {
 
   const pointerBrush = () => {
     const ptr = state.pointer;
+    // Follow-through: let go mid-stroke and the brush carries on a little in
+    // the direction it was moving, lifting off to its tip, so the stroke
+    // ends tapered rather than in a round cap.
+    if (!ptr.down && ptr.liftOut) {
+      const lo = ptr.liftOut, e = (performance.now() - lo.t0) / 1000, dur = Math.max(values.liftOut, 1e-3);
+      if (e > dur) { ptr.liftOut = null; return null; }
+      ptr.nx = ptr.px + (lo.tx - ptr.px) * 0.5;
+      ptr.ny = ptr.py + (lo.ty - ptr.py) * 0.5;
+      return { x0: ptr.px, y0: ptr.py, x1: ptr.nx, y1: ptr.ny, pressure: lo.p * (1 - e / dur) ** 2, side: ptr.side ?? 0, age: 1 };
+    }
     if (!ptr.down) return null;
     const age = (performance.now() - ptr.downAt) / 1000;
     let pressure = ptr.pressure;
@@ -282,12 +294,19 @@ async function init() {
     let dwell = 1;
     if (brush) {
       const seg = Math.hypot(brush.x1 - brush.x0, brush.y1 - brush.y0);
-      state.smoothSeg = brush.age < 0.02 ? seg : state.smoothSeg * 0.6 + seg * 0.4;
+      state.smoothSeg = !state.brushActive ? seg : state.smoothSeg * 0.6 + seg * 0.4;
       // Contact length: how much hair trails along the paper feeding paint
       // to the line (a rigger's long hairs), else about the brush's width.
       const contact = values.contactLength > 0 ? values.contactLength : 2 * frameF32[13];
-      dwell = Math.min(1, Math.max(0.3, contact / Math.max(state.smoothSeg, 1e-3)));
+      // Each substep stamps only its slice of the frame's segment (see the
+      // shader), so a spot is under the brush for (2r) / (2r + travel) as
+      // long as when every substep stamped the whole segment, the swept
+      // shape everything was calibrated with (which also doubled the paint
+      // at a fast stroke's joints). Scaled back up to the same totals.
+      const seg1 = Math.max(state.smoothSeg, 1e-3), w2 = 2 * frameF32[13];
+      dwell = Math.max(0.3, Math.min(1, contact / seg1)) * (w2 + seg1) / Math.max(w2, 1e-3);
     }
+    frameF32[29] = substeps;
     frameF32[9] = dwell / substeps;
     frameF32[10] = drying ? values.dryerStrength : 1;
     frameF32[12] = state.simTime;
@@ -295,17 +314,17 @@ async function init() {
     frameF32[15] = concMul();
     if (!brush) { frameF32[13] = values.brushRadius; frameF32[24] = 0; }
     frameF32[25] = values.fixTooth;
-    // Travel direction, for the brush's teardrop contact patch; forgotten
-    // when a new stroke starts (a fresh dab has none until it moves).
+    // Landing: how far the brush has travelled since it touched down, for
+    // its contact patch widening from the tip (reset with each new stroke).
+    let tipS0 = -1, ageFrac = 1;
     if (brush) {
-      if (!state.brushActive) state.brushDir = null;
-      const dx = brush.x1 - brush.x0, dy = brush.y1 - brush.y0, len = Math.hypot(dx, dy);
-      if (len > 0.3) state.brushDir = [dx / len, dy / len];
+      if (!state.brushActive) { state.brushTravel = 0; state.strokeStart = state.simTime; }
+      const seg = Math.hypot(brush.x1 - brush.x0, brush.y1 - brush.y0);
+      const L = values.brushRadius * values.tipLength * 1.5;
+      if (state.brushTravel < L) { tipS0 = state.brushTravel; ageFrac = Math.min(1, (brush.age ?? 1) / Math.max(values.tipLanding, 1e-3)); }
+      state.brushTravel += seg;
     }
-    // Only where the stroke lands: further along, the region behind the
-    // brush is already painted, and restamping the tail there added paint.
-    const landing = brush && (brush.age ?? 0) < values.tipLanding;
-    frameF32[26] = landing ? state.brushDir?.[0] ?? 0 : 0; frameF32[27] = landing ? state.brushDir?.[1] ?? 0 : 0;
+    frameF32[26] = tipS0; frameF32[27] = ageFrac; frameF32[28] = state.strokeStart ?? 0;
     state.brushActive = !!brush;
     // Brush load: pigment ids at u32 16..19, fractions at f32 20..23.
     const total = state.brush.reduce((t, b) => t + b.frac, 0) || 1;
@@ -399,6 +418,7 @@ async function init() {
       state.magDirty = false;
     }
     if (state.fixPending) { pass.setPipeline(pipes.fixSheet); pass.dispatchWorkgroups(gx, gy); state.fixPending = false; }
+    if (state.unmaskPending) { pass.setPipeline(pipes.unmaskSheet); pass.dispatchWorkgroups(gx, gy); state.unmaskPending = false; }
     pass.setPipeline(pipes.markTiles); pass.dispatchWorkgroups(gx, gy);
     pass.setPipeline(pipes.compactTiles); pass.dispatchWorkgroups(Math.ceil(TX * TY / 64));
     pass.end();
@@ -406,6 +426,7 @@ async function init() {
     const step = enc.beginComputePass();
     for (let s = 0; s < substeps; s++) {
       step.setBindGroup(0, simBG[parity]);
+      step.setPipeline(pipes.bumpStep); step.dispatchWorkgroups(1);
       step.setPipeline(pipes.velocity); step.dispatchWorkgroupsIndirect(argsBuf, 0);
       step.setPipeline(pipes.transport); step.dispatchWorkgroupsIndirect(argsBuf, 0);
       parity ^= 1;
@@ -442,7 +463,7 @@ async function init() {
     if (!state.paused && !state.headless && substeps > 0) {
       rbk = encodeSim(enc, substeps);
       // Only consume the brush segment once the sim has actually stamped it.
-      if (state.pointer.down) { state.pointer.px = state.pointer.nx; state.pointer.py = state.pointer.ny; }
+      if (state.pointer.down || state.pointer.liftOut) { state.pointer.px = state.pointer.nx; state.pointer.py = state.pointer.ny; }
     }
     const rp = enc.beginRenderPass({
       colorAttachments: [{ view: ctx.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: [1, 1, 1, 1] }],
@@ -514,7 +535,7 @@ async function init() {
     // A stroke from (x0,y0) to (x1,y1) over `frames` simulated frames.
     // Consecutive paint() calls continue one stroke (the brush isn't
     // reloaded) unless lift() is called in between.
-    lift() { strokeFrame = 0; state.brushDir = null; },
+    lift() { strokeFrame = 0; state.brushTravel = 0; state.strokeStart = state.simTime; },
     async paint(x0, y0, x1, y1, frames = 24) {
       if (strokeFrame === 0 && state.brushType === 'dip') state.reservoir = 1;   // a fresh dip stroke: reloaded
       const at = f => {
@@ -563,7 +584,7 @@ async function init() {
     const ptr = state.pointer;
     let f = 0;
     ptr.x = ptr.px = x0; ptr.y = ptr.py = y0; ptr.pressure = 1; ptr.downAt = performance.now(); ptr.down = true;
-    state.brushDir = null;
+    state.brushTravel = 0; state.strokeStart = state.simTime;
     ptr.pen = true; ptr.side = 0; ptr.scripted = true;
     if (state.brushType === 'dip') state.reservoir = 1;
     const step = () => {
@@ -596,7 +617,7 @@ async function init() {
     const ptr = state.pointer;
     const [x0, y0, p0 = 1, s0 = 0] = points[0];
     ptr.x = ptr.px = x0; ptr.y = ptr.py = y0; ptr.pressure = p0; ptr.downAt = performance.now(); ptr.down = true;
-    state.brushDir = null;   // a new stroke: no travel direction yet
+    state.brushTravel = 0; state.strokeStart = state.simTime;   // a new stroke
     ptr.pen = true; ptr.side = s0; ptr.scripted = true;   // scripted strokes use their exact pressure and path
     if (state.brushType === 'dip') state.reservoir = 1;
     let seg = 1, f = 0;
@@ -614,6 +635,8 @@ async function init() {
   window.__sim.setDrying = on => { state.drying = on; document.getElementById('dry').classList.toggle('on', on); };
   // Spray workable fixative over the whole sheet (applied on the next step).
   window.__sim.fix = () => { state.fixPending = true; state.lastEdit = performance.now(); };
+  // Peel off all masking fluid (applied on the next step).
+  window.__sim.unmask = () => { state.unmaskPending = true; state.lastEdit = performance.now(); };
 
   // ---- save / open
   async function readBuffer(src, size, offset = 0) {
@@ -957,7 +980,7 @@ function bindPointer(canvas) {
     ptr.pen = e.pointerType === 'pen';
     ptr.downAt = performance.now();
     ptr.down = true;
-    state.brushDir = null;   // a new stroke: no travel direction yet
+    state.brushTravel = 0; state.strokeStart = state.simTime;   // a new stroke
   });
   canvas.addEventListener('pointermove', e => {
     if (dragMagnet) { [dragMagnet.x, dragMagnet.y] = toGrid(e); drawMagnets(); return; }
@@ -967,6 +990,15 @@ function bindPointer(canvas) {
     ptr.pen = e.pointerType === 'pen';
   });
   const up = () => {
+    // Hand strokes follow through (see pointerBrush): toward a point ahead
+    // along the last direction of travel, if the brush was moving.
+    if (ptr.down && !ptr.scripted && state.mode !== 3) {
+      const dx = ptr.x - ptr.px, dy = ptr.y - ptr.py, len = Math.hypot(dx, dy);
+      if (len > 1) {
+        const L = values.brushRadius * values.tipLength * 0.6;
+        ptr.liftOut = { t0: performance.now(), tx: ptr.x + dx / len * L, ty: ptr.y + dy / len * L, p: ptr.pressure };
+      }
+    }
     ptr.down = false;
     // A magnet dragged off the paper is removed.
     if (dragMagnet && (dragMagnet.x < 0 || dragMagnet.y < 0 || dragMagnet.x > W || dragMagnet.y > H)) removeMagnet(dragMagnet);
@@ -1176,6 +1208,7 @@ function buildUI({ clear, newPaper }) {
   setMode(0);
 
   document.getElementById('fix').addEventListener('click', () => window.__sim.fix());
+  document.getElementById('unmask').addEventListener('click', () => window.__sim.unmask());
   const dryBtn = document.getElementById('dry');
   const setDry = on => { state.drying = on; dryBtn.classList.toggle('on', on); };
   dryBtn.addEventListener('pointerdown', () => setDry(true));
@@ -1228,6 +1261,7 @@ function buildUI({ clear, newPaper }) {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
     if (e.key >= '1' && e.key <= '4') setMode(+e.key - 1);
     if (e.key === '5') setMode(4);
+    if (e.key === '6') setMode(5);
     else if (e.key === 'f') flipMagnets();
     else if (e.key === '[' || e.key === ']') {
       const n = PIGMENTS.length;

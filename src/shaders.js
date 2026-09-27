@@ -43,7 +43,11 @@ struct Frame {
   brushFrac: vec4f,   // ... and their fractions of the load (sum 1)
   touch: f32,         // how lightly the brush skims (0 = full contact), from the CPU
   fixTooth: f32,      // how much a fixative spray fills the paper's tooth
-  dirX: f32, dirY: f32, // direction the brush is travelling (0, 0 = not yet known)
+  tipS0: f32,         // distance travelled since landing, at this frame's segment start (-1 = past the landing)
+  ageFrac: f32,       // time since landing / tipLanding, capped at 1
+  strokeStart: f32,   // sim time this stroke touched down
+  substeps: f32,      // sim steps this frame (the brush's segment is split among them)
+  _f2: f32, _f3: f32,
 };
 
 // Per-pigment physical properties, each relative to French ultramarine (1).
@@ -84,7 +88,7 @@ fn unpackG(g: GP) -> Comp8 {
 const ND: i32 = 8;
 struct Dep { id: array<u32, 8>, amt: array<f32, 8>, stamp: array<f32, 8>, stainK: vec4f, stainS: vec4f };
 // Stored form (112 bytes): the ids packed as bytes into two u32.
-struct DS { stainK: vec4f, stainS: vec4f, ids: vec2u, amt: array<f32, 8>, stamp: array<f32, 8> };
+struct DS { stainK: vec4f, stainS: vec4f, ids: vec2u, amt: array<f32, 8>, stamp: array<f32, 8>, mask: f32 };
 fn unpackD(d: DS) -> Dep {
   var o: Dep;
   o.stainK = d.stainK; o.stainS = d.stainS; o.amt = d.amt; o.stamp = d.stamp;
@@ -149,6 +153,11 @@ fn tileCell(wid: vec3u, lid: vec3u) -> vec2i {
 
 var<workgroup> tileHot: atomic<u32>;
 
+// Counts substeps within a frame (tiles.brushAcc[2], reset each frame), so
+// transport knows which slice of the brush's segment is this step's.
+@compute @workgroup_size(1)
+fn bumpStep() { atomicAdd(&tiles.brushAcc[2], 1u); }
+
 // One workgroup per tile: is anything in it active this frame?
 @compute @workgroup_size(16, 16)
 fn markTiles(@builtin(global_invocation_id) gid: vec3u, @builtin(workgroup_id) wid: vec3u,
@@ -212,6 +221,28 @@ fn fixSheet(@builtin(global_invocation_id) id: vec3u) {
   D[i].stamp = st;
 }
 
+// Peeling the masking fluid off the whole sheet. Where it covered dried
+// paint, some comes away with it: the less staining the pigment, the more
+// (Mars black, ultramarine; phthalos barely), less where it was fixed.
+@compute @workgroup_size(16, 16)
+fn unmaskSheet(@builtin(global_invocation_id) id: vec3u) {
+  let x = i32(id.x); let y = i32(id.y);
+  if (!inb(x, y)) { return; }
+  let i = ix(x, y);
+  if (D[i].mask <= 0.0) { return; }
+  let fixT = aux[i].z;
+  let d = unpackD(D[i]);
+  var am = D[i].amt;
+  for (var k = 0; k < ND; k++) {
+    if (am[k] <= 0.0) { continue; }
+    let om = stainOmega(d.id[k]);
+    let fixed = select(1.0, p.fixLift, isFixed(d.stamp[k], fixT));
+    am[k] *= 1.0 - clamp(p.maskTear * fixed / (om * om), 0.0, 0.9);
+  }
+  D[i].amt = am;
+  D[i].mask = 0.0;
+}
+
 fn wetInd(i: i32) -> f32 { return select(0.0, 1.0, Ain[i].x > p.wEps); }
 
 @compute @workgroup_size(16, 16)
@@ -235,7 +266,8 @@ fn blurV(@builtin(global_invocation_id) id: vec3u) {
 // ---------------------------------------------------------------- velocity
 fn isWet(i: i32) -> bool { return Ain[i].x > p.wEps; }
 // Surface water may only enter paper that is already wet or damp enough.
-fn isOpen(i: i32) -> bool { let a = Ain[i]; return a.x > p.wEps || a.w > p.dampThreshold; }
+// Masking fluid closes a cell to water: washes flow around and over it.
+fn isOpen(i: i32) -> bool { let a = Ain[i]; return (a.x > p.wEps || a.w > p.dampThreshold) && D[i].mask < 0.5; }
 
 // Height of the free water surface above a common datum.
 fn eta(i: i32) -> f32 { return Ain[i].x + p.paperRelief * aux[i].x; }
@@ -458,29 +490,36 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   // Brush: stamped along the segment the pointer travelled this frame. Its
   // load can hold up to 4 pigments (a palette mix).
   var liftK = 0.0;   // lifting agitation from the brush this step
+  let maskV = D[i].mask;
+  var maskNew = maskV;
   if (fr.brushOn == 1u) {
     let P = vec2f(f32(x) + 0.5, f32(y) + 0.5);
-    let A = vec2f(fr.bx0, fr.by0);
-    let AB = vec2f(fr.bx1, fr.by1) - A;
+    // Each substep stamps only its own slice of the segment the brush moved
+    // this frame, so a spot gets paint for as long as the brush is actually
+    // over it (a fast stroke lays less), and consecutive frames' segments
+    // meet without overlapping (whole-segment stamps on every substep
+    // doubled up at the joints: beads along fast strokes).
+    let nSub = max(fr.substeps, 1.0);
+    let kSub = min(f32(atomicLoad(&tiles.brushAcc[2])) - 1.0, nSub - 1.0);
+    let F0 = vec2f(fr.bx0, fr.by0);
+    let FB = vec2f(fr.bx1, fr.by1) - F0;
+    let A = F0 + FB * (max(kSub, 0.0) / nSub);
+    let AB = FB / nSub;
     let t = clamp(dot(P - A, AB) / max(dot(AB, AB), 1e-6), 0.0, 1.0);
     let dist = length(P - (A + AB * t));
     let r = fr.radius;
-    // Contact patch: a real round brush doesn't touch in a circle. Its
-    // belly leads and its hairs trail behind toward the tip, so the patch is
-    // an egg, longer behind (tipLength radii, more as it's pressed harder).
-    // Swept along the path that's the same as a disc in the middle of a
-    // stroke, but a stroke lands with an elongated, softly pointed start
-    // where the tip trailed, instead of a round cap. A dab pressed straight
-    // down (no direction yet) stays round.
+    // Contact patch: a real round brush doesn't touch in a circle. The tip
+    // touches down first, at the landing point, and the belly spreads ahead
+    // of it as the stroke moves, so a stroke starts from a point and widens
+    // to full over its first tipLength radii (more when pressed harder). A
+    // dab pressed in place widens with time instead (fr.ageFrac), so it
+    // ends up round. fr.tipS0 < 0: past the landing, full width.
     var cover = r - dist;
-    let dirv = vec2f(fr.dirX, fr.dirY);
-    if (dot(dirv, dirv) > 0.5) {
-      let u = dot(P - A, dirv);
-      if (u < 0.0) {
-        let L = max(r * p.tipLength * (0.5 + 0.5 * clamp(fr.pressure, 0.0, 1.5)), 1e-3);
-        let v = abs(dot(P - A, vec2f(-dirv.y, dirv.x)));
-        cover = r * sqrt(max(1.0 - (u / L) * (u / L), 0.0)) - v;
-      }
+    if (fr.tipS0 >= 0.0) {
+      let L = max(r * p.tipLength * (0.5 + 0.5 * clamp(fr.pressure, 0.0, 1.5)), 1e-3);
+      let sAlong = fr.tipS0 + (max(kSub, 0.0) + t) * length(AB);
+      let grow = clamp(max(sAlong / L, fr.ageFrac), 0.0, 1.0);
+      cover = r * sqrt(grow) - dist;
     }
     var soft = r * p.brushSoftness;
     // A flat brush: a thin rectangle (its chisel edge flatThickness of its
@@ -531,7 +570,12 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     // Charges from repeated touchdowns can't stack past the level edge
     // pinning holds, or overlapping passes flood the paper.
     let chargeRoom = max(p.pinning - max(w, p.brushWater), 0.0);
-    let charge = select(0.0, min(p.brushCharge * fr.charge * k, chargeRoom), a.x > p.wEps);
+    // Wet-in-wet charge: only into paper that was already wet before this
+    // stroke. Paper this stroke wetted a moment ago (a fast stroke's
+    // previous frame) isn't a wash to charge into; charging it put beads of
+    // extra paint at every joint of a fast stroke.
+    let wetBefore = a.x > p.wEps && aux[i].w > 0.0 && aux[i].w < fr.strokeStart - 0.02;
+    let charge = select(0.0, min(p.brushCharge * fr.charge * k, chargeRoom), wetBefore);
     // Water the brush can still lay down falls as its reservoir empties.
     let level = p.brushWater * mix(p.emptyLevel, 1.0, clamp(fr.load, 0.0, 1.0));
     if (fr.mode == 0u) {
@@ -561,6 +605,10 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
       let drop = hash2(x, y, u32(fr.time * 600.0) + 7u);
       if (drop < p.mistDensity * k) { w = max(w, p.mistWater * (0.6 + 0.8 * hash2(y, x, 3u))); }
       s = min(s + p.mistDamp * k, max(s, p.capacityMax));
+    } else if (fr.mode == 5u) {
+      // Masking fluid, on dry paper (or over dried paint): a rubbery film.
+      // Its edge follows the paper's tooth a little, as liquid latex does.
+      if (a.x <= p.wEps) { maskNew = max(maskNew, step(0.45 + 0.2 * (0.5 - aux[i].x), fall)); }
     } else {
       let kl = clamp(p.liftStrength * amt * 8.0, 0.0, 1.0);
       w *= 1.0 - kl;
@@ -573,6 +621,10 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     if (dw > 1e-6) { atomicAdd(&tiles.brushAcc[0], u32(dw * 1e4 + 0.5)); }
     if (gAdded > 1e-6) { atomicAdd(&tiles.brushAcc[1], u32(gAdded * 1e4 + 0.5)); }
   }
+  // Masked: paint and water laid on the film stay on the film (removed with
+  // it), and none reaches the paper; neighbours' water can't flow in.
+  if (maskNew != maskV) { D[i].mask = maskNew; }
+  if (maskNew > 0.5) { w = 0.0; for (var j = 0u; j < cn; j++) { camt[j] = 0.0; } }
 
   // Wetting and drying. aux.w > 0: when this cell's current wetting began.
   // aux.w <= 0: the cell is dry, since -aux.w. Gum arabic sets gradually
@@ -1139,7 +1191,7 @@ fn unpackG(g: GP) -> Comp8 {
 const ND: i32 = 8;
 struct Dep { id: array<u32, 8>, amt: array<f32, 8>, stamp: array<f32, 8>, stainK: vec4f, stainS: vec4f };
 // Stored form (112 bytes, see the sim): the ids packed as bytes into two u32.
-struct DS { stainK: vec4f, stainS: vec4f, ids: vec2u, amt: array<f32, 8>, stamp: array<f32, 8> };
+struct DS { stainK: vec4f, stainS: vec4f, ids: vec2u, amt: array<f32, 8>, stamp: array<f32, 8>, mask: f32 };
 fn unpackD(d: DS) -> Dep {
   var o: Dep;
   o.stainK = d.stainK; o.stainS = d.stainS; o.amt = d.amt; o.stamp = d.stamp;
@@ -1192,6 +1244,12 @@ fn overLayer4(Rg: vec4f, Kx: vec4f, Sx: vec4f, amount: f32) -> vec4f {
   let Rl = sh / c;
   let T = b / c;
   return Rl + T * T * Rg / (1.0 - Rl * Rg);
+}
+
+// Masking fluid: a translucent pale-yellow rubber film over the paint.
+fn maskOver(col: vec3f, i: u32) -> vec3f {
+  let m = D[i].mask;
+  return mix(col, vec3f(0.95, 0.9, 0.62), 0.45 * clamp(m, 0.0, 1.0));
 }
 
 fn srgbEncode(v: vec3f) -> vec3f {
@@ -1282,7 +1340,7 @@ fn fs(@builtin(position) fc: vec4f) -> @location(0) vec4f {
   let i = y * r.W + x;
   let a = A[i];
   let h = aux[i].x;
-  if (r.spectral > 0.5) { return spectralColour(i, a.x, h); }
+  if (r.spectral > 0.5) { let sc = spectralColour(i, a.x, h); return vec4f(maskOver(sc.rgb, i), 1.0); }
 
   let Rg = r.paperColor.rgb * (1.0 - r.paperShade * (1.0 - h));
 
@@ -1334,6 +1392,6 @@ fn fs(@builtin(position) fc: vec4f) -> @location(0) vec4f {
   col = overLayer(col, Kw, Sw, tw);
 
   col *= 1.0 - clamp(a.x * r.wetDarken, 0.0, 0.3);
-  return vec4f(clamp(col, vec3f(0.0), vec3f(1.0)), 1.0);
+  return vec4f(maskOver(clamp(col, vec3f(0.0), vec3f(1.0)), i), 1.0);
 }
 `;
