@@ -190,19 +190,17 @@ export function makeMinds(sim) {
   }
 
   // A wash that goes around what's already on the sheet, as a painter
-  // cuts in around a flower before laying the background. The sheet is
+  // cuts in around a flower while laying the background. The sheet is
   // sensed once: every cell holding paint (above threshold) is a shape to
-  // keep clear of, by margin cells of white paper. A distance map from
-  // those shapes gives, by marching squares, contour lines at margin +
-  // cutRadius, which are painted with a small brush (the cut-in); the big
-  // brush (the current radius) fills rows only where its whole footprint
-  // stays farther off, overlapping the cut-in band so the two merge wet.
-  // Top to bottom, each contour just before the rows reach it, so the
-  // cut-in is still wet when the fill joins it.
+  // keep clear of, by margin cells of white paper. From a distance map to
+  // those shapes: the brush's tip runs along a contour just outside each
+  // one (marching squares), and rows fill the rest with pressure set so the
+  // brush just fits the room it has. Top to bottom, each contour just
+  // before the rows reach it, so everything merges wet. Mists first.
   //   area       polygon to wash (default: the whole sheet)
   //   pigmentAt  optional (x, y) => brushPigment, for a graded wash
   //   brushAt    optional (x, y) => brush load, for a variegated wash
-  async function washAround(area = null, { margin = 3, cutRadius = 6, threshold = 0.004, pigmentAt = null, brushAt = null, mist = true, framesPerSeg = 2, log = () => {} } = {}) {
+  async function washAround(area = null, { margin = 3, threshold = 0.004, pigmentAt = null, brushAt = null, mist = true, framesPerSeg = 2, log = () => {} } = {}) {
     const W = 1024, a = await sim.read(), H = a.length / 4 / W, N = W * H;
     const bigR = V.brushRadius, pig0 = V.brushPigment;
     // Inside the area?
@@ -229,15 +227,17 @@ export function makeMinds(sim) {
       dist[c] = d;
     }
     const at = (x, y) => { const xi = Math.min(W - 1, Math.max(0, Math.round(x))), yi = Math.min(H - 1, Math.max(0, Math.round(y))); return inside[yi * W + xi] ? dist[yi * W + xi] : -1; };
-    // Contours by marching squares on a coarse grid: the cut-in at margin +
-    // cutRadius, then rings farther out, overlapping, until they meet the
-    // zone the big brush fills (its soft edge covers well short of its
-    // radius, so one cut-in line left a white band between them).
-    const rowStep = Math.max(4, bigR * 0.9), clearOf = margin + bigR * 0.95 + cutRadius * 0.3;
-    const levels = [];
-    for (let Lk = margin + cutRadius; Lk < clearOf + cutRadius; Lk += cutRadius * 1.5) levels.push(Lk);
-    const lines = [];
-    for (const L of levels) lines.push(...contours(L).map(l => ({ l, L })));
+    // One brush does it all, as a painter would: its tip along the edges,
+    // its belly in the open. Pressure sets the width (radius = R * (taperMin
+    // + (1 - taperMin) * pressure)), so each point of a stroke is pressed
+    // just hard enough for the brush to fit the room it has, and lifts to
+    // the tip near a shape. A tapered brush (the mop) has a fine tip.
+    // Separate small-brush rings dried apart into bands.
+    const taper = Math.max(V.taperMin, 0.02), tipR = bigR * taper;
+    const pressFor = room => Math.min(1, Math.max(0, (room / bigR - taper) / (1 - taper)));
+    const rowStep = Math.max(3, bigR * 0.7), cutL = margin + tipR * 1.2;
+    const clearOf = cutL;   // rows run wherever the tip fits
+    const lines = contours(cutL).map(l => ({ l, L: cutL }));
 
     function contours(L) {
     const g = 3, segs = [];
@@ -284,7 +284,7 @@ export function makeMinds(sim) {
     if (mist) {
       const mode0 = h.mode();
       h.setMode(4);
-      for (const [mistR, step] of [[40, 16], [cutRadius * 1.5, 6]]) {
+      for (const [mistR, step] of [[40, 16], [Math.max(tipR * 3, 8), 6]]) {
         V.brushRadius = mistR;
         for (let y = mistR * 0.6, dirx = 1; y < H; y += mistR * 1.1, dirx = -dirx) {
           let run = [];
@@ -292,7 +292,7 @@ export function makeMinds(sim) {
           for (let k = 0; k <= Math.ceil(W / step); k++) {
             const x = dirx > 0 ? k * step : W - k * step;
             const d = at(x, y);
-            if (d > margin + mistR * 0.9 && (mistR >= 40 || d < clearOf + mistR)) run.push([x, y, 0.9]); else await flush();
+            if (d > margin + mistR * 0.9 && (mistR >= 40 || d < bigR + mistR)) run.push([x, y, 0.9]); else await flush();
           }
           await flush();
         }
@@ -306,8 +306,8 @@ export function makeMinds(sim) {
     for (let y = rowStep / 2, dirx = 1; y < H + rowStep; y += rowStep, dirx = -dirx) {
       while (todo.length && todo[0].top < y + rowStep) {
         const { l } = todo.shift();
-        V.brushRadius = cutRadius; setLoad(l[0][0], l[0][1]);
-        h.lift(); await sim.path(l.map(([x, yy]) => [x, yy, 0.9]), framesPerSeg); cut++;
+        V.brushRadius = bigR; setLoad(l[0][0], l[0][1]);
+        h.lift(); await sim.path(l.map(([x, yy]) => [x, yy, 0]), framesPerSeg); cut++;
       }
       if (y >= H) continue;
       V.brushRadius = bigR;
@@ -315,7 +315,8 @@ export function makeMinds(sim) {
       const flush = async () => { if (run.length > 1) { setLoad(run[0][0], y); h.lift(); await sim.path(run, framesPerSeg); rows++; } run = []; };
       for (let k = 0; k <= Math.ceil(W / 10); k++) {
         const x = dirx > 0 ? k * 10 : W - k * 10;
-        if (at(x, y) > clearOf) run.push([x, y, 0.9]); else await flush();
+        const d = at(x, y);
+        if (d > clearOf) run.push([x, y, pressFor(d - margin)]); else await flush();
       }
       await flush();
     }

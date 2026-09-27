@@ -92,7 +92,7 @@ window.__paintDone = (async () => {
   log('background: a graded wash around the flowers and leaves (washAround senses them)');
   h.setBrushPreset('mop'); V.brushCapacity = 0; V.brushRadius = 26;
   await M.washAround(null, {
-    margin: 3, cutRadius: 6, log,
+    margin: 3, log,
     brushAt: (x, y) => (y < 380 ? [['French Ultramarine', 2], ['Quinacridone Rose', 1]] : [['French Ultramarine', 1], ['Perylene Green', 1], ['Raw Umber', 1]]),
     pigmentAt: (x, y) => 0.12 + 0.12 * Math.abs(y / 760 - 0.45) * 2,
   });
