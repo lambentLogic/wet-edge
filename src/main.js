@@ -295,6 +295,17 @@ async function init() {
     frameF32[15] = concMul();
     if (!brush) { frameF32[13] = values.brushRadius; frameF32[24] = 0; }
     frameF32[25] = values.fixTooth;
+    // Travel direction, for the brush's teardrop contact patch; forgotten
+    // when a new stroke starts (a fresh dab has none until it moves).
+    if (brush) {
+      if (!state.brushActive) state.brushDir = null;
+      const dx = brush.x1 - brush.x0, dy = brush.y1 - brush.y0, len = Math.hypot(dx, dy);
+      if (len > 0.3) state.brushDir = [dx / len, dy / len];
+    }
+    // Only where the stroke lands: further along, the region behind the
+    // brush is already painted, and restamping the tail there added paint.
+    const landing = brush && (brush.age ?? 0) < values.tipLanding;
+    frameF32[26] = landing ? state.brushDir?.[0] ?? 0 : 0; frameF32[27] = landing ? state.brushDir?.[1] ?? 0 : 0;
     state.brushActive = !!brush;
     // Brush load: pigment ids at u32 16..19, fractions at f32 20..23.
     const total = state.brush.reduce((t, b) => t + b.frac, 0) || 1;
@@ -503,7 +514,7 @@ async function init() {
     // A stroke from (x0,y0) to (x1,y1) over `frames` simulated frames.
     // Consecutive paint() calls continue one stroke (the brush isn't
     // reloaded) unless lift() is called in between.
-    lift() { strokeFrame = 0; },
+    lift() { strokeFrame = 0; state.brushDir = null; },
     async paint(x0, y0, x1, y1, frames = 24) {
       if (strokeFrame === 0 && state.brushType === 'dip') state.reservoir = 1;   // a fresh dip stroke: reloaded
       const at = f => {
@@ -552,6 +563,7 @@ async function init() {
     const ptr = state.pointer;
     let f = 0;
     ptr.x = ptr.px = x0; ptr.y = ptr.py = y0; ptr.pressure = 1; ptr.downAt = performance.now(); ptr.down = true;
+    state.brushDir = null;
     ptr.pen = true; ptr.side = 0; ptr.scripted = true;
     if (state.brushType === 'dip') state.reservoir = 1;
     const step = () => {
@@ -584,6 +596,7 @@ async function init() {
     const ptr = state.pointer;
     const [x0, y0, p0 = 1, s0 = 0] = points[0];
     ptr.x = ptr.px = x0; ptr.y = ptr.py = y0; ptr.pressure = p0; ptr.downAt = performance.now(); ptr.down = true;
+    state.brushDir = null;   // a new stroke: no travel direction yet
     ptr.pen = true; ptr.side = s0; ptr.scripted = true;   // scripted strokes use their exact pressure and path
     if (state.brushType === 'dip') state.reservoir = 1;
     let seg = 1, f = 0;
@@ -896,7 +909,10 @@ function bindPointer(canvas) {
   // Rotate a magnet: R (Shift+R backwards) for the last one touched, or the
   // scroll wheel over one.
   const rotateMagnet = (mg, da) => { mg.angle = (mg.angle ?? 0) + da; drawMagnets(); };
+  // Turn a flat brush: R (Shift+R backwards) or the scroll wheel, painting.
+  const turnFlat = deg => { values.flatAngle = ((values.flatAngle + deg + 540) % 360) - 180; uiSync(); };
   canvas.addEventListener('wheel', e => {
+    if (state.mode !== 3 && values.brushShape > 0.5) { e.preventDefault(); turnFlat(Math.sign(e.deltaY) * 7.5); return; }
     if (state.mode !== 3) return;
     const hit = magnetAt(...toGrid(e));
     if (!hit) return;
@@ -905,6 +921,8 @@ function bindPointer(canvas) {
     lastMagnet = hit;
   }, { passive: false });
   window.addEventListener('keydown', e => {
+    if (state.mode !== 3 && values.brushShape > 0.5 && (e.key === 'r' || e.key === 'R')
+        && e.target.tagName !== 'INPUT' && e.target.tagName !== 'SELECT') { turnFlat((e.shiftKey ? -1 : 1) * 15); return; }
     if (state.mode === 3 && lastMagnet && (e.key === 'r' || e.key === 'R')
         && e.target.tagName !== 'INPUT' && e.target.tagName !== 'SELECT') {
       rotateMagnet(lastMagnet, (e.shiftKey ? -1 : 1) * Math.PI / 12);
@@ -939,6 +957,7 @@ function bindPointer(canvas) {
     ptr.pen = e.pointerType === 'pen';
     ptr.downAt = performance.now();
     ptr.down = true;
+    state.brushDir = null;   // a new stroke: no travel direction yet
   });
   canvas.addEventListener('pointermove', e => {
     if (dragMagnet) { [dragMagnet.x, dragMagnet.y] = toGrid(e); drawMagnets(); return; }

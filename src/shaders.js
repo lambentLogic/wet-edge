@@ -43,7 +43,7 @@ struct Frame {
   brushFrac: vec4f,   // ... and their fractions of the load (sum 1)
   touch: f32,         // how lightly the brush skims (0 = full contact), from the CPU
   fixTooth: f32,      // how much a fixative spray fills the paper's tooth
-  _t2: f32, _t3: f32,
+  dirX: f32, dirY: f32, // direction the brush is travelling (0, 0 = not yet known)
 };
 
 // Per-pigment physical properties, each relative to French ultramarine (1).
@@ -465,7 +465,45 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     let t = clamp(dot(P - A, AB) / max(dot(AB, AB), 1e-6), 0.0, 1.0);
     let dist = length(P - (A + AB * t));
     let r = fr.radius;
-    var fall = clamp((r - dist) / max(r * p.brushSoftness, 1e-3), 0.0, 1.0);
+    // Contact patch: a real round brush doesn't touch in a circle. Its
+    // belly leads and its hairs trail behind toward the tip, so the patch is
+    // an egg, longer behind (tipLength radii, more as it's pressed harder).
+    // Swept along the path that's the same as a disc in the middle of a
+    // stroke, but a stroke lands with an elongated, softly pointed start
+    // where the tip trailed, instead of a round cap. A dab pressed straight
+    // down (no direction yet) stays round.
+    var cover = r - dist;
+    let dirv = vec2f(fr.dirX, fr.dirY);
+    if (dot(dirv, dirv) > 0.5) {
+      let u = dot(P - A, dirv);
+      if (u < 0.0) {
+        let L = max(r * p.tipLength * (0.5 + 0.5 * clamp(fr.pressure, 0.0, 1.5)), 1e-3);
+        let v = abs(dot(P - A, vec2f(-dirv.y, dirv.x)));
+        cover = r * sqrt(max(1.0 - (u / L) * (u / L), 0.0)) - v;
+      }
+    }
+    var soft = r * p.brushSoftness;
+    // A flat brush: a thin rectangle (its chisel edge flatThickness of its
+    // width) held at flatAngle, swept along the path. Pulled broadside it
+    // lays a wide band with square, straight ends; drawn along its edge, a
+    // thin line. Sampled along this frame's segment, closely enough that
+    // the thin edge leaves no gaps.
+    if (p.brushShape > 0.5) {
+      let th = max(r * p.flatThickness, 0.5);
+      let ang = radians(p.flatAngle);
+      let ea = vec2f(cos(ang), sin(ang));
+      let en = vec2f(-ea.y, ea.x);
+      let n = clamp(i32(ceil(length(AB) / (th * 0.25))), 1, 96);
+      var best = -1e9;
+      for (var k = 0; k <= n; k++) {
+        let q = P - (A + AB * (f32(k) / f32(n)));
+        let d = vec2f(abs(dot(q, ea)) - r, abs(dot(q, en)) - th);
+        best = max(best, -(length(max(d, vec2f(0.0))) + min(max(d.x, d.y), 0.0)));
+      }
+      cover = best;
+      soft = min(r, th * 2.0) * p.brushSoftness;
+    }
+    var fall = clamp(cover / max(soft, 1e-3), 0.0, 1.0);
     fall = fall * fall * (3.0 - 2.0 * fall);
     // Dry-brush is technique: a light, fast touch with a fairly dry brush
     // only kisses the peaks of the paper's tooth. It needs dry paper; on
