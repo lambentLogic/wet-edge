@@ -83,6 +83,8 @@ export const PARAMS = [
   { key: 'brushShape',    v: 0,    min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'shape (0 round, 1 flat)' },
   { key: 'flatAngle',     v: 0,    min: -180, max: 180, group: 'Brush', target: 'sim', label: 'flat: angle (deg; R / scroll)' },
   { key: 'flatThickness', v: 0.18, min: 0.02, max: 1, group: 'Brush', target: 'sim', label: 'flat: edge thickness (x width)' },
+  { key: 'lingerRate',    v: 0.3,  min: 0, max: 2,   group: 'Brush', target: 'js',  label: 'resting brush adds (frames per frame)' },
+  { key: 'dabDelay',      v: 0.1,  min: 0, max: 1,   group: 'Brush', target: 'js',  label: 'hold still this long to dab (s)' },
   { key: 'brushDose',     v: 2.1,  min: 0, max: 10,  group: 'Brush', target: 'js',  label: 'dose per spot crossed (frames)' },
   { key: 'taperMin',      v: 0.15, min: 0, max: 1,   group: 'Brush', target: 'js',  label: 'taper (width at no pressure)' },
   { key: 'brushCapacity', v: 5000, min: 0, max: 30000, group: 'Brush', target: 'js', label: 'reservoir (0 = endless)' },

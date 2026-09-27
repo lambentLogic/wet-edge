@@ -254,7 +254,7 @@ async function init() {
     const follow = ptr.scripted ? 1 : 0.5;
     ptr.nx = ptr.px + (ptr.x - ptr.px) * follow;
     ptr.ny = ptr.py + (ptr.y - ptr.py) * follow;
-    return { x0: ptr.px, y0: ptr.py, x1: ptr.nx, y1: ptr.ny, pressure, side: ptr.side ?? 0, age };
+    return { x0: ptr.px, y0: ptr.py, x1: ptr.nx, y1: ptr.ny, pressure, side: ptr.side ?? 0, age, hand: !ptr.scripted };
   };
 
   function writeUniforms(substeps, brush = pointerBrush(), drying = state.drying) {
@@ -262,6 +262,11 @@ async function init() {
     device.queue.writeBuffer(paramBuf, 0, paramData);
 
     frameU32[0] = W; frameU32[1] = H; frameU32[2] = state.mode; frameU32[3] = brush ? 1 : 0;
+    // A new stroke: the brush wasn't down last frame, or the pointer touched
+    // down again since (one scripted stroke can follow another with no gap),
+    // or a headless stroke's first frame.
+    const newStroke = brush && (!state.brushActive || state.pointer.downAt !== state.strokeDownAt || brush.age === 0);
+    if (brush) state.strokeDownAt = state.pointer.downAt;
     if (brush) {
       frameF32[4] = brush.x0; frameF32[5] = brush.y0; frameF32[6] = brush.x1; frameF32[7] = brush.y1;
       // Side of the brush (Shift, or a tilted pen): a wider stroke. Loaded,
@@ -276,7 +281,16 @@ async function init() {
       // brush is dry (Wetness down, or running out): a full brush lays solid
       // lines at any touch or speed.
       const segNow = Math.hypot(brush.x1 - brush.x0, brush.y1 - brush.y0);
-      state.smoothSeg = !state.brushActive ? segNow : state.smoothSeg * 0.6 + segNow * 0.4;
+      // No landing dot: a stroke lays nothing while the brush sits at its
+      // first point, until it moves (a flick lands already moving) or is
+      // held still on purpose for dabDelay (a dab).
+      if (newStroke) state.strokeMoved = false;
+      if (segNow >= 0.5) state.strokeMoved = true;
+      const ptrS = state.pointer;
+      const dabbing = ptrS.down && ptrS.scripted ? ptrS.dabIntended : (brush.age ?? 1) >= values.dabDelay;
+      if (!state.strokeMoved && !dabbing) frameU32[3] = 0;
+      state.smoothSeg = newStroke || !state.strokeMovedBefore ? segNow : state.smoothSeg * 0.6 + segNow * 0.4;
+      state.strokeMovedBefore = state.strokeMoved;
       const speed = Math.min(1, state.smoothSeg / Math.max(4 * values.brushRadius, 1e-3));
       // Dry only once it's well down (below dryBelow full): a brush that's
       // used a little water still lays a solid line at a light touch.
@@ -300,8 +314,14 @@ async function init() {
       // worth per frame, so slow strokes and dabs build up. A spot is under
       // a moving brush for (2r / travel) frames (each substep stamps only its
       // slice of the segment, see the shader).
-      const seg1 = Math.max(state.smoothSeg, 1e-3), w2 = Math.max(2 * frameF32[13], 1e-3);
-      dwell = Math.max(1, values.brushDose * seg1 / w2);
+      // Hand strokes use the smoothed travel (mouse events and frames don't
+      // line up); scripted strokes their exact travel. Moving, at least a
+      // frame's worth per frame; resting, lingerRate frames' worth per frame,
+      // so a held dab builds up but a one-frame hiccup doesn't blot.
+      const seg1 = brush.hand ? state.smoothSeg : Math.hypot(brush.x1 - brush.x0, brush.y1 - brush.y0);
+      const w2 = Math.max(2 * frameF32[13], 1e-3);
+      const moving = Math.hypot(brush.x1 - brush.x0, brush.y1 - brush.y0) >= 0.5;
+      dwell = moving ? Math.max(1, values.brushDose * seg1 / w2) : values.lingerRate;
     }
     frameF32[29] = substeps;
     frameF32[9] = dwell / substeps;
@@ -311,7 +331,7 @@ async function init() {
     frameF32[15] = concMul();
     if (!brush) { frameF32[13] = values.brushRadius; frameF32[24] = 0; }
     frameF32[25] = values.fixTooth;
-    if (brush && !state.brushActive) state.strokeStart = state.simTime;
+    if (newStroke) state.strokeStart = state.simTime;
     frameF32[28] = state.strokeStart ?? 0;
     state.brushActive = !!brush;
     // Brush load: pigment ids at u32 16..19, fractions at f32 20..23.
@@ -615,6 +635,8 @@ async function init() {
     ptr.x = ptr.px = x0; ptr.y = ptr.py = y0; ptr.pressure = p0; ptr.downAt = performance.now(); ptr.down = true;
     state.strokeStart = state.simTime;   // a new stroke
     ptr.pen = true; ptr.side = s0; ptr.scripted = true;   // scripted strokes use their exact pressure and path
+    // A scripted dab repeats its first point; anything else lands moving.
+    ptr.dabIntended = points.length < 2 || (points[1][0] === x0 && points[1][1] === y0);
     if (state.brushType === 'dip') state.reservoir = values.dipLoad;
     let seg = 1, f = 0;
     const step = () => {
