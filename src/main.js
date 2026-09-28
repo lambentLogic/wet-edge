@@ -416,6 +416,7 @@ async function init() {
       dwell = moving ? Math.max(1, values.brushDose * seg1 / w2) : values.lingerRate;
     }
     frameF32[29] = substeps;
+    frameF32[30] = 1 / Math.max(values.simSpeed, 1);   // seconds per step
     frameF32[9] = dwell / substeps;
     frameF32[10] = drying ? values.dryerStrength : 1;
     frameF32[12] = state.simTime;

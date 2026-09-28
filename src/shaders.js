@@ -46,7 +46,8 @@ struct Frame {
   _t0: f32, _t1: f32,
   strokeStart: f32,   // sim time this stroke touched down
   substeps: f32,      // sim steps this frame (the brush's segment is split among them)
-  _f2: f32, _f3: f32,
+  stepSec: f32,       // simulated seconds per step
+  _f3: f32,
   _cid: vec4u,
   carryConc: vec4f,   // x: 1 / the water the brush's carried paint is diluted in
 };
@@ -89,7 +90,7 @@ fn unpackG(g: GP) -> Comp8 {
 const ND: i32 = 8;
 struct Dep { id: array<u32, 8>, amt: array<f32, 8>, stamp: array<f32, 8>, stainK: vec4f, stainS: vec4f };
 // Stored form (112 bytes): the ids packed as bytes into two u32.
-struct DS { stainK: vec4f, stainS: vec4f, ids: vec2u, amt: array<f32, 8>, stamp: array<f32, 8>, mask: f32 };
+struct DS { stainK: vec4f, stainS: vec4f, ids: vec2u, amt: array<f32, 8>, stamp: array<f32, 8>, mask: f32, soak: f32 };
 fn unpackD(d: DS) -> Dep {
   var o: Dep;
   o.stainK = d.stainK; o.stainS = d.stainS; o.amt = d.amt; o.stamp = d.stamp;
@@ -779,6 +780,17 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     wetStart = max(fr.time, 1e-3);
   }
   if (wetStart != aux[i].w) { aux[i].w = wetStart; }
+  // How far the gum of paint dried here earlier has softened: seconds it
+  // has sat under standing water this wetting (damp paper alone doesn't
+  // count), plus scrubbing, which works it faster. Back to 0 once dry.
+  // Softened paint left alone mostly stays where it is: it comes up only at
+  // soakRewet of the rate a brush working at it gets.
+  let work = brushWorkAt(vec2f(f32(x) + 0.5, f32(y) + 0.5));
+  var soakT = D[i].soak;
+  if (a.x > p.wEps) { soakT += fr.stepSec * (1.0 + p.scrubRewet * work); }
+  else if (dryNow) { soakT = 0.0; }
+  if (soakT != D[i].soak) { D[i].soak = soakT; }
+  let soak = smoothstep(0.0, max(p.soakTime, 1e-3), soakT) * mix(clamp(p.soakRewet, 0.0, 1.0), 1.0, work);
 
   var dep = unpackD(D[i]);
   let depIn = dep;
@@ -910,7 +922,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
       // a thick staining line reactivates under a wet brush.
       let liftFree = max(1.0 + (h - 1.0) * gam, 0.0) * rho * p.dt;
       let lift = liftFree / omega;
-      let up = min(rewetUp(dep.amt[j], dep.stamp[j], fixT, lift, liftFree), dep.amt[j]);
+      let up = min(rewetUp(dep.amt[j], dep.stamp[j], fixT, lift, liftFree, soak), dep.amt[j]);
       gAmt[k] += up - down;
       dep.stamp[j] = stampMix(dep.stamp[j], dep.amt[j], down);
       dep.amt[j] += down - up;
@@ -918,7 +930,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
       // fresh deposit, rewets slowly too.
       for (var m = 0; m < ND; m++) {
         if (m != j && dOcc[m] && dep.id[m] == id && dep.stamp[m] < 0.0) {
-          let upB = min(rewetUp(dep.amt[m], dep.stamp[m], fixT, lift, liftFree), dep.amt[m]);
+          let upB = min(rewetUp(dep.amt[m], dep.stamp[m], fixT, lift, liftFree, soak), dep.amt[m]);
           gAmt[k] += upB; dep.amt[m] -= upB;
         }
       }
@@ -1014,13 +1026,30 @@ fn stampTime(stamp: f32) -> f32 { return select(stamp, -stamp - 1.0, stamp < 0.0
 // (staining-limited) rate, the part piled above it as freely as any paint;
 // both slowed if the gum has set (rewetLift for the fibre layer, thickRewet
 // for the pile) and slowed further under fixative.
-fn rewetUp(amt: f32, stamp: f32, fixT: f32, lift: f32, liftFree: f32) -> f32 {
+// soak: how far the gum of bound paint has softened (0: water only just
+// arrived; 1: soaked through, or scrubbed): dried paint stays put under a
+// quick glaze, and only comes up once water has had time to soften it or
+// the brush works at it.
+fn rewetUp(amt: f32, stamp: f32, fixT: f32, lift: f32, liftFree: f32, soak: f32) -> f32 {
   let cap = max(p.stainCapacity, 0.0);
   let low = min(amt, cap);
   let high = max(amt - cap, 0.0);
   if (stamp >= 0.0) { return low * lift + high * liftFree; }
   let fx = select(1.0, p.fixRewet, isFixed(stamp, fixT));
-  return (low * lift * p.rewetLift + high * liftFree * p.thickRewet) * fx;
+  return (low * lift * p.rewetLift + high * liftFree * p.thickRewet) * fx * soak;
+}
+
+// How much a moving brush is working at this spot this step: its footprint
+// (full in the middle, fading to its rim) times how hard it presses, if
+// it's moving at all. Paint and water modes only.
+fn brushWorkAt(q: vec2f) -> f32 {
+  if (fr.brushOn != 1u || (fr.mode != 0u && fr.mode != 1u)) { return 0.0; }
+  let F0 = vec2f(fr.bx0, fr.by0);
+  let FB = vec2f(fr.bx1, fr.by1) - F0;
+  let t = clamp(dot(q - F0, FB) / max(dot(FB, FB), 1e-6), 0.0, 1.0);
+  let dist = length(q - (F0 + FB * t));
+  let r = max(fr.radius, 0.5);
+  return smoothstep(r, r * 0.5, dist) * clamp(fr.pressure, 0.0, 1.0) * min(length(FB) / max(0.05 * r, 0.5), 1.0);
 }
 
 // Is a deposited component under fixative (bound, and dried before the
@@ -1324,7 +1353,7 @@ fn unpackG(g: GP) -> Comp8 {
 const ND: i32 = 8;
 struct Dep { id: array<u32, 8>, amt: array<f32, 8>, stamp: array<f32, 8>, stainK: vec4f, stainS: vec4f };
 // Stored form (112 bytes, see the sim): the ids packed as bytes into two u32.
-struct DS { stainK: vec4f, stainS: vec4f, ids: vec2u, amt: array<f32, 8>, stamp: array<f32, 8>, mask: f32 };
+struct DS { stainK: vec4f, stainS: vec4f, ids: vec2u, amt: array<f32, 8>, stamp: array<f32, 8>, mask: f32, soak: f32 };
 fn unpackD(d: DS) -> Dep {
   var o: Dep;
   o.stainK = d.stainK; o.stainS = d.stainS; o.amt = d.amt; o.stamp = d.stamp;

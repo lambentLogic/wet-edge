@@ -54,6 +54,9 @@ export const PARAMS = [
   { key: 'rewetLift',   v: 0.002, min: 0, max: 1,   group: 'Pigment', target: 'sim', label: 'dried paint rewets' },
   { key: 'stainCapacity', v: 0.015, min: 0, max: 0.2, group: 'Pigment', target: 'sim', label: 'fibres hold (stain capacity)' },
   { key: 'thickRewet',  v: 0.1,   min: 0, max: 1,   group: 'Pigment', target: 'sim', label: 'thick dried paint rewets' },
+  { key: 'soakTime',    v: 30,    min: 0, max: 120, group: 'Pigment', target: 'sim', label: 'dried paint softens after (s under water)' },
+  { key: 'soakRewet',   v: 0.02,   min: 0, max: 1,   group: 'Pigment', target: 'sim', label: 'softened paint left alone lifts (x scrubbed)' },
+  { key: 'scrubRewet',  v: 8,     min: 0, max: 40,  group: 'Pigment', target: 'sim', label: 'scrubbing softens dried paint (x soaking)' },
   { key: 'bindTime',    v: 3,     min: 0, max: 30,  group: 'Pigment', target: 'sim', label: 'gum sets (s, gradually)' },
   // Workable fixative (like SpectraFix: casein in alcohol). Sprayed over
   // dry paint, it commits it (it won't rewet or lift much), partly reverses
