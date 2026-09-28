@@ -73,6 +73,17 @@
   <h1>Hyperreal Watercolor <span id="fps"></span></h1>
   <div id="error"></div>
   <div class="row" id="tools"></div>
+  <div id="washRow" hidden>
+    <div class="row" style="align-items:center">
+      <select id="washKind" title="Flat: even rows, cutting in along the outline and keeping a wet edge. Graded: the same, fading top to bottom. Around what's painted: goes around shapes already on the sheet (tip along their edges, rows in the open)">
+        <option value="flat">Flat wash</option><option value="graded">Graded wash</option><option value="around">Around what's painted</option></select>
+      <select id="washArea" title="How to choose where the wash goes" style="flex:0 0 auto"><option value="lasso">Lasso</option><option value="rect">Rectangle</option><option value="sheet">Whole sheet</option></select>
+      <select id="washWith" title="Lay paint from the brush, or clean water (to wet an area for wet-in-wet)" style="flex:0 0 auto"><option value="paint">Paint</option><option value="water">Clean water</option></select>
+    </div>
+    <label class="studio" id="washFadeRow" title="Graded wash: paint strength at the bottom, as a multiple of the strength at the top (below 1 fades out; above 1 darkens downward)"><span>Fades to</span><input id="washFade" type="range" min="0" max="2" step="0.01" value="0.2"></label>
+    <label class="hint" id="washMistRow" style="display:flex; gap:6px; align-items:center; margin:0 0 6px" title="Mist the open area first so the cut-in strokes and rows melt together instead of drying with their own edges"><input id="washMist" type="checkbox" checked> mist first</label>
+    <p class="hint doc" id="washHint">Draw a loose outline on the paper; the brush fills it. Esc stops.</p>
+  </div>
   <div class="row" id="magnetRow" hidden><select id="magnetShape" title="Magnet shape (R or scroll over a magnet to rotate)" style="flex:0 0 auto"></select></div>
   <div id="palette" title="Paint box: click a pan to load the brush ( [ and ] cycle )"></div>
   <div class="row" style="align-items:center; margin-bottom:4px">

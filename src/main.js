@@ -735,7 +735,7 @@ async function init() {
   // Real-time painting helpers (for scripted painting you can watch): a
   // continuous stroke through points [x, y, pressure?, side?], and the
   // blow-dryer.
-  window.__sim.path = (points, framesPerSeg = 4) => new Promise(done => {
+  window.__sim.path = (points, framesPerSeg = 4) => new Promise((done, stop) => {
     const ptr = state.pointer;
     const [x0, y0, p0 = 1, s0 = 0] = points[0];
     ptr.x = ptr.px = x0; ptr.y = ptr.py = y0; ptr.pressure = p0; ptr.downAt = performance.now(); ptr.down = true;
@@ -746,6 +746,7 @@ async function init() {
     if (state.brushType === 'dip') state.reservoir = values.dipLoad;
     let seg = 1, f = 0;
     const step = () => {
+      if (state.washing && state.cancelWash) { ptr.down = false; stop(new Error('cancelled')); return; }
       if (seg >= points.length) { ptr.down = false; done(); return; }
       f++;
       const [ax, ay, ap = 1, as = 0] = points[seg - 1], [bx, by, bp = 1, bs = 0] = points[seg];
@@ -989,6 +990,8 @@ async function init() {
   // paper dampness, and pigment amounts by name (wet and settled). Reads only
   // the rows it needs.
   window.__sim.sense = async (x, y, r = 6) => {
+    // A point off the sheet senses the nearest edge of it.
+    x = Math.min(W - 1, Math.max(0, x)); y = Math.min(H - 1, Math.max(0, y)); r = Math.max(r, 0.5);
     const y0 = Math.max(0, Math.floor(y - r)), y1 = Math.min(H - 1, Math.ceil(y + r)), rows = y1 - y0 + 1;
     const grab = async (buf, stride) => {
       const size = rows * W * stride;
@@ -1039,6 +1042,35 @@ async function init() {
   window.__sim.layerBlobs = layerBlobs;
   window.__sim.renderOver = renderOver;
   window.__minds = makeMinds(window.__sim);
+  // The Wash tool: a little mind a person can use too. Fills an outline
+  // with the loaded brush, in real time, as one undo step. The painter's
+  // lasso and scripts both call this.
+  window.__sim.washOptions = { kind: 'flat', fadeTo: 0.2, mist: true, water: false, area: 'lasso' };
+  window.__sim.wash = async (outline, opts = {}) => {
+    if (state.washing) throw new Error('a wash is already running');
+    const { kind, fadeTo, mist, water } = { ...window.__sim.washOptions, ...opts };
+    // The whole sheet (a little past its edges, so rows run off the paper).
+    outline ??= [[-8, -8], [W + 8, -8], [W + 8, H + 8], [-8, H + 8]];
+    const M = window.__minds, h = window.__sim.headless;
+    const keep = ['brushRadius', 'brushPigment', 'mistRadius'].map(k => [k, values[k]]);
+    const mode0 = state.mode;   // (the pigment isn't restored: switching pans mid-wash variegates it)
+    window.__sim.checkpoint();
+    state.washing = true; state.cancelWash = false; state.onWash?.();
+    try {
+      h.setMode(water ? 1 : 0);
+      if (kind === 'around') await M.washAround(outline, { mist });
+      else await M.fill(outline, { grade: kind === 'graded' ? [1, fadeTo] : null });
+      return true;
+    } catch (e) {
+      if (e.message !== 'cancelled') throw e;
+      return false;
+    } finally {
+      for (const [k, v] of keep) values[k] = v;
+      state.washing = false; state.cancelWash = false;
+      h.setMode(mode0);
+      uiSync(); drawMagnets(); state.onWash?.();
+    }
+  };
   window.__sim.savePainting = savePainting;
 
   bindPointer(canvas);
@@ -1091,7 +1123,7 @@ function bindPointer(canvas) {
     const ev = { t: performance.now() - (state.recording.t0 ?? (state.recording.t0 = performance.now())), type: e.type, gx, gy,
       pressure: e.pressure, pointerType: e.pointerType, shiftKey: e.shiftKey, altKey: e.altKey, button: e.button, buttons: e.buttons,
       tiltX: e.tiltX, tiltY: e.tiltY, touch: values.mouseTouch };
-    if (e.type === 'pointerdown') Object.assign(ev, { mode: state.mode, brush: JSON.parse(JSON.stringify(state.brush)), brushType: state.brushType, values: { ...values } });
+    if (e.type === 'pointerdown') Object.assign(ev, { mode: state.mode, brush: JSON.parse(JSON.stringify(state.brush)), brushType: state.brushType, values: { ...values }, wash: { ...window.__sim.washOptions } });
     state.recording.push(ev);
   };
   for (const type of ['pointerdown', 'pointermove', 'pointerup']) canvas.addEventListener(type, record);
@@ -1105,7 +1137,7 @@ function bindPointer(canvas) {
       const now = (performance.now() - t0) * speed;
       while (k < events.length && events[k].t <= now) {
         const ev = events[k++];
-        if (ev.values) { Object.assign(values, ev.values); state.brush = ev.brush; state.brushType = ev.brushType; state.mode = ev.mode; }
+        if (ev.values) { Object.assign(values, ev.values); state.brush = ev.brush; state.brushType = ev.brushType; window.__sim.headless.setMode(ev.mode); if (ev.wash) Object.assign(window.__sim.washOptions, ev.wash); }
         values.mouseTouch = ev.touch;
         const r = canvas.getBoundingClientRect();
         canvas.dispatchEvent(new PointerEvent(ev.type, { clientX: r.left + ev.gx / W * r.width, clientY: r.top + ev.gy / H * r.height,
@@ -1167,7 +1199,25 @@ function bindPointer(canvas) {
     }
   });
   canvas.addEventListener('contextmenu', e => { if (state.mode === 3) e.preventDefault(); });
+  // Wash tool: draw a loose outline (a lasso); on release the brush fills
+  // it (sim.wash). Nothing else paints while a wash is running.
+  let lasso = null;
+  const drawLasso = (pts, done = false) => {
+    drawMagnets();
+    const g = document.getElementById('overlay').getContext('2d');
+    g.save();
+    g.setLineDash([6, 5]); g.lineWidth = 2; g.strokeStyle = done ? 'rgba(80,120,200,.35)' : 'rgba(40,80,170,.8)';
+    g.beginPath(); pts.forEach(([x, y], k) => (k ? g.lineTo(x, y) : g.moveTo(x, y))); g.closePath(); g.stroke();
+    g.restore();
+  };
   canvas.addEventListener('pointerdown', e => {
+    if (state.washing) return;
+    if (state.mode === 7) {
+      if (window.__sim.washOptions.area === 'sheet') { window.__sim.wash(null).catch(err => fail(`Wash: ${err.message}`)); return; }
+      lasso = [toGrid(e)];
+      try { canvas.setPointerCapture(e.pointerId); } catch {}
+      return;
+    }
     if (state.mode !== 3) window.__sim.checkpoint();   // each stroke can be undone
     if (state.brushType === 'dip') state.reservoir = values.dipLoad;   // a dip brush is reloaded each stroke (Wetness: how full)
     if (state.mode === 3) {
@@ -1198,6 +1248,16 @@ function bindPointer(canvas) {
     state.strokeStart = state.simTime;   // a new stroke
   });
   canvas.addEventListener('pointermove', e => {
+    if (lasso) {
+      const p = toGrid(e), q = lasso[lasso.length - 1];
+      if (window.__sim.washOptions.area === 'rect') {
+        const [a] = lasso;
+        lasso = [a, p];
+        drawLasso([a, [p[0], a[1]], p, [a[0], p[1]]]);
+      } else if (Math.hypot(p[0] - q[0], p[1] - q[1]) > 4) { lasso.push(p); drawLasso(lasso); }
+      return;
+    }
+    if (state.washing) return;
     if (dragMagnet) { [dragMagnet.x, dragMagnet.y] = toGrid(e); drawMagnets(); return; }
     [ptr.x, ptr.y] = toGrid(e);
     ptr.pressure = pressureOf(e);
@@ -1228,6 +1288,19 @@ function bindPointer(canvas) {
   };
   requestAnimationFrame(tick);
   const up = () => {
+    if (lasso) {
+      let pts = lasso; lasso = null;
+      if (window.__sim.washOptions.area === 'rect' && pts.length === 2) {
+        const [[ax, ay], [bx, by]] = pts;
+        pts = Math.abs(bx - ax) > 4 && Math.abs(by - ay) > 4 ? [[ax, ay], [bx, ay], [bx, by], [ax, by]] : [];
+      }
+      if (pts.length >= 3) {
+        drawLasso(pts, true);
+        window.__sim.wash(pts).catch(err => fail(`Wash: ${err.message}`));
+      } else drawMagnets();
+      return;
+    }
+    if (state.washing) return;
     ptr.down = false;
     // A magnet dragged off the paper is removed.
     if (dragMagnet && (dragMagnet.x < 0 || dragMagnet.y < 0 || dragMagnet.x > W || dragMagnet.y > H)) removeMagnet(dragMagnet);
@@ -1609,10 +1682,30 @@ function buildUI({ clear, newPaper, acts }) {
     return b;
   });
   const magnetRow = document.getElementById('magnetRow');
+  // The Wash tool's settings (sim.washOptions, shared with scripts).
+  const washRow = document.getElementById('washRow');
+  const wo = window.__sim.washOptions;
+  const washKind = document.getElementById('washKind'), washWith = document.getElementById('washWith');
+  const washFade = document.getElementById('washFade'), washMist = document.getElementById('washMist');
+  const showWash = () => {
+    document.getElementById('washFadeRow').hidden = wo.kind !== 'graded';
+    document.getElementById('washMistRow').hidden = wo.kind !== 'around';
+  };
+  washKind.addEventListener('change', () => { wo.kind = washKind.value; showWash(); });
+  washWith.addEventListener('change', () => { wo.water = washWith.value === 'water'; });
+  const washArea = document.getElementById('washArea');
+  washArea.addEventListener('change', () => { wo.area = washArea.value; washHint.textContent = WASH_HINTS[wo.area]; });
+  const washHint = document.getElementById('washHint');
+  const WASH_HINTS = { lasso: 'Draw a loose outline on the paper; the brush fills it. Esc stops.', rect: 'Drag a rectangle on the paper; the brush fills it. Esc stops.', sheet: 'Click the paper to wash the whole sheet. Esc stops.' };
+  washFade.addEventListener('input', () => { wo.fadeTo = +washFade.value; });
+  washMist.addEventListener('change', () => { wo.mist = washMist.checked; });
+  washFade.addEventListener('dblclick', () => { washFade.value = wo.fadeTo = 0.2; });
+  showWash();
   const setMode = m => {
     state.mode = m;
     TOOLS.forEach((t, i) => toolBtns[i].classList.toggle('on', t.mode === m));
     magnetRow.hidden = m !== 3;
+    washRow.hidden = m !== 7;
     showStudio();
   };
   const setTool = name => {
@@ -1646,6 +1739,7 @@ function buildUI({ clear, newPaper, acts }) {
     flipMagnets: () => flipMagnets(),
     removeMagnets: () => { state.magnets = []; drawMagnets(); },
     record: () => toggleRecord(),
+    stop: () => { if (state.washing) state.cancelWash = true; },
   };
   const rows = { sheet: 'sheetActions', magnet: 'magnetRow', history: 'historyActions', file: 'fileActions' };
   for (const a of ACTIONS) {
@@ -1663,6 +1757,8 @@ function buildUI({ clear, newPaper, acts }) {
     btns[a.name] = b;
   }
   btns.restore.hidden = true;
+  btns.stop.hidden = true;
+  state.onWash = () => { btns.stop.hidden = !state.washing; };
   window.__sim.tool = setTool;
   window.__sim.act = (name, ...args) => {
     if (!act[name]) throw new Error(`unknown action ${name}; actions: ${ACTIONS.map(a => a.name).join(', ')}`);
@@ -1718,6 +1814,7 @@ function buildUI({ clear, newPaper, acts }) {
       return;
     }
     if (e.metaKey || e.ctrlKey) return;
+    if (e.key === 'Escape') { act.stop(); return; }
     const tool = TOOLS.find(t => t.key === e.key);
     if (tool) setMode(tool.mode);
     else if (e.key === 'f') act.flipMagnets();

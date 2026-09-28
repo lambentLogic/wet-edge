@@ -14,6 +14,7 @@ export const TOOLS = [
   { name: 'mist',   mode: 4, key: '5', label: 'Mist',   doc: 'Spray bottle: fine droplets over a wide cone that dampen the paper, so strokes laid into it melt together.' },
   { name: 'blot',   mode: 6, key: '7', label: 'Blot',   doc: 'Press a crumpled paper towel on wet paint to soak it up, leaving a mottled crease texture.' },
   { name: 'mask',   mode: 5, key: '6', label: 'Mask',   doc: 'Masking fluid: a rubber film on dry paper or dried paint that washes flow around. Peel it with Remove mask.' },
+  { name: 'wash',   mode: 7, key: '8', label: 'Wash',   doc: 'Choose an area (lasso, rectangle or the whole sheet) and the loaded brush lays a wash in it, in real time: flat, graded, or around whatever is already painted there. Esc stops it; Cmd+Z takes the whole wash back.' },
   { name: 'magnet', mode: 3, key: '4', label: 'Magnet', doc: 'Place a magnet under the paper (it pulls magnetic pigments such as Mars black). Drag to move; double-click, drag off the sheet or press Delete to remove; R or scroll to rotate.' },
 ];
 
@@ -30,6 +31,8 @@ export const ACTIONS = [
     doc: 'Spray workable fixative (like SpectraFix) over the sheet: commits the dry paint so it barely rewets or lifts, deepens it a little, fills some tooth and seals the paper.' },
   { name: 'unmask',     group: 'sheet',   label: 'Remove mask',
     doc: 'Peel off all masking fluid. Some dried paint under it comes away too, more for non-staining pigments.' },
+  { name: 'stop',       group: 'sheet',   label: 'Stop wash', key: 'Esc',
+    doc: 'Stop a wash in progress (what it painted stays; Cmd+Z takes it back).' },
   { name: 'pause',      group: 'sheet',   label: 'Pause', key: 'Space', toggle: true,
     doc: 'Stop time: nothing flows or dries until unpaused.' },
   { name: 'clear',      group: 'sheet',   label: 'Clear', key: 'C',
@@ -103,6 +106,8 @@ export const SCRIPT_API = [
   { call: 'sim.pigments.edit(name, changes)', probe: 'sim.pigments.edit', doc: 'Change a pigment\'s recipe; it is rebuilt (colour fit included) and applies everywhere at once. The painter\'s edits live in their browser and in saved paintings; a headless page starts from the built-in box.' },
   { call: 'sim.pigments.add(from, name, changes)', probe: 'sim.pigments.add', doc: 'A new pan starting from another pigment\'s recipe. Returns its id. The box holds 32.' },
   { call: 'sim.pigments.reset(name) / remove(name) / recipes()', probe: 'sim.pigments.reset', doc: 'Back to the built-in recipe; remove the newest pigment of one\'s own; every recipe that differs from the built-in box.' },
+  { section: 'The Wash tool' },
+  { call: 'sim.wash(outline, { kind, fadeTo, mist, water })', probe: 'sim.wash', doc: 'What the Wash tool does with the painter\'s lasso: fill the outline ([[x, y], ...], or null for the whole sheet) with the loaded brush. kind: \'flat\' (fill), \'graded\' (strength fades top to bottom to fadeTo × paint strength) or \'around\' (washAround: goes around paint already there; mist: spray first). water: true for clean water (wetting an area for wet-in-wet). One undo step; resolves false if stopped. The panel\'s settings are sim.washOptions.' },
   { section: 'Little minds (src/minds.js, window.__minds)' },
   { call: 'M.fill(poly, { grade, mode })', probe: '__minds.fill',
     doc: 'Paint a polygon evenly with the loaded brush (rows, cutting in along the edge, rewetting edges that start to dry). grade: [start, end] multiplies paint strength top to bottom.' },

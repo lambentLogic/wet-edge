@@ -39,6 +39,7 @@ window.__paintDone = (async () => {
 | `mist` | 5 | Spray bottle: fine droplets over a wide cone that dampen the paper, so strokes laid into it melt together. |
 | `blot` | 7 | Press a crumpled paper towel on wet paint to soak it up, leaving a mottled crease texture. |
 | `mask` | 6 | Masking fluid: a rubber film on dry paper or dried paint that washes flow around. Peel it with Remove mask. |
+| `wash` | 8 | Choose an area (lasso, rectangle or the whole sheet) and the loaded brush lays a wash in it, in real time: flat, graded, or around whatever is already painted there. Esc stops it; Cmd+Z takes the whole wash back. |
 | `magnet` | 4 | Place a magnet under the paper (it pulls magnetic pigments such as Mars black). Drag to move; double-click, drag off the sheet or press Delete to remove; R or scroll to rotate. |
 
 ## Actions
@@ -50,6 +51,7 @@ window.__paintDone = (async () => {
 | `dry` (held: on/off) | D | A hair dryer over the whole sheet while held: water evaporates much faster (see the dryer knob). |
 | `fix` |  | Spray workable fixative (like SpectraFix) over the sheet: commits the dry paint so it barely rewets or lifts, deepens it a little, fills some tooth and seals the paper. |
 | `unmask` |  | Peel off all masking fluid. Some dried paint under it comes away too, more for non-staining pigments. |
+| `stop` | Esc | Stop a wash in progress (what it painted stays; Cmd+Z takes it back). |
 | `pause` | Space | Stop time: nothing flows or dries until unpaused. |
 | `clear` | C | Wipe the sheet back to clean paper (undoable). |
 | `newPaper` |  | A fresh sheet of the chosen paper, with a new random texture. |
@@ -86,6 +88,10 @@ Other keys: [ ] previous / next pigment · Shift-drag side of the brush · Z / X
 - `sim.pigments.edit(name, changes)`: Change a pigment's recipe; it is rebuilt (colour fit included) and applies everywhere at once. The painter's edits live in their browser and in saved paintings; a headless page starts from the built-in box.
 - `sim.pigments.add(from, name, changes)`: A new pan starting from another pigment's recipe. Returns its id. The box holds 32.
 - `sim.pigments.reset(name) / remove(name) / recipes()`: Back to the built-in recipe; remove the newest pigment of one's own; every recipe that differs from the built-in box.
+
+## The Wash tool
+
+- `sim.wash(outline, { kind, fadeTo, mist, water })`: What the Wash tool does with the painter's lasso: fill the outline ([[x, y], ...], or null for the whole sheet) with the loaded brush. kind: 'flat' (fill), 'graded' (strength fades top to bottom to fadeTo × paint strength) or 'around' (washAround: goes around paint already there; mist: spray first). water: true for clean water (wetting an area for wet-in-wet). One undo step; resolves false if stopped. The panel's settings are sim.washOptions.
 
 ## Little minds (src/minds.js, window.__minds)
 
