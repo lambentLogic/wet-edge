@@ -7,6 +7,7 @@
 <style>
   :root { --bg: #1d1c1a; --panel: #262522; --ink: #e9e4da; --dim: #9a9489; --accent: #7fa7d9; }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
     font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; }
   body { display: flex; }
@@ -49,6 +50,13 @@
   #loadBar { height: 100%; width: 100%; background: var(--accent); transition: width 60ms linear; }
   .hint { color: var(--dim); font-size: 11px; margin-top: 10px; }
   #error { color: #e98a7a; }
+  .hint.doc { margin: 2px 0 6px; }
+  .knob span { cursor: help; }
+  .studio { display: grid; grid-template-columns: 92px 1fr; gap: 6px; align-items: center; margin: 0 0 4px; }
+  .studio span { color: var(--dim); font-size: 11px; cursor: help; }
+  .studio input { width: 100%; accent-color: var(--accent); }
+  .labToggle { display: flex; gap: 6px; align-items: center; margin: 10px 0 6px; cursor: pointer; }
+  #lab details details { margin-left: 8px; }
 </style>
 </head>
 <body>
@@ -56,16 +64,8 @@
 <aside>
   <h1>Hyperreal Watercolor <span id="fps"></span></h1>
   <div id="error"></div>
-  <div class="row">
-    <button data-mode="0">Paint</button>
-    <button data-mode="1">Water</button>
-    <button data-mode="2">Lift</button>
-    <button data-mode="4" title="Mist: spray the paper with fine droplets and dampen it, so strokes laid into it melt together (key 5)">Mist</button>
-    <button data-mode="6" title="Blot: press a crumpled paper towel on wet paint to soak it up, with a mottled crease texture (key 7)">Blot</button>
-    <button data-mode="5" title="Masking fluid: paint a rubber film on dry paper or dried paint; washes flow around it. Remove mask peels it off (key 6)">Mask</button>
-    <button data-mode="3" title="Click to place a magnet under the paper, drag to move. Remove: double-click it, drag it off the paper, or Delete after touching it">Magnet</button>
-    <select id="magnetShape" title="Magnet shape (R or scroll over a magnet to rotate)" style="flex:0 0 auto"></select>
-  </div>
+  <div class="row" id="tools"></div>
+  <div class="row" id="magnetRow" hidden><select id="magnetShape" title="Magnet shape (R or scroll over a magnet to rotate)" style="flex:0 0 auto"></select></div>
   <div id="palette" title="Paint box: click a pan to load the brush ( [ and ] cycle )"></div>
   <div class="row" style="align-items:center; margin-bottom:4px">
     <span class="hint" style="margin:0; flex:1">Mixing wells · shift-click a pan to add a dab</span>
@@ -77,40 +77,19 @@
   <div class="row" style="align-items:center; margin-bottom:4px">
     <select id="brushType" title="Brush. Dip brushes reload every stroke. The water brush keeps its pigment and water between strokes: click a pan to pick up a dab, hold Q to squeeze water in, E to wipe the pigment out."></select>
   </div>
-  <label class="row hint" style="align-items:center; margin:0 0 4px" title="How much pigment the brush picks up: a pale wash to thick paint (same as the Brush knob 'pigment concentration')">Paint strength
-    <input id="strength" type="range" min="0.02" max="1.5" step="0.01" style="flex:1"></label>
-  <label class="row hint" style="align-items:center; margin:0 0 4px" title="Mouse and trackpad pressure: hold Z (or Option) to lighten, X to press harder; it stays where you leave it">Touch
-    <input id="touch" type="range" min="0.02" max="1" step="0.01" style="flex:1"></label>
-  <label class="row hint" style="align-items:center; margin:0 0 4px" title="How much water a dip brush picks up each time: turn it down for a blotted, dry-ish brush (dry-brush skips)">Wetness
-    <input id="wetness" type="range" min="0.05" max="1" step="0.01" style="flex:1"></label>
+  <div id="studio"></div>
   <div id="loadWrap" title="Water in the brush"><div id="loadBar"></div></div>
   <div id="pigWrap" title="Pigment in the brush"><div id="pigBar"></div></div>
   <div class="row"><select id="paperType" title="Paper texture and physics"></select><select id="tone" title="Paper tone" style="flex:0 0 auto"></select></div>
-  <div class="row">
-    <button id="dry">Blow-dry (hold)</button>
-    <button id="fix" title="Spray workable fixative over the whole sheet (like SpectraFix): commits the dry paint, deepens it a little, fills some tooth and seals the paper">Fix (spray)</button>
-    <button id="unmask" title="Peel off all masking fluid. Some dried paint under it comes away too, more for non-staining pigments">Remove mask</button>
-    <button id="pause">Pause</button>
-    <button id="clear">Clear</button>
-    <button id="flipMagnets" title="Flip every magnet's pole (F)">Flip poles</button>
-    <button id="clearMagnets">Remove magnets</button>
-    <button id="paper">New paper</button>
-    <button id="reset">Reset knobs</button>
-  </div>
-  <div class="row">
-    <button id="savePNG" title="Download the painting as a PNG">Save PNG</button>
-    <button id="saveLayer" title="Download just the paint, on a transparent background">Save layer</button>
-    <button id="savePainting" title="Download the full paint state, to reopen and keep working (even rewet) later">Save painting</button>
-    <button id="openPainting" title="Open a saved painting">Open…</button>
-    <button id="undo" title="Undo the last stroke (Cmd+Z)">Undo</button>
-    <button id="redo" title="Redo (Shift+Cmd+Z)">Redo</button>
-    <button id="record" title="Record your strokes (pointer input and settings) to a file, to replay exactly">Record strokes</button>
-    <input id="openInput" type="file" accept=".wcpaint" hidden>
-    <button id="restorePainting" hidden>Restore</button>
-  </div>
-  <div id="knobs"></div>
-  <p class="hint">Keys: 1 paint · 2 water · 3 lift · Shift-drag side of brush · hold Z / X for a lighter / heavier touch · 4 magnet (R / scroll to rotate; double-click or drag off to remove) · F flip poles · [ ] pigment · hold D to dry · space pause · C clear · Cmd+Z undo, Shift+Cmd+Z redo.
-    Number boxes are unclamped.</p>
+  <div class="row" id="sheetActions"></div>
+  <div class="row" id="historyActions"></div>
+  <details id="fileMenu"><summary>File</summary><div class="row" id="fileActions"></div></details>
+  <details id="brushDetails"><summary>Build: brush</summary><p class="hint doc">What the chosen brush is made of. Choosing a brush resets these.</p><div id="brushKnobs"></div></details>
+  <details id="paperDetails"><summary>Build: paper</summary><p class="hint doc">How the chosen paper behaves. Choosing a paper resets these.</p><div id="paperKnobs"></div></details>
+  <input id="openInput" type="file" accept=".wcpaint" hidden>
+  <p class="hint" id="keys"></p>
+  <label class="hint labToggle" title="The laws of the medium: global constants the pigments, paper and brushes are calibrated against. Changing them changes everything at once."><input type="checkbox" id="labToggle"> Show the lab (laws of the medium)</label>
+  <div id="lab" hidden><p class="hint doc">Global laws. Each pigment, brush and paper has its own character on top of these; a knob here changes all of them at once. Number boxes are unclamped. <button id="reset">Reset knobs</button></p><div id="knobs"></div></div>
 </aside>
 <script type="module" src="src/main.js"></script>
 </body>

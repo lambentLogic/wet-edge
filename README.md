@@ -13,7 +13,7 @@ python3 tools/serve.py        # no-cache dev server
 # http://127.0.0.1:8765/
 ```
 
-Keys: `1` paint · `2` water · `3` lift · hold `D` to blow-dry · space pause · `C` clear.
+Keys are listed at the bottom of the panel. Agents: see [AGENTS.md](AGENTS.md).
 
 ## Layout
 
@@ -21,7 +21,9 @@ Keys: `1` paint · `2` water · `3` lift · hold `D` to blow-dry · space pause 
 - `src/params.js` — the knob table; the WGSL `Params` struct is generated from it
 - `src/paper.js` — procedural paper height field (noise + fibers)
 - `src/pigments.js` — K/S values after Curtis et al.
-- `window.__sim` — debug hooks (`stats()`, `read()`, `stroke()`, `clear()`, `values`)
+- `src/actions.js` — every tool and action by name, for the page and for scripts (`sim.tool`, `sim.act`)
+- `src/knob-docs.js` — plain-language docs for every knob (panel tooltips and AGENTS.md)
+- `window.__sim` — the script interface (see AGENTS.md)
 
 ## Measuring
 

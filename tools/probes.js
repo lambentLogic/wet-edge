@@ -760,5 +760,24 @@
     },
   };
 
+  // Agent/human parity: every documented script call exists, every tool
+  // and action runs by name, and every knob has a plain-language doc.
+  probes.api = async () => {
+    const { TOOLS, ACTIONS, SCRIPT_API, STUDIO } = await import('/src/actions.js');
+    const { KNOB_DOCS } = await import('/src/knob-docs.js');
+    const { PARAMS } = await import('/src/params.js');
+    const missing = [];
+    for (const e of SCRIPT_API.filter(e => e.probe)) {
+      const v = e.probe.split('.').reduce((o, k) => o?.[k], { sim: S, __minds: window.__minds });
+      if (v === undefined) missing.push(e.probe);
+    }
+    for (const t of TOOLS) { S.tool(t.name); if (h.mode() !== t.mode) missing.push(`tool ${t.name}`); }
+    S.tool('paint');
+    const safe = ['pause', 'dry', 'flipMagnets', 'removeMagnets'];
+    for (const a of safe) { S.act(a, a === 'pause' || a === 'dry' ? true : undefined); if (a === 'pause' || a === 'dry') S.act(a, false); }
+    const undocumented = PARAMS.filter(p => !KNOB_DOCS[p.key]?.doc).map(p => p.key);
+    const studioBad = STUDIO.filter(k => !PARAMS.some(p => p.key === k.key)).map(k => k.key);
+    return { missing, undocumented, studioBad, tools: TOOLS.length, actions: ACTIONS.length, calls: SCRIPT_API.filter(e => e.call).length };
+  };
   window.__probes = { ...probes, withValues };
 })();

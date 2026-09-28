@@ -3,6 +3,8 @@ import { simWGSL, renderWGSL, MAX_PIGMENTS, MAX_CHARGES } from './shaders.js';
 import { SHAPES, buildCharges, drawMagnet, hitMagnet } from './magnets.js';
 import { BRUSHES, DEFAULT_BRUSH } from './brushes.js';
 import { makeMinds } from './minds.js';
+import { TOOLS, ACTIONS, STUDIO, KEYS } from './actions.js';
+import { KNOB_DOCS } from './knob-docs.js';
 import { makePaper, PAPERS, DEFAULT_PAPER, TONES } from './paper.js';
 import { PIGMENTS, STAIN_MAP } from './pigments.js';
 import { NB, upsample, srgbToLinear, TO_RGB } from './spectral.js';
@@ -679,7 +681,7 @@ async function init() {
     };
     requestAnimationFrame(step);
   });
-  window.__sim.setDrying = on => { state.drying = on; document.getElementById('dry').classList.toggle('on', on); };
+  window.__sim.setDrying = on => window.__sim.act('dry', on);
   // Spray workable fixative over the whole sheet (applied on the next step).
   // ---- undo: full snapshots of the paper on the GPU (about 145 MB each;
   // a copy takes a few milliseconds), taken at the start of every stroke and
@@ -963,12 +965,25 @@ async function init() {
   window.__sim.savePainting = savePainting;
 
   bindPointer(canvas);
-  buildUI({ clear, newPaper });
-  document.getElementById('savePNG').addEventListener('click', () => savePNG().catch(e => fail(e.message)));
-  document.getElementById('saveLayer').addEventListener('click', () => saveLayer().catch(e => fail(e.message)));
-  document.getElementById('savePainting').addEventListener('click', () => savePainting().catch(e => fail(e.message)));
+  const openInput = document.getElementById('openInput');
+  openInput.addEventListener('change', () => {
+    if (openInput.files[0]) openPainting(openInput.files[0]).catch(e => fail(`Couldn't open painting: ${e.message}`));
+    openInput.value = '';
+  });
+  let restoreNext = () => {};
+  const { btns } = buildUI({ clear, newPaper, acts: {
+    fix: () => window.__sim.fix(),
+    unmask: () => window.__sim.unmask(),
+    undo: () => window.__sim.undo(),
+    redo: () => window.__sim.redo(),
+    savePNG: () => savePNG().catch(e => fail(e.message)),
+    saveLayer: () => saveLayer().catch(e => fail(e.message)),
+    savePainting: () => savePainting().catch(e => fail(e.message)),
+    open: () => openInput.click(),
+    restore: () => restoreNext(),
+  } });
   // Restore: offer the autosaves, newest first.
-  const restoreBtn = document.getElementById('restorePainting');
+  const restoreBtn = btns.restore;
   const ago = at => { const m = Math.round((Date.now() - at) / 60000); return m < 1 ? 'just now' : m < 90 ? `${m} min ago` : new Date(at).toLocaleString(); };
   (async () => {
     const saves = (await Promise.all(['latest', 'previous'].map(k => autosave.get(k).catch(() => null)))).filter(Boolean);
@@ -976,16 +991,10 @@ async function init() {
     let k = 0;
     const label = () => { restoreBtn.textContent = `Restore (${ago(saves[k].at)})`; restoreBtn.title = saves.length > 1 ? 'Restore the autosave; click again for the one before' : 'Restore the autosave'; };
     label(); restoreBtn.hidden = false;
-    restoreBtn.addEventListener('click', () => {
+    restoreNext = () => {
       openPainting(saves[k].blob).then(() => { k = (k + 1) % saves.length; label(); }).catch(e => fail(`Couldn't restore: ${e.message}`));
-    });
+    };
   })();
-  const openInput = document.getElementById('openInput');
-  document.getElementById('openPainting').addEventListener('click', () => openInput.click());
-  openInput.addEventListener('change', () => {
-    if (openInput.files[0]) openPainting(openInput.files[0]).catch(e => fail(`Couldn't open painting: ${e.message}`));
-    openInput.value = '';
-  });
   requestAnimationFrame(frame);
 }
 
@@ -1156,39 +1165,85 @@ function bindPointer(canvas) {
 let uiSync = () => {};
 let inputs_mouseTouch = v => {};   // set by buildUI
 
-function buildUI({ clear, newPaper }) {
-  const panel = document.getElementById('knobs');
-  const groups = {};
-  const inputs = {};
-  for (const p of PARAMS) {
-    if (!groups[p.group]) {
-      const det = document.createElement('details');
-      det.open = p.group !== 'Render';
-      det.innerHTML = `<summary>${p.group}</summary>`;
-      panel.appendChild(det);
-      groups[p.group] = det;
-    }
+function buildUI({ clear, newPaper, acts }) {
+  // Knobs live in three places: the studio (turned while painting), the
+  // builders (what the chosen brush and paper are made of; choosing a preset
+  // resets them), and the lab (global laws, hidden unless asked for).
+  const inputs = {}, setters = {};
+  const studioKeys = new Set(STUDIO.map(k => k.key));
+  const brushKeys = new Set(Object.values(BRUSHES).flatMap(b => Object.keys(b.knobs)).filter(k => !studioKeys.has(k)));
+  const paperKeys = new Set(Object.values(PAPERS).flatMap(pp => Object.keys(pp.knobs ?? {})).filter(k => !studioKeys.has(k)));
+  const docOf = p => KNOB_DOCS[p.key]?.doc ?? '';
+  const knobRow = (p, parent) => {
     const row = document.createElement('label');
     row.className = 'knob';
+    row.title = docOf(p);
     const range = Object.assign(document.createElement('input'), {
       type: 'range', min: p.min, max: p.max, step: (p.max - p.min) / 1000, value: p.v,
     });
     const num = Object.assign(document.createElement('input'), { type: 'number', step: 'any', value: p.v });
     const name = document.createElement('span');
     name.textContent = p.label ?? p.key;
-    const set = v => {
-      if (!Number.isFinite(v)) return;
-      values[p.key] = v; range.value = v; num.value = +v.toPrecision(4);
-      if (p.key === 'brushPigment') document.getElementById('strength').value = v;   // the panel's sliders
-      if (p.key === 'mouseTouch') document.getElementById('touch').value = v;
-      if (p.key === 'dipLoad') document.getElementById('wetness').value = v;
-    };
-    range.addEventListener('input', () => set(parseFloat(range.value)));
-    num.addEventListener('change', () => set(parseFloat(num.value)));
-    inputs[p.key] = set;
+    range.addEventListener('input', () => inputs[p.key](parseFloat(range.value)));
+    num.addEventListener('change', () => inputs[p.key](parseFloat(num.value)));
+    (setters[p.key] ??= []).push(v => { range.value = v; num.value = +v.toPrecision(4); });
     row.append(name, range, num);
-    groups[p.group].appendChild(row);
+    parent.appendChild(row);
+  };
+  const byKey = Object.fromEntries(PARAMS.map(p => [p.key, p]));
+  const studioEl = document.getElementById('studio');
+  const studioRows = STUDIO.map(k => {
+    const p = byKey[k.key];
+    const row = document.createElement('label');
+    row.className = 'studio';
+    row.title = k.doc;
+    const name = document.createElement('span');
+    name.textContent = k.label;
+    const range = Object.assign(document.createElement('input'), {
+      type: 'range', min: k.min ?? p.min, max: k.max ?? p.max, step: ((k.max ?? p.max) - (k.min ?? p.min)) / 500, value: p.v,
+    });
+    range.addEventListener('input', () => inputs[k.key](parseFloat(range.value)));
+    (setters[k.key] ??= []).push(v => { range.value = v; });
+    row.append(name, range);
+    studioEl.appendChild(row);
+    return { k, row };
+  });
+  const showStudio = () => {
+    for (const { k, row } of studioRows) {
+      row.hidden = (k.tool && TOOLS.find(t => t.name === k.tool).mode !== state.mode) || (k.flat && values.brushShape < 0.5);
+    }
+  };
+  const lab = document.getElementById('knobs');
+  const groups = {};
+  const labGroup = name => {
+    if (!groups[name]) {
+      const det = document.createElement('details');
+      det.innerHTML = `<summary>${name}</summary>`;
+      lab.appendChild(det);
+      groups[name] = det;
+    }
+    return groups[name];
+  };
+  for (const p of PARAMS) {
+    inputs[p.key] = v => {
+      if (!Number.isFinite(v)) return;
+      values[p.key] = v;
+      for (const set of setters[p.key] ?? []) set(v);
+      if (p.key === 'brushShape') showStudio();
+    };
+    if (studioKeys.has(p.key)) continue;
+    if (brushKeys.has(p.key)) knobRow(p, document.getElementById('brushKnobs'));
+    else if (paperKeys.has(p.key)) knobRow(p, document.getElementById('paperKnobs'));
+    else knobRow(p, labGroup(KNOB_DOCS[p.key]?.tier === 'dev' ? 'Performance and debugging' : p.group));
   }
+  const dev = groups['Performance and debugging'];
+  if (dev) lab.appendChild(dev);   // last
+  const labToggle = document.getElementById('labToggle'), labEl = document.getElementById('lab');
+  const LAB_KEY = 'hyperreal-watercolor.lab';
+  try { labToggle.checked = localStorage.getItem(LAB_KEY) === '1'; } catch {}
+  const showLab = () => { labEl.hidden = !labToggle.checked; try { localStorage.setItem(LAB_KEY, labToggle.checked ? '1' : '0'); } catch {} };
+  labToggle.addEventListener('change', showLab);
+  showLab();
 
   // Paint box: every pigment in the library. Clicking a pan loads the brush
   // with it; Shift-clicking (or clicking with Mix on) adds a dab of it to
@@ -1240,6 +1295,7 @@ function buildUI({ clear, newPaper }) {
   const applyBrush = key => {
     const b = BRUSHES[key];
     for (const [k, v] of Object.entries(b.knobs)) inputs[k](v);
+    document.getElementById('brushDetails').querySelector('summary').textContent = `Build: brush (${b.name})`;
     state.brushType = b.type;
     state.reservoir = 1; state.pigStore = 1;
     brushSel.value = key;
@@ -1348,57 +1404,94 @@ function buildUI({ clear, newPaper }) {
 
   setPigment(0);
 
-  const modeBtns = [...document.querySelectorAll('[data-mode]')];
-  const setMode = m => { state.mode = m; modeBtns.forEach(b => b.classList.toggle('on', +b.dataset.mode === m)); };
-  modeBtns.forEach(b => b.addEventListener('click', () => setMode(+b.dataset.mode)));
+  // Tools and actions, from the shared tables (src/actions.js); scripts use
+  // the same ones through sim.tool(name) and sim.act(name, ...args).
+  const toolBtns = TOOLS.map(t => {
+    const b = document.createElement('button');
+    b.textContent = t.label;
+    b.title = `${t.doc} (key ${t.key})`;
+    b.addEventListener('click', () => setTool(t.name));
+    document.getElementById('tools').appendChild(b);
+    return b;
+  });
+  const magnetRow = document.getElementById('magnetRow');
+  const setMode = m => {
+    state.mode = m;
+    TOOLS.forEach((t, i) => toolBtns[i].classList.toggle('on', t.mode === m));
+    magnetRow.hidden = m !== 3;
+    showStudio();
+  };
+  const setTool = name => {
+    const t = TOOLS.find(t => t.name === name);
+    if (!t) throw new Error(`unknown tool ${name}; tools: ${TOOLS.map(t => t.name).join(', ')}`);
+    setMode(t.mode);
+  };
   setMode(0);
 
-  document.getElementById('fix').addEventListener('click', () => window.__sim.fix());
-  document.getElementById('undo').addEventListener('click', () => window.__sim.undo());
-  const recBtn = document.getElementById('record');
-  recBtn.addEventListener('click', () => {
+  const btns = {};
+  const dryBtn = () => btns.dry;
+  const setDry = on => { state.drying = on; dryBtn().classList.toggle('on', on); };
+  const pauseBtn = () => btns.pause;
+  const togglePause = (on = !state.paused) => { state.paused = on; pauseBtn().classList.toggle('on', state.paused); };
+  const recBtn = () => btns.record;
+  const toggleRecord = () => {
     if (state.recording) {
       const rec = { version: 1, W, H, paper: state.paper, tone: state.tone, events: state.recording };
-      state.recording = null; recBtn.classList.remove('on'); recBtn.textContent = 'Record strokes';
+      state.recording = null; recBtn().classList.remove('on'); recBtn().textContent = 'Record strokes';
       if (rec.events.length) download(new Blob([JSON.stringify(rec)], { type: 'application/json' }), `strokes-${stamp()}.json`);
     } else {
-      state.recording = []; recBtn.classList.add('on'); recBtn.textContent = 'Stop and save strokes';
+      state.recording = []; recBtn().classList.add('on'); recBtn().textContent = 'Stop and save strokes';
     }
-  });
-  document.getElementById('redo').addEventListener('click', () => window.__sim.redo());
-  document.getElementById('unmask').addEventListener('click', () => window.__sim.unmask());
-  const dryBtn = document.getElementById('dry');
-  const setDry = on => { state.drying = on; dryBtn.classList.toggle('on', on); };
-  dryBtn.addEventListener('pointerdown', () => setDry(true));
-  for (const ev of ['pointerup', 'pointerleave']) dryBtn.addEventListener(ev, () => setDry(false));
+  };
+  const act = {
+    ...acts,
+    dry: (on = true) => setDry(on),
+    pause: on => togglePause(on),
+    clear: () => clear(),
+    newPaper: () => newPaper(),
+    flipMagnets: () => flipMagnets(),
+    removeMagnets: () => { state.magnets = []; drawMagnets(); },
+    record: () => toggleRecord(),
+  };
+  const rows = { sheet: 'sheetActions', magnet: 'magnetRow', history: 'historyActions', file: 'fileActions' };
+  for (const a of ACTIONS) {
+    if (!act[a.name]) throw new Error(`action ${a.name} has no implementation`);
+    const b = document.createElement('button');
+    b.textContent = a.label;
+    b.title = a.doc + (a.key ? ` (${a.key})` : '');
+    if (a.hold) {
+      b.addEventListener('pointerdown', () => act[a.name](true));
+      for (const ev of ['pointerup', 'pointerleave']) b.addEventListener(ev, () => act[a.name](false));
+    } else {
+      b.addEventListener('click', () => act[a.name]());
+    }
+    document.getElementById(rows[a.group]).appendChild(b);
+    btns[a.name] = b;
+  }
+  btns.restore.hidden = true;
+  window.__sim.tool = setTool;
+  window.__sim.act = (name, ...args) => {
+    if (!act[name]) throw new Error(`unknown action ${name}; actions: ${ACTIONS.map(a => a.name).join(', ')}`);
+    return act[name](...args);
+  };
+  window.__sim.headless.setMode = setMode;
+  document.getElementById('keys').textContent = 'Keys: ' + [
+    ...TOOLS.map(t => `${t.key} ${t.label.toLowerCase()}`),
+    ...ACTIONS.filter(a => a.key).map(a => `${a.key} ${a.label.toLowerCase().replace(' (hold)', '')}`),
+    ...KEYS.map(([k, what]) => `${k} ${what}`),
+  ].join(' · ') + '.';
 
-  const pauseBtn = document.getElementById('pause');
-  const togglePause = () => { state.paused = !state.paused; pauseBtn.classList.toggle('on', state.paused); };
-  pauseBtn.addEventListener('click', togglePause);
-
-  document.getElementById('clear').addEventListener('click', clear);
-  document.getElementById('flipMagnets').addEventListener('click', flipMagnets);
   const shapeSel = document.getElementById('magnetShape');
   for (const [key, sh] of Object.entries(SHAPES)) shapeSel.add(new Option(sh.name, key));
   shapeSel.addEventListener('change', () => { state.magnetShape = shapeSel.value; setMode(3); });
-  document.getElementById('clearMagnets').addEventListener('click', () => { state.magnets = []; drawMagnets(); });
-  document.getElementById('paper').addEventListener('click', () => newPaper());
   // A paper preset sets its surface and its physics knobs together.
   const applyPaperKnobs = () => {
     for (const [k, v] of Object.entries(PAPERS[state.paper].knobs)) inputs[k](v);
+    document.getElementById('paperDetails').querySelector('summary').textContent = `Build: paper (${PAPERS[state.paper].name})`;
   };
-  const strength = document.getElementById('strength');
-  const touchEl = document.getElementById('touch'), wetEl = document.getElementById('wetness');
-  touchEl.value = values.mouseTouch; wetEl.value = values.dipLoad;
-  touchEl.addEventListener('input', () => { inputs.mouseTouch(+touchEl.value); });
-  wetEl.addEventListener('input', () => { inputs.dipLoad(+wetEl.value); });
-  strength.value = values.brushPigment;
-  strength.addEventListener('input', () => { values.brushPigment = +strength.value; inputs.brushPigment(values.brushPigment); });
   inputs_mouseTouch = v => inputs.mouseTouch(v);
   uiSync = () => {
     for (const p of PARAMS) inputs[p.key](values[p.key]);
-    strength.value = values.brushPigment;
-    touchEl.value = values.mouseTouch; wetEl.value = values.dipLoad;
     document.getElementById('paperType').value = state.paper;
     document.getElementById('tone').value = state.tone;
   };
@@ -1415,33 +1508,35 @@ function buildUI({ clear, newPaper }) {
     newPaper();
   });
   applyPaperKnobs();
+  uiSync();
 
   document.getElementById('reset').addEventListener('click', () => {
     PARAMS.forEach(p => inputs[p.key](p.v));
     applyPaperKnobs();
+    applyBrush(brushSel.value);
   });
 
   window.addEventListener('keydown', e => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
     if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z')) {
       e.preventDefault();
-      if (e.shiftKey) window.__sim.redo(); else window.__sim.undo();
+      act[e.shiftKey ? 'redo' : 'undo']();
       return;
     }
-    if (e.key >= '1' && e.key <= '4') setMode(+e.key - 1);
-    if (e.key === '5') setMode(4);
-    if (e.key === '6') setMode(5);
-    if (e.key === '7') setMode(6);
-    else if (e.key === 'f') flipMagnets();
+    if (e.metaKey || e.ctrlKey) return;
+    const tool = TOOLS.find(t => t.key === e.key);
+    if (tool) setMode(tool.mode);
+    else if (e.key === 'f') act.flipMagnets();
     else if (e.key === '[' || e.key === ']') {
       const n = PIGMENTS.length;
       setPigment((state.brush[0].pigment + (e.key === ']' ? 1 : n - 1)) % n);
     }
     else if (e.key === 'd' && !e.repeat) setDry(true);
     else if (e.key === ' ') { e.preventDefault(); togglePause(); }
-    else if (e.key === 'c') clear();
+    else if (e.key === 'c') act.clear();
   });
   window.addEventListener('keyup', e => { if (e.key === 'd') setDry(false); });
+  return { btns };
 }
 
 // Display colour of a pigment at a mid-strength wash over white paper
