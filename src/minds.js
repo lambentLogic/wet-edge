@@ -437,9 +437,13 @@ export function makeMinds(sim) {
   //   area       polygon to wash (default: the whole sheet)
   //   pigmentAt  optional (x, y) => brushPigment, for a graded wash
   //   brushAt    optional (x, y) => brush load, for a variegated wash
-  async function washAround(area = null, { margin = 3, threshold = 0.004, pigmentAt = null, brushAt = null, mist = true, framesPerSeg = 2, fine = 0.5, even = false, log = () => {} } = {}) {
+  async function washAround(area = null, { margin = 3, threshold = 0.004, pigmentAt = null, brushAt = null, mist = true, framesPerSeg = 2, fine = 0.5, even = false, avoidPaint = true, log = () => {} } = {}) {
     const W = 1024, a = await sim.read(), H = a.length / 4 / W, N = W * H;
     const bigR = V.brushRadius, pig0 = V.brushPigment;
+    // The margin keeps a wash off paint it goes around; a glaze (not
+    // avoiding paint) reaches right to its own edge (a sea washed up to a
+    // dry sky left a white line along the horizon).
+    if (!avoidPaint) margin = 0;
     // Inside the area?
     const inside = new Uint8Array(N);
     if (area?.mask) inside.set(area.mask);
@@ -453,7 +457,9 @@ export function makeMinds(sim) {
     // The area's own edge counts like a shape's: the tip traces it and the
     // rows narrow toward it (rows had run full width up to it and stopped
     // in steps along a slanted edge).
-    for (let c = 0; c < N; c++) dist[c] = a[c * 4 + 1] + a[c * 4 + 2] > threshold || !inside[c] ? 0 : INF;
+    // avoidPaint false: a glaze over whatever is there, cut in along the
+    // area's edge only.
+    for (let c = 0; c < N; c++) dist[c] = (avoidPaint && a[c * 4 + 1] + a[c * 4 + 2] > threshold) || !inside[c] ? 0 : INF;
     const D1 = 1, D2 = Math.SQRT2;
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
       const c = y * W + x; let d = dist[c];
@@ -482,7 +488,26 @@ export function makeMinds(sim) {
     const pressFor = room => Math.min(1, Math.max(0, (room / bigR - taper) / (1 - taper)));
     const rowStep = Math.max(3, bigR * 0.7), cutL = margin + tipR * 1.2;
     const clearOf = cutL;   // rows run wherever the tip fits
-    const lines = contours(cutL).map(l => ({ l, L: cutL }));
+    // Cut in with a few loops along every edge, each further in and pressed
+    // harder (just touching the edge): the tip first, then wider, until the
+    // full brush fits. Rows fill the open middle. (Rows narrowed to fit
+    // the room near an edge left stubby dashes along any upright edge.)
+    const openAt0 = margin + bigR, levels = [cutL];
+    while (levels[levels.length - 1] * 2 < openAt0) levels.push(levels[levels.length - 1] * 2);
+    // Each loop is cut into short pieces, laid just ahead of the rows as the
+    // sweep comes down to them: a whole loop laid first had dried at the
+    // bottom, with a hard edge, by the time the rows got there.
+    const pieces = l => {
+      const out = [];
+      let cur = [l[0]], lo = l[0][1], hi = l[0][1];
+      for (let k = 1; k < l.length; k++) {
+        cur.push(l[k]); lo = Math.min(lo, l[k][1]); hi = Math.max(hi, l[k][1]);
+        if (hi - lo > Math.max(bigR, 30) && k < l.length - 1) { out.push(cur); cur = [l[k]]; lo = hi = l[k][1]; }
+      }
+      if (cur.length > 1) out.push(cur);
+      return out;
+    };
+    const lines = levels.flatMap(L => contours(L).flatMap(l => pieces(l).map(p => ({ l: p, L }))));
 
     function contours(L) {
     const g = 3, segs = [];
@@ -514,7 +539,13 @@ export function makeMinds(sim) {
           if (dir) poly.push(next); else poly.unshift(next);
         }
       }
-      if (poly.length >= 3) out.push(poly.filter((_, k) => k % 3 === 0 || k === poly.length - 1));
+      if (poly.length < 3) continue;
+      const thin = poly.filter((_, k) => k % 3 === 0 || k === poly.length - 1);
+      // A loop that comes back to its start is closed, so its ends meet
+      // (they left a notch).
+      const [fx, fy] = thin[0], [lx, ly] = thin[thin.length - 1];
+      if (thin.length > 4 && Math.hypot(fx - lx, fy - ly) < 3 * g) thin.push([fx, fy], thin[1]);
+      out.push(thin);
     }
     return out;
     }
@@ -577,12 +608,12 @@ export function makeMinds(sim) {
     };
     for (let y = fineStep / 2; y < H + rowStep; y += fineStep) {
       while (todo.length && todo[0].top < y + rowStep) {
-        const { l } = todo.shift();
+        const { l, L } = todo.shift();
+        const p = L === cutL ? 0 : pressFor(L - margin);
         V.brushRadius = bigR; setLoad(l[0][0], l[0][1]);
-        h.lift(); await layStroke(l.map(([x, yy]) => [x, yy, 0]), framesPerSeg, brushAt); cut++;
+        h.lift(); await layStroke(l.map(([x, yy]) => [x, yy, p]), framesPerSeg, brushAt); cut++;
       }
       if (y >= H) continue;
-      await row(y, true);
       while (y >= nextCoarse) { await row(nextCoarse, false); nextCoarse += rowStep; }
     }
     V.brushRadius = bigR; V.brushPigment = pig0;

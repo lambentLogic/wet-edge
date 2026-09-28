@@ -764,6 +764,8 @@ async function init() {
     };
     requestAnimationFrame(step);
   });
+  // Rinse the brush clean of paint it has picked up from the paper.
+  window.__sim.rinse = () => { state.carry.fill(0); device.queue.writeBuffer(tilesBuf, CARRY_OFF, new Uint32Array(MAX_PIGMENTS)); };
   window.__sim.setDrying = on => window.__sim.act('dry', on);
   // Spray workable fixative over the whole sheet (applied on the next step).
   // ---- undo: full snapshots of the paper on the GPU (about 145 MB each;
@@ -1166,6 +1168,7 @@ async function init() {
     const mode0 = state.mode;   // (the pigment isn't restored: switching pans mid-wash variegates it)
     const load0 = state.brush.map(b => ({ ...b }));
     window.__sim.checkpoint();
+    window.__sim.rinse();   // a clean brush for a new wash (it carried the last wash's colour into this one)
     state.washing = true; state.cancelWash = false; state.washReturn = mode0; state.onWash?.();
     try {
       h.setMode(water ? 1 : 0);
@@ -1185,16 +1188,20 @@ async function init() {
         const pigmentAt = kind === 'graded' ? (x, y) => pig0 * (1 + (fadeTo - 1) * along(x, y)) : null;
         await M.alongBand(path, R, outline.mask, { brushAt, pigmentAt });
         values.brushPigment = pig0;
-      } else if (kind === 'around' || outline.mask) {
+      } else {
         let pigmentAt = null;
         if (kind === 'graded') {
           let top = H, bottom = 0;
-          for (let c = 0; c < N; c++) if (outline.mask[c]) { const y = (c / W) | 0; if (y < top) top = y; bottom = y; }
+          for (let c = 0; c < N; c++) if (areaMask[c]) { const y = (c / W) | 0; if (y < top) top = y; bottom = y; }
           const pig0 = values.brushPigment;
           pigmentAt = (x, y) => pig0 * (1 + (fadeTo - 1) * Math.min(1, Math.max(0, (y - top) / Math.max(1, bottom - top))));
         }
-        await M.washAround(outline, { mist: false, pigmentAt, brushAt, even: true });
-      } else await M.fill(outline, { grade: kind === 'graded' ? [1, fadeTo] : null, brushAt, even: true });
+        // Cut in along the edge with the tip and fill with rows that narrow
+        // toward it, so a big brush doesn't spill past the outline (plain
+        // rows stopped only the brush's middle short of it). Only 'around'
+        // goes around paint already inside; the rest glaze over it.
+        await M.washAround(outline, { mist: false, pigmentAt, brushAt, even: true, avoidPaint: kind === 'around' });
+      }
       return true;
     } catch (e) {
       // Stopped midway: the minds didn't get to put back what they change
