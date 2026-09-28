@@ -449,7 +449,10 @@ export function makeMinds(sim) {
     } else inside.fill(1);
     // Distance (cells) to the nearest painted cell: two-pass chamfer.
     const INF = 1e9, dist = new Float32Array(N);
-    for (let c = 0; c < N; c++) dist[c] = a[c * 4 + 1] + a[c * 4 + 2] > threshold ? 0 : INF;
+    // The area's own edge counts like a shape's: the tip traces it and the
+    // rows narrow toward it (rows had run full width up to it and stopped
+    // in steps along a slanted edge).
+    for (let c = 0; c < N; c++) dist[c] = a[c * 4 + 1] + a[c * 4 + 2] > threshold || !inside[c] ? 0 : INF;
     const D1 = 1, D2 = Math.SQRT2;
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
       const c = y * W + x; let d = dist[c];
