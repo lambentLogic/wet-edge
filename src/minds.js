@@ -535,5 +535,8 @@ export function makeMinds(sim) {
     return { cut, rows };
   }
 
-  return { mark, fill, soften, washAround, waitDry, waitDamp, spans, areaAt, scrubArea };
+  // Cells of an area (polygon or { mask }), as a mask over the sheet.
+  const maskOf = area => (area.mask ? area.mask : insideOf(region(area)));
+
+  return { mark, fill, soften, washAround, waitDry, waitDamp, spans, areaAt, scrubArea, maskOf };
 }

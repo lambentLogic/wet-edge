@@ -1031,6 +1031,30 @@ async function init() {
     return { water: +(water / n).toFixed(4), damp: +(damp / n).toFixed(4), wet: avg(wet), settled: avg(dry), reservoir: +state.reservoir.toFixed(3) };
   };
   // Debug hook: everything stored for one cell.
+  // Dampen the paper by fiat: every cell of the mask (Uint8Array over the
+  // sheet) is brought up to `level` of what its fibres hold (more in the
+  // texture's valleys), evenly, with no strokes. What a painter gets from a
+  // clean pass with a big brush and a wait for the shine to go. Time stops
+  // while the sheet is read and written back, so nothing flowing elsewhere
+  // is lost.
+  window.__sim.dampen = async (mask, level = 0.8) => {
+    const paused = state.paused;
+    state.paused = true;
+    try {
+      await device.queue.onSubmittedWorkDone();
+      const a = new Float32Array(await readBuffer(A[parity], N * 16));
+      const aux = new Float32Array(await readBuffer(auxBuf, N * 16));
+      const sizing = Math.min(1, Math.max(0, values.sizing));
+      for (let c = 0; c < N; c++) {
+        if (!mask[c]) continue;
+        const texture = (1 - aux[c * 4]) * (1 - sizing) + 0.5 * sizing;
+        const cap = values.capacityMin + (values.capacityMax - values.capacityMin) * texture;
+        a[c * 4 + 3] = Math.max(a[c * 4 + 3], level * cap);
+      }
+      for (const b of A) device.queue.writeBuffer(b, 0, a);
+      device.queue.writeBuffer(tilesBuf, 32, new Uint32Array(TX * TY).fill(4));   // wake every tile
+    } finally { state.paused = paused; }
+  };
   // Masking fluid over the sheet (per cell, 0..1): what areaAt treats as a
   // boundary.
   window.__sim.maskField = async () => {
@@ -1085,12 +1109,14 @@ async function init() {
       if (!outline) throw new Error('that spot is painted: click inside an unpainted shape');
     } else if (outline.scrub) outline = M.scrubArea(outline.scrub, outline.radius ?? window.__sim.washOptions.scrubWidth);
     if (outline.mask) drawArea(outline.mask);
+    const areaMask = M.maskOf(outline);
     const keep = ['brushRadius', 'brushPigment', 'mistRadius'].map(k => [k, values[k]]);
     const mode0 = state.mode;   // (the pigment isn't restored: switching pans mid-wash variegates it)
     window.__sim.checkpoint();
     state.washing = true; state.cancelWash = false; state.washReturn = mode0; state.onWash?.();
     try {
       h.setMode(water ? 1 : 0);
+      if (dampen) await window.__sim.dampen(areaMask);
       // A found or scrubbed shape is cut in along its edge with the tip and
       // filled with rows that fit the room (washAround): flat rows would
       // spill a big brush over a thin painted outline.
@@ -1102,8 +1128,8 @@ async function init() {
           const pig0 = values.brushPigment;
           pigmentAt = (x, y) => pig0 * (1 + (fadeTo - 1) * Math.min(1, Math.max(0, (y - top) / Math.max(1, bottom - top))));
         }
-        await M.washAround(outline, { mist: dampen, pigmentAt, even: true });
-      } else await M.fill(outline, { grade: kind === 'graded' ? [1, fadeTo] : null, even: true, dampen });
+        await M.washAround(outline, { mist: false, pigmentAt, even: true });
+      } else await M.fill(outline, { grade: kind === 'graded' ? [1, fadeTo] : null, even: true });
       return true;
     } catch (e) {
       // Stopped midway: the minds didn't get to put back what they change

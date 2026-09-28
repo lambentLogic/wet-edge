@@ -91,7 +91,8 @@ Other keys: [ ] previous / next pigment · Shift-drag side of the brush · Z / X
 
 ## The Wash tool
 
-- `sim.wash(area, { kind, fadeTo, dampen, water })`: What the Wash tool does with the painter's lasso: fill an area with the loaded brush: a polygon [[x, y], ...]; null for the whole sheet; { at: [x, y] } for the unpainted shape around a point (bounded by paint and masking fluid; M.areaAt); { scrub: points, radius } for a scrubbed area (M.scrubArea); or { mask }. kind: 'flat' (fill), 'graded' (strength fades top to bottom to fadeTo × paint strength) or 'around' (washAround: goes around paint already there). dampen: wet the paper lightly first. The wash senses as it goes and keeps its strength to about one stroke of the same brush. water: true for clean water (wetting an area for wet-in-wet). One undo step; resolves false if stopped. The panel's settings are sim.washOptions.
+- `sim.wash(area, { kind, fadeTo, dampen, water })`: What the Wash tool does with the painter's lasso: fill an area with the loaded brush: a polygon [[x, y], ...]; null for the whole sheet; { at: [x, y] } for the unpainted shape around a point (bounded by paint and masking fluid; M.areaAt); { scrub: points, radius } for a scrubbed area (M.scrubArea); or { mask }. kind: 'flat' (fill), 'graded' (strength fades top to bottom to fadeTo × paint strength) or 'around' (washAround: goes around paint already there). dampen: bring the paper in the area evenly up to damp first (sim.dampen, no strokes). The wash senses as it goes and keeps its strength to about one stroke of the same brush. water: true for clean water (wetting an area for wet-in-wet). One undo step; resolves false if stopped. The panel's settings are sim.washOptions.
+- `sim.dampen(mask, level = 0.8)`: Dampen the paper evenly by fiat: every cell of the mask (Uint8Array over the sheet; M.maskOf(area) makes one) up to that fraction of what its fibres hold. No strokes.
 
 ## Little minds (src/minds.js, window.__minds)
 
