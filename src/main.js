@@ -1200,6 +1200,7 @@ function bindPointer(canvas) {
     state.recording.push(ev);
   };
   for (const type of ['pointerdown', 'pointermove', 'pointerup']) canvas.addEventListener(type, record);
+  canvas.closest('main').addEventListener('pointerdown', e => { if (e.target !== canvas && state.mode === 7) record(e); });   // a wash area started on the margin
   // Replay a recording: real PointerEvents on the canvas, at the recorded
   // times (scaled by 1 / speed), with each stroke's settings restored.
   window.__sim.replay = (rec, { speed = 1 } = {}) => new Promise(done => {
@@ -1291,6 +1292,14 @@ function bindPointer(canvas) {
     g.beginPath(); pts.forEach(([x, y], k) => (k ? g.lineTo(x, y) : g.moveTo(x, y))); g.stroke();
     g.restore();
   };
+  // Wash areas can start on the margin around the paper, so a rectangle
+  // can run off the sheet without leaving a sliver at its edge.
+  canvas.closest('main').addEventListener('pointerdown', e => {
+    if (e.target === canvas || state.mode !== 7 || state.washing) return;
+    if (!['rect', 'lasso', 'scrub'].includes(window.__sim.washOptions.area)) return;
+    lasso = [toGrid(e)];
+    try { canvas.setPointerCapture(e.pointerId); } catch {}
+  });
   canvas.addEventListener('pointerdown', e => {
     if (state.washing) return;
     if (state.mode === 7) {
@@ -1379,7 +1388,10 @@ function bindPointer(canvas) {
     if (lasso) {
       let pts = lasso; lasso = null;
       if (window.__sim.washOptions.area === 'rect' && pts.length === 2) {
-        const [[ax, ay], [bx, by]] = pts;
+        let [[ax, ay], [bx, by]] = pts;
+        // An edge dragged to within a millimetre of the sheet's edge goes past it.
+        const snapX = x => (x < 5 ? -8 : x > W - 5 ? W + 8 : x), snapY = y => (y < 5 ? -8 : y > H - 5 ? H + 8 : y);
+        [ax, bx] = [snapX(ax), snapX(bx)]; [ay, by] = [snapY(ay), snapY(by)];
         pts = Math.abs(bx - ax) > 4 && Math.abs(by - ay) > 4 ? [[ax, ay], [bx, ay], [bx, by], [ax, by]] : [];
       }
       if (window.__sim.washOptions.area === 'scrub') {

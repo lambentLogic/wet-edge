@@ -257,7 +257,10 @@ export function makeMinds(sim) {
     if (bottom - top < r) log(`fill: shape is ${Math.round(bottom - top)} cells tall, brush is ${Math.round(2 * r)} wide`);
     let dir = 1, prev = null, rewets = 0;
     const basePigment = V.brushPigment;
-    const first = Math.min(top + inset, (top + bottom) / 2);
+    // The first and last rows run close to the top and bottom edges: a soft
+    // brush covers fully only near its middle, and half a radius in left a
+    // pale band along the edge.
+    const first = Math.min(top + inset * 0.5, (top + bottom) / 2);
     const unturn = broadside();
     const rowAt = (y, a, b) => { const n = Math.max(2, Math.ceil((b - a) / 30)); return Array.from({ length: n + 1 }, (_, k) => [a + (b - a) * k / n + (b === a ? k - n / 2 : 0), y]); };
     if (dampen) await mistOver(insideOf(reg));
