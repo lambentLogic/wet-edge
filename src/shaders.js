@@ -315,6 +315,15 @@ fn pres(i: i32) -> f32 {
 
 // Thin films stick to the paper; deep puddles flow. Viscous drag in a film
 // of depth h scales roughly as 1/h^2, referenced to dragDepth.
+// Extra drag on flow toward or away from the sheet's edge, within 30
+// cells (6 mm) of it (d: cells from the face to the wall). The edge holds water,
+// but a closed wall reflected it straight back in; a film this thin on
+// paper is too damped to rebound.
+fn edgeDragAt(d: f32) -> f32 {
+  let t = max(1.0 - d / 30.0, 0.0);
+  return p.edgeDamp * t * t;
+}
+
 fn dragAt(i: i32, j: i32) -> f32 {
   let h = max(0.5 * (Ain[i].x + Ain[j].x), 0.002);
   let r = p.dragDepth / h;
@@ -379,7 +388,8 @@ fn velocity(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) lid
       let u0 = Bin[i].x;
       let lap = uAt(x - 1, y) + uAt(x + 1, y) + uAt(x, y - 1) + uAt(x, y + 1) - 4.0 * u0;
       let acc = -(pres(j) - pres(i)) * waveCap(i, j) + p.viscosity * lap + p.tiltX;
-      u = (u0 + p.dt * acc) / (1.0 + p.dt * dragAt(i, j));
+      let wallD = f32(min(x + 1, W() - 1 - x));
+      u = (u0 + p.dt * acc) / (1.0 + p.dt * (dragAt(i, j) + edgeDragAt(wallD)));
       let bd = brushDragAt(vec2f(f32(x) + 1.0, f32(y) + 0.5));
       u = mix(u, clamp(bd.x, -vmax, vmax), bd.z);
     }
@@ -390,7 +400,8 @@ fn velocity(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) lid
       let v0 = Bin[i].y;
       let lap = vAt(x - 1, y) + vAt(x + 1, y) + vAt(x, y - 1) + vAt(x, y + 1) - 4.0 * v0;
       let acc = -(pres(j) - pres(i)) * waveCap(i, j) + p.viscosity * lap + p.tiltY;
-      v = (v0 + p.dt * acc) / (1.0 + p.dt * dragAt(i, j));
+      let wallD = f32(min(y + 1, H() - 1 - y));
+      v = (v0 + p.dt * acc) / (1.0 + p.dt * (dragAt(i, j) + edgeDragAt(wallD)));
       let bd = brushDragAt(vec2f(f32(x) + 0.5, f32(y) + 1.0));
       v = mix(v, clamp(bd.y, -vmax, vmax), bd.z);
     }

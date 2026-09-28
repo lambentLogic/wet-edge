@@ -22,6 +22,7 @@ export const PARAMS = [
   { key: 'capSuction',    v: 0,      min: 0,    max: 2,     group: 'Flow', target: 'sim',  label: 'thin-film suction' },
   { key: 'suctionDepth',  v: 0.02,   min: 0.001, max: 0.2,  group: 'Flow', target: 'sim',  label: 'suction depth scale' },
   { key: 'pinning',       v: 0.35,    min: 0,    max: 0.5,   group: 'Flow', target: 'sim',  label: 'wet edges hold their line (pinning)' },
+  { key: 'edgeDamp',      v: 3,      min: 0,    max: 50,    group: 'Flow', target: 'sim',  label: 'sheet edge damps rebound' },
   { key: 'edgePull',      v: 0.15,   min: 0,    max: 0.2,   group: 'Flow', target: 'sim',  label: 'edge darkening (pull to the edge, Curtis η)' },
 
   // --- Paper and drying (capillary layer) ---

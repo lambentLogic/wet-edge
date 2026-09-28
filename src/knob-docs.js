@@ -19,6 +19,7 @@ export const KNOB_DOCS = {
   capSuction: { tier: 'lab', doc: 'Meniscus pull toward thin water: more feeds a drying wash from its thick middle out to its thinning rim, so the edge recedes smoothly instead of in tide lines. 0 = off.' },
   suctionDepth: { tier: 'lab', doc: 'Depth scale for thin-film suction: larger means deeper water still counts as thin and gets pulled toward. Only matters when thin-film suction is above 0.' },
   pinning: { tier: 'lab', doc: 'How firmly a wet edge holds on dry paper (contact-angle hysteresis). More: crisp edges that only break out under a big pool. Also caps how much a wet-in-wet charge can flood.' },
+  edgeDamp: { tier: 'lab', doc: 'The sheet\'s edge holds water like a wet edge, but a closed wall also bounced it straight back in. This slows flow toward and away from the edge within about 6 mm of it (flow along the edge is untouched). 0: a perfectly reflecting wall.' },
   edgePull: { tier: 'lab', doc: 'Draws water, and the pigment in it, outward toward the rim of a wet area as it dries (Curtis\'s edge darkening). More: darker, harder dried edges on washes.' },
 
   // --- Paper & drying ---

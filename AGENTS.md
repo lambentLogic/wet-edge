@@ -165,6 +165,7 @@ All in `sim.values` by key. The page shows the studio ones always, the brush and
 | `capSuction` | 0 | thin-film suction | Meniscus pull toward thin water: more feeds a drying wash from its thick middle out to its thinning rim, so the edge recedes smoothly instead of in tide lines. 0 = off. |
 | `suctionDepth` | 0.02 | suction depth scale | Depth scale for thin-film suction: larger means deeper water still counts as thin and gets pulled toward. Only matters when thin-film suction is above 0. |
 | `pinning` | 0.35 | wet edges hold their line (pinning) | How firmly a wet edge holds on dry paper (contact-angle hysteresis). More: crisp edges that only break out under a big pool. Also caps how much a wet-in-wet charge can flood. |
+| `edgeDamp` | 3 | sheet edge damps rebound | The sheet's edge holds water like a wet edge, but a closed wall also bounced it straight back in. This slows flow toward and away from the edge within about 6 mm of it (flow along the edge is untouched). 0: a perfectly reflecting wall. |
 | `edgePull` | 0.15 | edge darkening (pull to the edge, Curtis η) | Draws water, and the pigment in it, outward toward the rim of a wet area as it dries (Curtis's edge darkening). More: darker, harder dried edges on washes. |
 
 ### Paper & drying
