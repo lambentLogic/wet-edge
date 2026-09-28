@@ -1155,7 +1155,11 @@ async function init() {
     if (!Array.isArray(outline) && outline.at) {
       outline = await M.areaAt(...outline.at);
       if (!outline) throw new Error('that spot is painted: click inside an unpainted shape');
-    } else if (outline.scrub) outline = M.scrubArea(outline.scrub, outline.radius ?? window.__sim.washOptions.scrubWidth);
+    } else if (outline.scrub) {
+      const R = outline.radius ?? window.__sim.washOptions.scrubWidth, path = outline.scrub;
+      outline = M.scrubArea(path, R);
+      if (M.isBand(path, R, outline.mask)) outline.band = { path, R };
+    }
     if (outline.mask) drawArea(outline.mask);
     const areaMask = M.maskOf(outline);
     const keep = ['brushRadius', 'brushPigment', 'mistRadius'].map(k => [k, values[k]]);
@@ -1171,7 +1175,17 @@ async function init() {
       // A found or scrubbed shape is cut in along its edge with the tip and
       // filled with rows that fit the room (washAround): flat rows would
       // spill a big brush over a thin painted outline.
-      if (kind === 'around' || outline.mask) {
+      if (outline.band && kind !== 'around') {
+        // A scrub that follows a shape: strokes follow it too. Graded fades
+        // along the band.
+        const { path, R } = outline.band, pig0 = values.brushPigment;
+        let total = 0; const at = [0];
+        for (let k = 1; k < path.length; k++) at.push(total += Math.hypot(path[k][0] - path[k - 1][0], path[k][1] - path[k - 1][1]));
+        const along = (x, y) => { let best = 0, bd = Infinity; path.forEach(([px, py], k) => { const d = (px - x) ** 2 + (py - y) ** 2; if (d < bd) { bd = d; best = at[k]; } }); return best / Math.max(1, total); };
+        const pigmentAt = kind === 'graded' ? (x, y) => pig0 * (1 + (fadeTo - 1) * along(x, y)) : null;
+        await M.alongBand(path, R, outline.mask, { brushAt, pigmentAt });
+        values.brushPigment = pig0;
+      } else if (kind === 'around' || outline.mask) {
         let pigmentAt = null;
         if (kind === 'graded') {
           let top = H, bottom = 0;

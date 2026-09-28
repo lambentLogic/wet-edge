@@ -102,6 +102,7 @@ Other keys: [ ] previous / next pigment · Shift-drag side of the brush · Z / X
 
 - `M.fill(poly, { grade, mode })`: Paint a polygon evenly with the loaded brush (rows, cutting in along the edge, rewetting edges that start to dry). grade: [start, end] multiplies paint strength top to bottom.
 - `M.washAround(area, { margin, pigmentAt, brushAt, mist })`: A wash that senses paint already on the sheet and goes around it: tip contours along shapes, then rows. pigmentAt/brushAt vary strength and mix by position.
+- `M.alongBand(path, halfWidth, mask, { brushAt, pigmentAt })`: Wash a band along a path in parallel lanes that follow it (what a scrub along a shape gets; M.isBand(points, r, mask) tells a band from a scribble).
 - `M.soften(line, out)`: Find the wet edge along a line and run a damp brush along it to soften it.
 - `M.mark(points, { target })`: A stroke that checks it actually left paint, and repeats if it skipped.
 - `M.waitDry(points)`: Wait (with the dryer) until those points are dry and the gum has set. Returns seconds.

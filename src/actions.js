@@ -120,6 +120,7 @@ export const SCRIPT_API = [
     doc: 'Paint a polygon evenly with the loaded brush (rows, cutting in along the edge, rewetting edges that start to dry). grade: [start, end] multiplies paint strength top to bottom.' },
   { call: 'M.washAround(area, { margin, pigmentAt, brushAt, mist })', probe: '__minds.washAround',
     doc: 'A wash that senses paint already on the sheet and goes around it: tip contours along shapes, then rows. pigmentAt/brushAt vary strength and mix by position.' },
+  { call: 'M.alongBand(path, halfWidth, mask, { brushAt, pigmentAt })', probe: '__minds.alongBand', doc: 'Wash a band along a path in parallel lanes that follow it (what a scrub along a shape gets; M.isBand(points, r, mask) tells a band from a scribble).' },
   { call: 'M.soften(line, out)', probe: '__minds.soften', doc: 'Find the wet edge along a line and run a damp brush along it to soften it.' },
   { call: 'M.mark(points, { target })', probe: '__minds.mark', doc: 'A stroke that checks it actually left paint, and repeats if it skipped.' },
   { call: 'M.waitDry(points)', probe: '__minds.waitDry', doc: 'Wait (with the dryer) until those points are dry and the gum has set. Returns seconds.' },

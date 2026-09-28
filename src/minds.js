@@ -234,14 +234,15 @@ export function makeMinds(sim) {
   // Lay a stroke; with brushAt (a variegated wash), in pieces about two
   // brush-widths long, each loaded for where it lands and overlapping the
   // last a little, so the colour changes along the stroke too.
-  async function layStroke(pts, framesPerSeg, brushAt) {
-    if (!brushAt) { await sim.path(pts, framesPerSeg); return; }
+  async function layStroke(pts, framesPerSeg, brushAt, pigmentAt = null) {
+    if (!brushAt && !pigmentAt) { await sim.path(pts, framesPerSeg); return; }
     const piece = Math.max(4 * V.brushRadius, 60);
     let cur = [pts[0]], len = 0;
     const flush = async () => {
       if (cur.length < 2) return;
       const [mx, my] = cur[Math.floor(cur.length / 2)];
-      h.setBrush(brushAt(mx, my));
+      if (brushAt) h.setBrush(brushAt(mx, my));
+      if (pigmentAt) V.brushPigment = pigmentAt(mx, my);
       h.lift(); await sim.path(cur, framesPerSeg);
     };
     // Resample finely so pieces can end anywhere.
@@ -590,8 +591,69 @@ export function makeMinds(sim) {
     return { cut, rows };
   }
 
+  // Is a scrubbed area a band along its path (little doubling back), rather
+  // than a scribble covering a patch? Its area against the path's length
+  // times its width.
+  function isBand(points, r, mask) {
+    let L = 0, cells = 0;
+    for (let k = 1; k < points.length; k++) L += Math.hypot(points[k][0] - points[k - 1][0], points[k][1] - points[k - 1][1]);
+    for (let c = 0; c < mask.length; c++) cells += mask[c];
+    return L > 4 * r && cells / (L * 2 * r + Math.PI * r * r) > 0.75;
+  }
+
+  // Wash a band along a path (a scrub that follows a shape): strokes follow
+  // the path in parallel lanes, as few as the brush allows, each pressed
+  // just enough to fill its lane, alternating direction so each lane meets
+  // the last one wet. Points outside the band (a lane cutting a corner) are
+  // left out. halfWidth: the band's half-width; mask: its cells.
+  //   brushAt / pigmentAt  as for fill (variegated, graded along the band)
+  async function alongBand(path, halfWidth, mask, { framesPerSeg = 2, brushAt = null, pigmentAt = null, log = () => {} } = {}) {
+    // Smooth the hand's path and resample it every few cells.
+    const res = [];
+    for (let k = 1; k < path.length; k++) {
+      const [ax, ay] = path[k - 1], [bx, by] = path[k], n = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / 4));
+      for (let i = k === 1 ? 0 : 1; i <= n; i++) res.push([ax + (bx - ax) * i / n, ay + (by - ay) * i / n]);
+    }
+    const win = Math.max(1, Math.round(halfWidth / 8));
+    const sm = res.map((_, k) => {
+      let x = 0, y = 0, n = 0;
+      for (let j = Math.max(0, k - win); j <= Math.min(res.length - 1, k + win); j++) { x += res[j][0]; y += res[j][1]; n++; }
+      return [x / n, y / n];
+    }).filter((_, k, arr) => k % 3 === 0 || k === arr.length - 1);
+    const r = V.brushRadius, taper = Math.max(V.taperMin, 0.02);
+    const lanes = Math.max(1, Math.ceil((2 * halfWidth) / (1.5 * r)));
+    const laneHalf = halfWidth / lanes;
+    const press = Math.min(1, Math.max(0, (laneHalf * 1.2 / r - taper) / (1 - taper)));
+    const unturn = broadside();
+    const inMask = (x, y) => { const xi = Math.round(x), yi = Math.round(y); return xi >= 0 && yi >= 0 && xi < SW && yi < SH && mask[yi * SW + xi]; };
+    let strokes = 0;
+    for (let i = 0; i < lanes; i++) {
+      const o = -halfWidth + (i + 0.5) * 2 * laneHalf;
+      let lane = sm.map(([x, y], k) => {
+        const [ax, ay] = sm[Math.max(0, k - 1)], [bx, by] = sm[Math.min(sm.length - 1, k + 1)];
+        const l = Math.hypot(bx - ax, by - ay) || 1;
+        return [x - (by - ay) / l * o, y + (bx - ax) / l * o, press];
+      });
+      if (i % 2) lane.reverse();
+      // Split where the lane leaves the band.
+      // (Scraps shorter than the brush is wide are dropped: they left blobs.)
+      let run = [];
+      const lay = async () => {
+        let len = 0;
+        for (let k = 1; k < run.length; k++) len += Math.hypot(run[k][0] - run[k - 1][0], run[k][1] - run[k - 1][1]);
+        if (run.length > 1 && len > 2 * r) { h.lift(); await layStroke(run, framesPerSeg, brushAt, pigmentAt); strokes++; }
+        run = [];
+      };
+      for (const p of lane) { if (inMask(p[0], p[1])) run.push(p); else await lay(); }
+      await lay();
+    }
+    unturn();
+    log(`alongBand: ${lanes} ${lanes === 1 ? 'lane' : 'lanes'}, ${strokes} strokes`);
+    return { lanes, strokes };
+  }
+
   // Cells of an area (polygon or { mask }), as a mask over the sheet.
   const maskOf = area => (area.mask ? area.mask : insideOf(region(area)));
 
-  return { mark, fill, soften, washAround, waitDry, waitDamp, spans, areaAt, scrubArea, maskOf };
+  return { mark, fill, soften, washAround, waitDry, waitDamp, spans, areaAt, scrubArea, maskOf, isBand, alongBand };
 }
