@@ -57,8 +57,12 @@ function packOldG(old, version) {
 }
 
 const values = Object.fromEntries(PARAMS.map(p => [p.key, p.v]));
+// Stop a wash in progress now: the brush lifts at once, and the wash ends
+// at its next step (sim.path rejects).
+const stopWashNow = () => { if (state.washing) { state.cancelWash = true; state.pointer.down = false; } };
 const state = {
-  mode: 0,          // 0 paint, 1 water, 2 lift, 3 magnet, 4 mist, 5 mask, 6 blot
+  stopWash: () => stopWashNow(),
+  mode: 0,          // 0 paint, 1 water, 2 lift, 3 magnet, 4 mist, 5 mask, 6 blot, 7 wash
   // What the brush is loaded with: up to 4 pigments (PIGMENTS indices) and
   // their fractions of the load. One pigment straight from a pan, or a mix.
   brush: [{ pigment: 0, frac: 1 }],
@@ -137,12 +141,15 @@ async function init() {
   const argsBuf = buf(16, CD | GPUBufferUsage.INDIRECT);
 
   const newPaper = seed => {
+    state.stopWash();
     const h = makePaper(W, H, PAPERS[state.paper], seed);
     const aux = new Float32Array(N * 4);
     for (let i = 0; i < N; i++) aux[i * 4] = h[i];
     device.queue.writeBuffer(auxBuf, 0, aux);
   };
+  // Anything that replaces the sheet stops a wash in progress first.
   const clear = () => {
+    state.stopWash();
     window.__sim?.checkpoint?.();
     const z = new Float32Array(N * 4);
     for (const b of [...A, ...B]) device.queue.writeBuffer(b, 0, z);
@@ -806,12 +813,14 @@ async function init() {
     undoStack.push(takeSnap());
   };
   window.__sim.undo = () => {
+    state.stopWash();
     if (!undoStack.length) return false;
     redoStack.push(takeSnap());
     const snap = undoStack.pop(); putSnap(snap); undoPool.push(snap);
     return true;
   };
   window.__sim.redo = () => {
+    state.stopWash();
     if (!redoStack.length) return false;
     undoStack.push(takeSnap());
     const snap = redoStack.pop(); putSnap(snap); undoPool.push(snap);
@@ -943,6 +952,7 @@ async function init() {
   })();
 
   async function openPainting(file) {
+    state.stopWash();
     window.__sim.checkpoint?.();
     const raw = await new Response(file.stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
     const len = new Uint32Array(raw, 0, 1)[0];
@@ -1021,6 +1031,13 @@ async function init() {
     return { water: +(water / n).toFixed(4), damp: +(damp / n).toFixed(4), wet: avg(wet), settled: avg(dry), reservoir: +state.reservoir.toFixed(3) };
   };
   // Debug hook: everything stored for one cell.
+  // Masking fluid over the sheet (per cell, 0..1): what areaAt treats as a
+  // boundary.
+  window.__sim.maskField = async () => {
+    const df = new Float32Array(await readBuffer(Dbuf, N * DB)), out = new Float32Array(N);
+    for (let c = 0; c < N; c++) out[c] = df[c * 28 + 26];
+    return out;
+  };
   window.__sim.cell = async (x, y) => {
     const c = y * W + x, f = async (buf, n) => new Float32Array(await readBuffer(buf, n * 4, c * n * 4));
     const d = await f(Dbuf, DB / 4), du = new Uint32Array(d.buffer);
@@ -1045,21 +1062,48 @@ async function init() {
   // The Wash tool: a little mind a person can use too. Fills an outline
   // with the loaded brush, in real time, as one undo step. The painter's
   // lasso and scripts both call this.
-  window.__sim.washOptions = { kind: 'flat', fadeTo: 0.2, mist: true, water: false, area: 'lasso' };
+  window.__sim.washOptions = { kind: 'flat', fadeTo: 0.2, dampen: true, water: false, area: 'lasso', scrubWidth: 40 };
+  // Show an area on the overlay (faint blue) while it's being washed.
+  const drawArea = mask => {
+    drawMagnets();
+    const g = document.getElementById('overlay').getContext('2d'), img = g.getImageData(0, 0, W, H);
+    for (let c = 0; c < N; c++) if (mask[c]) { img.data[c * 4] = 60; img.data[c * 4 + 1] = 100; img.data[c * 4 + 2] = 190; img.data[c * 4 + 3] = 40; }
+    g.putImageData(img, 0, 0);
+  };
   window.__sim.wash = async (outline, opts = {}) => {
     if (state.washing) throw new Error('a wash is already running');
-    const { kind, fadeTo, mist, water } = { ...window.__sim.washOptions, ...opts };
-    // The whole sheet (a little past its edges, so rows run off the paper).
-    outline ??= [[-8, -8], [W + 8, -8], [W + 8, H + 8], [-8, H + 8]];
+    const { kind, fadeTo, water } = { ...window.__sim.washOptions, ...opts };
+    const dampen = opts.dampen ?? opts.mist ?? window.__sim.washOptions.dampen;
     const M = window.__minds, h = window.__sim.headless;
+    // The area: a polygon; null for the whole sheet (a little past its
+    // edges, so rows run off the paper); { at: [x, y] } for the unpainted
+    // shape around a point; { scrub: points, radius } for a scrubbed area;
+    // or { mask }.
+    outline ??= [[-8, -8], [W + 8, -8], [W + 8, H + 8], [-8, H + 8]];
+    if (!Array.isArray(outline) && outline.at) {
+      outline = await M.areaAt(...outline.at);
+      if (!outline) throw new Error('that spot is painted: click inside an unpainted shape');
+    } else if (outline.scrub) outline = M.scrubArea(outline.scrub, outline.radius ?? window.__sim.washOptions.scrubWidth);
+    if (outline.mask) drawArea(outline.mask);
     const keep = ['brushRadius', 'brushPigment', 'mistRadius'].map(k => [k, values[k]]);
     const mode0 = state.mode;   // (the pigment isn't restored: switching pans mid-wash variegates it)
     window.__sim.checkpoint();
-    state.washing = true; state.cancelWash = false; state.onWash?.();
+    state.washing = true; state.cancelWash = false; state.washReturn = mode0; state.onWash?.();
     try {
       h.setMode(water ? 1 : 0);
-      if (kind === 'around') await M.washAround(outline, { mist });
-      else await M.fill(outline, { grade: kind === 'graded' ? [1, fadeTo] : null });
+      // A found or scrubbed shape is cut in along its edge with the tip and
+      // filled with rows that fit the room (washAround): flat rows would
+      // spill a big brush over a thin painted outline.
+      if (kind === 'around' || outline.mask) {
+        let pigmentAt = null;
+        if (kind === 'graded') {
+          let top = H, bottom = 0;
+          for (let c = 0; c < N; c++) if (outline.mask[c]) { const y = (c / W) | 0; if (y < top) top = y; bottom = y; }
+          const pig0 = values.brushPigment;
+          pigmentAt = (x, y) => pig0 * (1 + (fadeTo - 1) * Math.min(1, Math.max(0, (y - top) / Math.max(1, bottom - top))));
+        }
+        await M.washAround(outline, { mist: dampen, pigmentAt, even: true });
+      } else await M.fill(outline, { grade: kind === 'graded' ? [1, fadeTo] : null, even: true, dampen });
       return true;
     } catch (e) {
       if (e.message !== 'cancelled') throw e;
@@ -1067,7 +1111,7 @@ async function init() {
     } finally {
       for (const [k, v] of keep) values[k] = v;
       state.washing = false; state.cancelWash = false;
-      h.setMode(mode0);
+      h.setMode(state.washReturn ?? mode0); state.washReturn = null;
       uiSync(); drawMagnets(); state.onWash?.();
     }
   };
@@ -1210,10 +1254,23 @@ function bindPointer(canvas) {
     g.beginPath(); pts.forEach(([x, y], k) => (k ? g.lineTo(x, y) : g.moveTo(x, y))); g.closePath(); g.stroke();
     g.restore();
   };
+  const drawScrub = pts => {
+    drawMagnets();
+    const g = document.getElementById('overlay').getContext('2d');
+    g.save();
+    g.lineCap = g.lineJoin = 'round'; g.lineWidth = 2 * window.__sim.washOptions.scrubWidth; g.strokeStyle = 'rgba(60,100,190,.18)';
+    g.beginPath(); pts.forEach(([x, y], k) => (k ? g.lineTo(x, y) : g.moveTo(x, y))); g.stroke();
+    g.restore();
+  };
   canvas.addEventListener('pointerdown', e => {
     if (state.washing) return;
     if (state.mode === 7) {
-      if (window.__sim.washOptions.area === 'sheet') { window.__sim.wash(null).catch(err => fail(`Wash: ${err.message}`)); return; }
+      const area = window.__sim.washOptions.area;
+      if (area === 'sheet' || area === 'shape') {
+        document.getElementById('error').textContent = '';
+        window.__sim.wash(area === 'sheet' ? null : { at: toGrid(e) }).catch(err => fail(`Wash: ${err.message}`));
+        return;
+      }
       lasso = [toGrid(e)];
       try { canvas.setPointerCapture(e.pointerId); } catch {}
       return;
@@ -1250,7 +1307,9 @@ function bindPointer(canvas) {
   canvas.addEventListener('pointermove', e => {
     if (lasso) {
       const p = toGrid(e), q = lasso[lasso.length - 1];
-      if (window.__sim.washOptions.area === 'rect') {
+      if (window.__sim.washOptions.area === 'scrub') {
+        if (Math.hypot(p[0] - q[0], p[1] - q[1]) > 3) { lasso.push(p); drawScrub(lasso); }
+      } else if (window.__sim.washOptions.area === 'rect') {
         const [a] = lasso;
         lasso = [a, p];
         drawLasso([a, [p[0], a[1]], p, [a[0], p[1]]]);
@@ -1294,7 +1353,9 @@ function bindPointer(canvas) {
         const [[ax, ay], [bx, by]] = pts;
         pts = Math.abs(bx - ax) > 4 && Math.abs(by - ay) > 4 ? [[ax, ay], [bx, ay], [bx, by], [ax, by]] : [];
       }
-      if (pts.length >= 3) {
+      if (window.__sim.washOptions.area === 'scrub') {
+        window.__sim.wash({ scrub: pts }).catch(err => fail(`Wash: ${err.message}`));
+      } else if (pts.length >= 3) {
         drawLasso(pts, true);
         window.__sim.wash(pts).catch(err => fail(`Wash: ${err.message}`));
       } else drawMagnets();
@@ -1689,23 +1750,30 @@ function buildUI({ clear, newPaper, acts }) {
   const washFade = document.getElementById('washFade'), washMist = document.getElementById('washMist');
   const showWash = () => {
     document.getElementById('washFadeRow').hidden = wo.kind !== 'graded';
-    document.getElementById('washMistRow').hidden = wo.kind !== 'around';
   };
   washKind.addEventListener('change', () => { wo.kind = washKind.value; showWash(); });
   washWith.addEventListener('change', () => { wo.water = washWith.value === 'water'; });
   const washArea = document.getElementById('washArea');
   washArea.addEventListener('change', () => { wo.area = washArea.value; washHint.textContent = WASH_HINTS[wo.area]; });
   const washHint = document.getElementById('washHint');
-  const WASH_HINTS = { lasso: 'Draw a loose outline on the paper; the brush fills it. Esc stops.', rect: 'Drag a rectangle on the paper; the brush fills it. Esc stops.', sheet: 'Click the paper to wash the whole sheet. Esc stops.' };
+  const washScrub = document.getElementById('washScrub');
+  washScrub.addEventListener('input', () => { wo.scrubWidth = +washScrub.value; });
+  washArea.addEventListener('change', () => { document.getElementById('washScrubRow').hidden = wo.area !== 'scrub'; });
+  const WASH_HINTS = { shape: 'Click inside a shape bounded by paint or masking fluid (small gaps are bridged); the brush fills it. Esc stops.', scrub: 'Scrub roughly over the area; the brush lays an even wash where you scrubbed. Esc stops.', lasso: 'Draw a loose outline on the paper; the brush fills it. Esc stops.', rect: 'Drag a rectangle on the paper; the brush fills it. Esc stops.', sheet: 'Click the paper to wash the whole sheet. Esc stops.' };
   washFade.addEventListener('input', () => { wo.fadeTo = +washFade.value; });
-  washMist.addEventListener('change', () => { wo.mist = washMist.checked; });
+  washMist.addEventListener('change', () => { wo.dampen = washMist.checked; });
   washFade.addEventListener('dblclick', () => { washFade.value = wo.fadeTo = 0.2; });
   showWash();
-  const setMode = m => {
-    state.mode = m;
-    TOOLS.forEach((t, i) => toolBtns[i].classList.toggle('on', t.mode === m));
-    magnetRow.hidden = m !== 3;
-    washRow.hidden = m !== 7;
+  // During a wash the wash switches between paint and water itself
+  // (internal); a tool chosen meanwhile takes over when the wash ends, and
+  // the buttons keep showing the Wash tool (or the one chosen next).
+  const setMode = (m, internal = false) => {
+    if (state.washing && !internal) state.washReturn = m;
+    else state.mode = m;
+    const shown = state.washing ? (state.washReturn ?? 7) : m;
+    TOOLS.forEach((t, i) => toolBtns[i].classList.toggle('on', t.mode === shown));
+    magnetRow.hidden = shown !== 3;
+    washRow.hidden = shown !== 7;
     showStudio();
   };
   const setTool = name => {
@@ -1739,7 +1807,7 @@ function buildUI({ clear, newPaper, acts }) {
     flipMagnets: () => flipMagnets(),
     removeMagnets: () => { state.magnets = []; drawMagnets(); },
     record: () => toggleRecord(),
-    stop: () => { if (state.washing) state.cancelWash = true; },
+    stop: () => state.stopWash(),
   };
   const rows = { sheet: 'sheetActions', magnet: 'magnetRow', history: 'historyActions', file: 'fileActions' };
   for (const a of ACTIONS) {
@@ -1764,7 +1832,7 @@ function buildUI({ clear, newPaper, acts }) {
     if (!act[name]) throw new Error(`unknown action ${name}; actions: ${ACTIONS.map(a => a.name).join(', ')}`);
     return act[name](...args);
   };
-  window.__sim.headless.setMode = setMode;
+  window.__sim.headless.setMode = m => setMode(m, true);
   document.getElementById('keys').textContent = 'Keys: ' + [
     ...TOOLS.map(t => `${t.key} ${t.label.toLowerCase()}`),
     ...ACTIONS.filter(a => a.key).map(a => `${a.key} ${a.label.toLowerCase().replace(' (hold)', '')}`),

@@ -39,7 +39,7 @@ window.__paintDone = (async () => {
 | `mist` | 5 | Spray bottle: fine droplets over a wide cone that dampen the paper, so strokes laid into it melt together. |
 | `blot` | 7 | Press a crumpled paper towel on wet paint to soak it up, leaving a mottled crease texture. |
 | `mask` | 6 | Masking fluid: a rubber film on dry paper or dried paint that washes flow around. Peel it with Remove mask. |
-| `wash` | 8 | Choose an area (lasso, rectangle or the whole sheet) and the loaded brush lays a wash in it, in real time: flat, graded, or around whatever is already painted there. Esc stops it; Cmd+Z takes the whole wash back. |
+| `wash` | 8 | Choose an area (lasso, rectangle, click inside a shape bounded by paint or mask, scrub over it, or the whole sheet) and the loaded brush lays a wash in it, in real time: flat, graded, or around whatever is already painted there. Esc stops it; Cmd+Z takes the whole wash back. |
 | `magnet` | 4 | Place a magnet under the paper (it pulls magnetic pigments such as Mars black). Drag to move; double-click, drag off the sheet or press Delete to remove; R or scroll to rotate. |
 
 ## Actions
@@ -91,7 +91,7 @@ Other keys: [ ] previous / next pigment · Shift-drag side of the brush · Z / X
 
 ## The Wash tool
 
-- `sim.wash(outline, { kind, fadeTo, mist, water })`: What the Wash tool does with the painter's lasso: fill the outline ([[x, y], ...], or null for the whole sheet) with the loaded brush. kind: 'flat' (fill), 'graded' (strength fades top to bottom to fadeTo × paint strength) or 'around' (washAround: goes around paint already there; mist: spray first). water: true for clean water (wetting an area for wet-in-wet). One undo step; resolves false if stopped. The panel's settings are sim.washOptions.
+- `sim.wash(area, { kind, fadeTo, dampen, water })`: What the Wash tool does with the painter's lasso: fill an area with the loaded brush: a polygon [[x, y], ...]; null for the whole sheet; { at: [x, y] } for the unpainted shape around a point (bounded by paint and masking fluid; M.areaAt); { scrub: points, radius } for a scrubbed area (M.scrubArea); or { mask }. kind: 'flat' (fill), 'graded' (strength fades top to bottom to fadeTo × paint strength) or 'around' (washAround: goes around paint already there). dampen: wet the paper lightly first. The wash senses as it goes and keeps its strength to about one stroke of the same brush. water: true for clean water (wetting an area for wet-in-wet). One undo step; resolves false if stopped. The panel's settings are sim.washOptions.
 
 ## Little minds (src/minds.js, window.__minds)
 

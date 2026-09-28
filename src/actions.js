@@ -14,7 +14,7 @@ export const TOOLS = [
   { name: 'mist',   mode: 4, key: '5', label: 'Mist',   doc: 'Spray bottle: fine droplets over a wide cone that dampen the paper, so strokes laid into it melt together.' },
   { name: 'blot',   mode: 6, key: '7', label: 'Blot',   doc: 'Press a crumpled paper towel on wet paint to soak it up, leaving a mottled crease texture.' },
   { name: 'mask',   mode: 5, key: '6', label: 'Mask',   doc: 'Masking fluid: a rubber film on dry paper or dried paint that washes flow around. Peel it with Remove mask.' },
-  { name: 'wash',   mode: 7, key: '8', label: 'Wash',   doc: 'Choose an area (lasso, rectangle or the whole sheet) and the loaded brush lays a wash in it, in real time: flat, graded, or around whatever is already painted there. Esc stops it; Cmd+Z takes the whole wash back.' },
+  { name: 'wash',   mode: 7, key: '8', label: 'Wash',   doc: 'Choose an area (lasso, rectangle, click inside a shape bounded by paint or mask, scrub over it, or the whole sheet) and the loaded brush lays a wash in it, in real time: flat, graded, or around whatever is already painted there. Esc stops it; Cmd+Z takes the whole wash back.' },
   { name: 'magnet', mode: 3, key: '4', label: 'Magnet', doc: 'Place a magnet under the paper (it pulls magnetic pigments such as Mars black). Drag to move; double-click, drag off the sheet or press Delete to remove; R or scroll to rotate.' },
 ];
 
@@ -107,7 +107,7 @@ export const SCRIPT_API = [
   { call: 'sim.pigments.add(from, name, changes)', probe: 'sim.pigments.add', doc: 'A new pan starting from another pigment\'s recipe. Returns its id. The box holds 32.' },
   { call: 'sim.pigments.reset(name) / remove(name) / recipes()', probe: 'sim.pigments.reset', doc: 'Back to the built-in recipe; remove the newest pigment of one\'s own; every recipe that differs from the built-in box.' },
   { section: 'The Wash tool' },
-  { call: 'sim.wash(outline, { kind, fadeTo, mist, water })', probe: 'sim.wash', doc: 'What the Wash tool does with the painter\'s lasso: fill the outline ([[x, y], ...], or null for the whole sheet) with the loaded brush. kind: \'flat\' (fill), \'graded\' (strength fades top to bottom to fadeTo × paint strength) or \'around\' (washAround: goes around paint already there; mist: spray first). water: true for clean water (wetting an area for wet-in-wet). One undo step; resolves false if stopped. The panel\'s settings are sim.washOptions.' },
+  { call: 'sim.wash(area, { kind, fadeTo, dampen, water })', probe: 'sim.wash', doc: 'What the Wash tool does with the painter\'s lasso: fill an area with the loaded brush: a polygon [[x, y], ...]; null for the whole sheet; { at: [x, y] } for the unpainted shape around a point (bounded by paint and masking fluid; M.areaAt); { scrub: points, radius } for a scrubbed area (M.scrubArea); or { mask }. kind: \'flat\' (fill), \'graded\' (strength fades top to bottom to fadeTo × paint strength) or \'around\' (washAround: goes around paint already there). dampen: wet the paper lightly first. The wash senses as it goes and keeps its strength to about one stroke of the same brush. water: true for clean water (wetting an area for wet-in-wet). One undo step; resolves false if stopped. The panel\'s settings are sim.washOptions.' },
   { section: 'Little minds (src/minds.js, window.__minds)' },
   { call: 'M.fill(poly, { grade, mode })', probe: '__minds.fill',
     doc: 'Paint a polygon evenly with the loaded brush (rows, cutting in along the edge, rewetting edges that start to dry). grade: [start, end] multiplies paint strength top to bottom.' },
