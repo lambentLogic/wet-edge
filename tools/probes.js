@@ -140,7 +140,8 @@
         h.setBrush(name); h.lift(); await h.paint(200, y, 820, y + 30, 20);
       }
       await h.wait(4);
-      h.setMode(2); S.values.dipLoad = 0;   // lifting with a thirsty brush h.lift(); await h.paint(300, 200, 700, 560, 20); h.setMode(0);
+      h.setMode(2); S.values.dipLoad = 0;   // lifting with a thirsty brush
+      h.lift(); await h.paint(300, 200, 700, 560, 20); h.setMode(0);
       await h.wait(10); await h.wait(10, { dry: true }); await h.wait(1);
       h.end();
       return await S.stateHashes();

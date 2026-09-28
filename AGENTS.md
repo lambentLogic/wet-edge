@@ -59,14 +59,16 @@ window.__paintDone = (async () => {
 | `removeMagnets` |  | Take every magnet away. |
 | `undo` | Cmd+Z | Undo the last stroke or sheet action. Wet paint comes back exactly as it was, mid-flow. |
 | `redo` | Shift+Cmd+Z | Redo what was undone (until the next stroke). |
+| `squeeze` (held: on/off) | Q | Water brush: squeeze water from the handle into the tip while held. |
+| `wipe` | E | Water brush: wipe the pigment out of the tip (it keeps its water). |
 | `savePainting` |  | Download the full paint state (.wcpaint) to reopen and keep working on, even rewet, later. Scripts: sim.paintingBlob(). |
 | `open` |  | *Human only.* Open a saved painting. Scripts: sim.open(blob), or tools/paint.mjs --open file. |
-| `restore` |  | *Human only.* Reopen the autosave (kept in this browser every few seconds), newest first; click again for the one before. |
+| `restore` |  | Reopen the autosave (kept in this browser every few seconds), newest first; click again for the one before. |
 | `savePNG` |  | Download the painting as it looks. Scripts: tools/paint.mjs --shot file. |
 | `saveLayer` |  | Download just the paint on a transparent background: a filter layer (multiply) and a body layer (add). Scripts: sim.layerBlobs(). |
 | `record` |  | *Human only.* Record pointer strokes and settings to a file that replays exactly. Scripts replay them with sim.replay(rec) or tools/paint.mjs --replay file. |
 
-Other keys: [ ] previous / next pigment · Shift-drag side of the brush · Z / X lighter / heavier touch · R, scroll turn a flat brush or a magnet · Q / E water brush: squeeze water in / wipe pigment out.
+Other keys: [ ] previous / next pigment · Shift-drag side of the brush · Z / X lighter / heavier touch · R, scroll turn a flat brush or a magnet.
 
 ## Tools and actions
 
@@ -76,8 +78,9 @@ Other keys: [ ] previous / next pigment · Shift-drag side of the brush · Z / X
 ## Painting
 
 - `sim.path(points, framesPerSeg = 4)`: One stroke through [x, y, pressure?, side?] points in grid cells (1024×768, 0.2 mm each), in real time. Pressure sets width (down to the brush's taper); side > 0 lays the brush on its side. A path whose first two points are equal is a dab.
-- `sim.headless.setBrushPreset(key)`: Pick a brush: round, mop, water, rigger, flat.
-- `sim.headless.setBrush(nameOrMix)`: Load pigment: a name ('French Ultramarine') or a mix [[name, parts], ...]. sim.headless.pigmentNames() lists the paint box.
+- `sim.headless.setBrushPreset(key)`: Pick a brush (round, mop, water, rigger, flat), exactly as the brush menu does: the preset's build, and the size that brush was last given in this browser.
+- `sim.headless.setBrush(nameOrMix)`: Load pigment as the paint box does: a name is a click on its pan (a dip brush takes it; the water brush picks up a dab that joins what it holds), a mix [[name, parts], ...] loads like a mixing well. sim.headless.pigmentNames() lists the box.
+- `sim.wells.get() / add(well, name) / load(well) / empty(well)`: The six mixing wells (kept in the browser): read them, add a dab of a pigment to one (at most 4 pigments a well), load the brush from one, or empty it. Wells are numbered 0-5.
 - `sim.values`: Every knob by key (see the tables below). brushRadius, brushPigment (paint strength) and dipLoad (Wetness) are the everyday ones; set them directly.
 - `sim.headless.setPaper(key, seed)`: New sheet of a paper preset with a fixed seed.
 - `sim.headless.setTone(key)`: Paper tone (natural, white, …).
@@ -91,7 +94,7 @@ Other keys: [ ] previous / next pigment · Shift-drag side of the brush · Z / X
 
 ## The Wash tool
 
-- `sim.wash(area, { kind, fadeTo, dampen, water })`: What the Wash tool does with the painter's lasso: fill an area with the loaded brush: a polygon [[x, y], ...]; null for the whole sheet; { at: [x, y] } for the unpainted shape around a point (bounded by paint and masking fluid; M.areaAt); { scrub: points, radius } for a scrubbed area (M.scrubArea); or { mask }. kind: 'flat' (fill), 'graded' (strength fades top to bottom to fadeTo × paint strength) or 'around' (washAround: goes around paint already there). dampen: bring the paper in the area evenly up to damp first (sim.dampen, no strokes). The wash senses as it goes and keeps its strength to about one stroke of the same brush. water: true for clean water (wetting an area for wet-in-wet). One undo step; resolves false if stopped. The panel's settings are sim.washOptions.
+- `sim.wash(area, { kind, fadeTo, dampen, water, dampenOnly })`: What the Wash tool does with the painter's lasso: fill an area with the loaded brush: a polygon [[x, y], ...]; null for the whole sheet; { at: [x, y] } for the unpainted shape around a point (bounded by paint and masking fluid; M.areaAt); { scrub: points, radius } for a scrubbed area (M.scrubArea); or { mask }. kind: 'flat' (fill), 'graded' (strength fades top to bottom to fadeTo × paint strength) or 'around' (washAround: goes around paint already there). dampen: bring the paper in the area evenly up to damp first (sim.dampen, no strokes). The wash senses as it goes and keeps its strength to about one stroke of the same brush. water: true for clean water brushed on (wetting an area for wet-in-wet); dampenOnly: true to only dampen the area, with no strokes. One undo step; resolves false if stopped. The panel's settings are sim.washOptions.
 - `sim.dampen(mask, level = 0.8)`: Dampen the paper evenly by fiat: every cell of the mask (Uint8Array over the sheet; M.maskOf(area) makes one) up to that fraction of what its fibres hold. No strokes.
 
 ## Little minds (src/minds.js, window.__minds)

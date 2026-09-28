@@ -47,11 +47,15 @@ export const ACTIONS = [
     doc: 'Undo the last stroke or sheet action. Wet paint comes back exactly as it was, mid-flow.' },
   { name: 'redo',       group: 'history', label: 'Redo', key: 'Shift+Cmd+Z',
     doc: 'Redo what was undone (until the next stroke).' },
+  { name: 'squeeze',    group: 'keys',    label: 'Squeeze', key: 'Q', hold: true,
+    doc: 'Water brush: squeeze water from the handle into the tip while held.' },
+  { name: 'wipe',       group: 'keys',    label: 'Wipe', key: 'E',
+    doc: 'Water brush: wipe the pigment out of the tip (it keeps its water).' },
   { name: 'savePainting', group: 'file',  label: 'Save painting',
     doc: 'Download the full paint state (.wcpaint) to reopen and keep working on, even rewet, later. Scripts: sim.paintingBlob().' },
   { name: 'open',       group: 'file',    label: 'Open…', human: true,
     doc: 'Open a saved painting. Scripts: sim.open(blob), or tools/paint.mjs --open file.' },
-  { name: 'restore',    group: 'history',   label: 'Restore', human: true,
+  { name: 'restore',    group: 'history',   label: 'Restore',
     doc: 'Reopen the autosave (kept in this browser every few seconds), newest first; click again for the one before.' },
   { name: 'savePNG',    group: 'file',    label: 'Save PNG',
     doc: 'Download the painting as it looks. Scripts: tools/paint.mjs --shot file.' },
@@ -80,7 +84,7 @@ export const STUDIO = [
 // Keys that aren't tied to one action.
 export const KEYS = [
   ['[ ]', 'previous / next pigment'], ['Shift-drag', 'side of the brush'], ['Z / X', 'lighter / heavier touch'],
-  ['R, scroll', 'turn a flat brush or a magnet'], ['Q / E', 'water brush: squeeze water in / wipe pigment out'],
+  ['R, scroll', 'turn a flat brush or a magnet'],
 ];
 
 // The script interface beyond tools and actions, for AGENTS.md. `probe`
@@ -93,9 +97,10 @@ export const SCRIPT_API = [
   { call: 'sim.path(points, framesPerSeg = 4)', probe: 'sim.path',
     doc: 'One stroke through [x, y, pressure?, side?] points in grid cells (1024×768, 0.2 mm each), in real time. Pressure sets width (down to the brush\'s taper); side > 0 lays the brush on its side. A path whose first two points are equal is a dab.' },
   { call: 'sim.headless.setBrushPreset(key)', probe: 'sim.headless.setBrushPreset',
-    doc: 'Pick a brush: round, mop, water, rigger, flat.' },
+    doc: 'Pick a brush (round, mop, water, rigger, flat), exactly as the brush menu does: the preset\'s build, and the size that brush was last given in this browser.' },
   { call: 'sim.headless.setBrush(nameOrMix)', probe: 'sim.headless.setBrush',
-    doc: 'Load pigment: a name (\'French Ultramarine\') or a mix [[name, parts], ...]. sim.headless.pigmentNames() lists the paint box.' },
+    doc: 'Load pigment as the paint box does: a name is a click on its pan (a dip brush takes it; the water brush picks up a dab that joins what it holds), a mix [[name, parts], ...] loads like a mixing well. sim.headless.pigmentNames() lists the box.' },
+  { call: 'sim.wells.get() / add(well, name) / load(well) / empty(well)', probe: 'sim.wells.get', doc: 'The six mixing wells (kept in the browser): read them, add a dab of a pigment to one (at most 4 pigments a well), load the brush from one, or empty it. Wells are numbered 0-5.' },
   { call: 'sim.values', probe: 'sim.values',
     doc: 'Every knob by key (see the tables below). brushRadius, brushPigment (paint strength) and dipLoad (Wetness) are the everyday ones; set them directly.' },
   { call: 'sim.headless.setPaper(key, seed)', probe: 'sim.headless.setPaper',
@@ -107,7 +112,7 @@ export const SCRIPT_API = [
   { call: 'sim.pigments.add(from, name, changes)', probe: 'sim.pigments.add', doc: 'A new pan starting from another pigment\'s recipe. Returns its id. The box holds 32.' },
   { call: 'sim.pigments.reset(name) / remove(name) / recipes()', probe: 'sim.pigments.reset', doc: 'Back to the built-in recipe; remove the newest pigment of one\'s own; every recipe that differs from the built-in box.' },
   { section: 'The Wash tool' },
-  { call: 'sim.wash(area, { kind, fadeTo, dampen, water })', probe: 'sim.wash', doc: 'What the Wash tool does with the painter\'s lasso: fill an area with the loaded brush: a polygon [[x, y], ...]; null for the whole sheet; { at: [x, y] } for the unpainted shape around a point (bounded by paint and masking fluid; M.areaAt); { scrub: points, radius } for a scrubbed area (M.scrubArea); or { mask }. kind: \'flat\' (fill), \'graded\' (strength fades top to bottom to fadeTo × paint strength) or \'around\' (washAround: goes around paint already there). dampen: bring the paper in the area evenly up to damp first (sim.dampen, no strokes). The wash senses as it goes and keeps its strength to about one stroke of the same brush. water: true for clean water (wetting an area for wet-in-wet). One undo step; resolves false if stopped. The panel\'s settings are sim.washOptions.' },
+  { call: 'sim.wash(area, { kind, fadeTo, dampen, water, dampenOnly })', probe: 'sim.wash', doc: 'What the Wash tool does with the painter\'s lasso: fill an area with the loaded brush: a polygon [[x, y], ...]; null for the whole sheet; { at: [x, y] } for the unpainted shape around a point (bounded by paint and masking fluid; M.areaAt); { scrub: points, radius } for a scrubbed area (M.scrubArea); or { mask }. kind: \'flat\' (fill), \'graded\' (strength fades top to bottom to fadeTo × paint strength) or \'around\' (washAround: goes around paint already there). dampen: bring the paper in the area evenly up to damp first (sim.dampen, no strokes). The wash senses as it goes and keeps its strength to about one stroke of the same brush. water: true for clean water brushed on (wetting an area for wet-in-wet); dampenOnly: true to only dampen the area, with no strokes. One undo step; resolves false if stopped. The panel\'s settings are sim.washOptions.' },
   { call: 'sim.dampen(mask, level = 0.8)', probe: 'sim.dampen', doc: 'Dampen the paper evenly by fiat: every cell of the mask (Uint8Array over the sheet; M.maskOf(area) makes one) up to that fraction of what its fibres hold. No strokes.' },
   { section: 'Little minds (src/minds.js, window.__minds)' },
   { call: 'M.fill(poly, { grade, mode })', probe: '__minds.fill',

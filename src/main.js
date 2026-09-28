@@ -1086,7 +1086,7 @@ async function init() {
   // The Wash tool: a little mind a person can use too. Fills an outline
   // with the loaded brush, in real time, as one undo step. The painter's
   // lasso and scripts both call this.
-  window.__sim.washOptions = { kind: 'flat', fadeTo: 0.2, dampen: true, water: false, area: 'lasso', scrubWidth: 40 };
+  window.__sim.washOptions = { kind: 'flat', fadeTo: 0.2, dampen: true, water: false, dampenOnly: false, area: 'lasso', scrubWidth: 40 };
   // Show an area on the overlay (faint blue) while it's being washed.
   const drawArea = mask => {
     drawMagnets();
@@ -1096,7 +1096,7 @@ async function init() {
   };
   window.__sim.wash = async (outline, opts = {}) => {
     if (state.washing) throw new Error('a wash is already running');
-    const { kind, fadeTo, water } = { ...window.__sim.washOptions, ...opts };
+    const { kind, fadeTo, water, dampenOnly } = { ...window.__sim.washOptions, ...opts };
     const dampen = opts.dampen ?? opts.mist ?? window.__sim.washOptions.dampen;
     const M = window.__minds, h = window.__sim.headless;
     // The area: a polygon; null for the whole sheet (a little past its
@@ -1116,7 +1116,8 @@ async function init() {
     state.washing = true; state.cancelWash = false; state.washReturn = mode0; state.onWash?.();
     try {
       h.setMode(water ? 1 : 0);
-      if (dampen) await window.__sim.dampen(areaMask);
+      if (dampen || dampenOnly) await window.__sim.dampen(areaMask);
+      if (dampenOnly) return true;
       // A found or scrubbed shape is cut in along its edge with the tip and
       // filled with rows that fit the room (washAround): flat rows would
       // spill a big brush over a thin painted outline.
@@ -1679,7 +1680,10 @@ function buildUI({ clear, newPaper, acts }) {
     applying = false;
     document.getElementById('brushDetails').querySelector('summary').textContent = `Build: brush (${b.name})`;
     state.brushType = b.type;
-    state.reservoir = 1; state.pigStore = 1;
+    // A freshly picked water brush is clean: the first pan clicked is its
+    // first dab (it held a full dab of the last brush's pigment, so the
+    // first click gave it two).
+    state.reservoir = 1; state.pigStore = b.type === 'water' ? 0 : 1;
     brushSel.value = key;
     updateBrushLabel();
   };
@@ -1687,10 +1691,10 @@ function buildUI({ clear, newPaper, acts }) {
   applyBrush(DEFAULT_BRUSH);
   window.addEventListener('keydown', e => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || state.brushType !== 'water') return;
-    if (e.key === 'q' || e.key === 'Q') state.squeezing = true;
-    if (e.key === 'e' || e.key === 'E') { state.pigStore = 0; updateBrushLabel(); }
+    if (e.key === 'q' || e.key === 'Q') window.__sim.act('squeeze', true);
+    if (e.key === 'e' || e.key === 'E') window.__sim.act('wipe');
   });
-  window.addEventListener('keyup', e => { if (e.key === 'q' || e.key === 'Q') state.squeezing = false; });
+  window.addEventListener('keyup', e => { if (e.key === 'q' || e.key === 'Q') window.__sim.act('squeeze', false); });
 
   // Mixing wells: each holds dabs of up to 4 pigments (the most a wet spot
   // on the paper can carry). Saved in this browser.
@@ -1807,7 +1811,7 @@ function buildUI({ clear, newPaper, acts }) {
     document.getElementById('washFadeRow').hidden = wo.kind !== 'graded';
   };
   washKind.addEventListener('change', () => { wo.kind = washKind.value; showWash(); });
-  washWith.addEventListener('change', () => { wo.water = washWith.value === 'water'; });
+  washWith.addEventListener('change', () => { wo.water = washWith.value === 'water'; wo.dampenOnly = washWith.value === 'dampen'; });
   const washArea = document.getElementById('washArea');
   washArea.addEventListener('change', () => { wo.area = washArea.value; washHint.textContent = WASH_HINTS[wo.area]; });
   const washHint = document.getElementById('washHint');
@@ -1863,6 +1867,8 @@ function buildUI({ clear, newPaper, acts }) {
     removeMagnets: () => { state.magnets = []; drawMagnets(); },
     record: () => toggleRecord(),
     stop: () => state.stopWash(),
+    squeeze: (on = true) => { if (state.brushType === 'water') state.squeezing = on; },
+    wipe: () => { if (state.brushType === 'water') { state.pigStore = 0; updateBrushLabel(); } },
   };
   const rows = { sheet: 'sheetActions', magnet: 'magnetRow', history: 'historyActions', file: 'fileActions' };
   for (const a of ACTIONS) {
@@ -1876,8 +1882,8 @@ function buildUI({ clear, newPaper, acts }) {
     } else {
       b.addEventListener('click', () => act[a.name]());
     }
-    document.getElementById(rows[a.group]).appendChild(b);
     btns[a.name] = b;
+    if (rows[a.group]) document.getElementById(rows[a.group]).appendChild(b);   // 'keys': key only
   }
   btns.restore.hidden = true;
   btns.stop.hidden = true;
@@ -1888,6 +1894,26 @@ function buildUI({ clear, newPaper, acts }) {
     return act[name](...args);
   };
   window.__sim.headless.setMode = m => setMode(m, true);
+  // Scripts pick brushes and load pigment through the same functions as
+  // the brush menu, the pans and the wells.
+  const pigIndex = name => { const i = PIGMENTS.findIndex(pg => pg.name === name); if (i < 0) throw new Error(`unknown pigment ${name}`); return i; };
+  window.__sim.headless.setBrushPreset = key => { if (!BRUSHES[key]) throw new Error(`unknown brush ${key}`); applyBrush(key); };
+  window.__sim.headless.setBrush = load => {
+    if (typeof load === 'string') return setPigment(pigIndex(load));
+    if (load.length === 1) return setPigment(pigIndex(load[0][0]));
+    state.brush = load.map(([name, frac]) => ({ pigment: pigIndex(name), frac }));
+    if (state.brushType === 'water') state.pigStore = 1;
+    selectedWell = -1; renderWells();
+    pans.forEach(pan => pan.classList.remove('on'));
+    brushLabel.textContent = state.brush.map(b => `${b.frac} ${PIGMENTS[b.pigment].code}`).join(' + ');
+    renderEditor();
+  };
+  window.__sim.wells = {
+    get: () => wells.map(w => w.map(d => ({ name: PIGMENTS[d.pigment].name, dabs: d.dabs }))),
+    add: (k, name) => { selectedWell = k; addDab(pigIndex(name)); return window.__sim.wells.get()[k]; },
+    load: k => loadWell(k),
+    empty: k => { wells[k] = []; saveWells(); loadWell(k); },
+  };
   document.getElementById('keys').textContent = 'Keys: ' + [
     ...TOOLS.map(t => `${t.key} ${t.label.toLowerCase()}`),
     ...ACTIONS.filter(a => a.key).map(a => `${a.key} ${a.label.toLowerCase().replace(' (hold)', '')}`),
