@@ -261,9 +261,14 @@ export function makeMinds(sim) {
     const unturn = broadside();
     const rowAt = (y, a, b) => { const n = Math.max(2, Math.ceil((b - a) / 30)); return Array.from({ length: n + 1 }, (_, k) => [a + (b - a) * k / n + (b === a ? k - n / 2 : 0), y]); };
     if (dampen) await mistOver(insideOf(reg));
-    const gradeAt = y => (grade ? grade[0] + (grade[1] - grade[0]) * Math.min(1, Math.max(0, (y - first) / Math.max(1, bottom - inset * 0.5 - first))) : 1);
+    const gradeAt = y => (grade ? grade[0] + (grade[1] - grade[0]) * Math.min(1, Math.max(0, (y - first) / Math.max(1, bottom - (first - top) - first))) : 1);
     const doser = even && mode !== 1 ? await makeDoser(insideOf(reg), gradeAt) : null;
-    for (let y = first; y <= Math.max(first, bottom - inset * 0.5); y += dy, dir = -dir) {
+    // Rows spread evenly from the first to the last, the last as far in
+    // from the bottom as the first is from the top (stepping by dy from
+    // the top left up to a whole gap unpainted at the bottom).
+    const last = Math.max(first, bottom - (first - top));
+    const nRows = Math.max(1, Math.ceil((last - first) / dy - 1e-6)), step = (last - first) / nRows || dy;
+    for (let y = first, k = 0; k <= nRows; k++, y = first + k * step, dir = -dir) {
       for (const [x0, x1] of reg.spans(y)) {
         let a = x0 + inset * 0.6, b = x1 - inset * 0.6;
         if (b <= a) { a = b = (x0 + x1) / 2; }
