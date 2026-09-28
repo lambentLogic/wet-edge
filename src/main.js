@@ -1279,12 +1279,27 @@ function buildUI({ clear, newPaper, acts }) {
     const range = Object.assign(document.createElement('input'), {
       type: 'range', min: k.min ?? p.min, max: k.max ?? p.max, step: ((k.max ?? p.max) - (k.min ?? p.min)) / 500, value: p.v,
     });
-    range.addEventListener('input', () => inputs[k.key](parseFloat(range.value)));
-    (setters[k.key] ??= []).push(v => { range.value = v; });
+    // Centred sliders (tilt) snap to their middle; double-click any slider
+    // to put it back to its default.
+    const lo = k.min ?? p.min, hi = k.max ?? p.max, snap = lo < 0 && hi > 0;
+    range.addEventListener('input', () => {
+      let v = parseFloat(range.value);
+      if (snap && Math.abs(v) < 0.04 * (hi - lo)) v = 0;
+      inputs[k.key](v);
+    });
+    range.addEventListener('dblclick', () => inputs[k.key](p.v));
+    row.title += ' Double-click to reset.';
+    (setters[k.key] ??= []).push(v => { range.value = v; name.textContent = k.label + (snap && v !== 0 ? ' •' : ''); });
     row.append(name, range);
     studioEl.appendChild(row);
     return { k, row };
   });
+  // Put the board back down flat.
+  const level = Object.assign(document.createElement('button'), { textContent: 'Level the board', title: 'Tilt back to flat' });
+  level.addEventListener('click', () => { inputs.tiltX(0); inputs.tiltY(0); });
+  const levelRow = Object.assign(document.createElement('div'), { className: 'row' });
+  levelRow.appendChild(level);
+  studioEl.appendChild(levelRow);
   const showStudio = () => {
     for (const { k, row } of studioRows) {
       row.hidden = (k.tool && TOOLS.find(t => t.name === k.tool).mode !== state.mode) || (k.flat && values.brushShape < 0.5);
@@ -1307,6 +1322,7 @@ function buildUI({ clear, newPaper, acts }) {
       values[p.key] = v;
       for (const set of setters[p.key] ?? []) set(v);
       if (p.key === 'brushShape') showStudio();
+      if (p.key === 'tiltX' || p.key === 'tiltY') levelRow.hidden = !values.tiltX && !values.tiltY;
     };
     if (studioKeys.has(p.key)) continue;
     if (brushKeys.has(p.key)) knobRow(p, document.getElementById('brushKnobs'));
