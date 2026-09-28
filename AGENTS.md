@@ -80,6 +80,13 @@ Other keys: [ ] previous / next pigment · Shift-drag side of the brush · Z / X
 - `sim.headless.setPaper(key, seed)`: New sheet of a paper preset with a fixed seed.
 - `sim.headless.setTone(key)`: Paper tone (natural, white, …).
 
+## The paint box
+
+- `sim.pigments.get(name)`: A pigment's recipe: masstone and tint colours, opacity, scatter, spectrum, and its physical ratings (density, staining, granulation, flocculation, mobility, wick, load, magnetic; see RECIPE_FIELDS in src/pigments.js).
+- `sim.pigments.edit(name, changes)`: Change a pigment's recipe; it is rebuilt (colour fit included) and applies everywhere at once. The painter's edits live in their browser and in saved paintings; a headless page starts from the built-in box.
+- `sim.pigments.add(from, name, changes)`: A new pan starting from another pigment's recipe. Returns its id. The box holds 32.
+- `sim.pigments.reset(name) / remove(name) / recipes()`: Back to the built-in recipe; remove the newest pigment of one's own; every recipe that differs from the built-in box.
+
 ## Little minds (src/minds.js, window.__minds)
 
 - `M.fill(poly, { grade, mode })`: Paint a polygon evenly with the loaded brush (rows, cutting in along the edge, rewetting edges that start to dry). grade: [start, end] multiplies paint strength top to bottom.

@@ -6,7 +6,7 @@ import { makeMinds } from './minds.js';
 import { TOOLS, ACTIONS, STUDIO, KEYS } from './actions.js';
 import { KNOB_DOCS } from './knob-docs.js';
 import { makePaper, PAPERS, DEFAULT_PAPER, TONES } from './paper.js';
-import { PIGMENTS, STAIN_MAP } from './pigments.js';
+import { PIGMENTS, STAIN_MAP, RECIPES, RECIPE_FIELDS, SPECTRA, OPACITIES, buildPigment, refitStainMap } from './pigments.js';
 import { NB, upsample, srgbToLinear, TO_RGB } from './spectral.js';
 
 const W = 1024, H = 768, N = W * H;
@@ -223,21 +223,95 @@ async function init() {
   const frameU32 = new Uint32Array(frameData), frameF32 = new Float32Array(frameData);
   const renderData = new ArrayBuffer(64);
   // The pigment table: colour and physical properties of every pigment in
-  // the library. Constant, so it's uploaded once.
+  // the paint box, and (render only) their spectra: per pigment 16 K then
+  // 16 S bands; then the ground (paper) spectrum; then maps from the stain
+  // layer's RGB K and S totals to spectra (the stain layer keeps only RGB
+  // sums, see stainDep). Uploaded again when the painter edits a pigment.
   const pigData = new Float32Array(MAX_PIGMENTS * 16);
-  PIGMENTS.slice(0, MAX_PIGMENTS).forEach((pg, k) => {
-    pigData.set([...pg.K, 0, ...pg.S, 0,
-      pg.density, pg.staining, pg.granulation, pg.flocculation,
-      pg.mobility, pg.wick, pg.load ?? 1, pg.magnetic ?? 0], k * 16);
-  });
-  device.queue.writeBuffer(pigBuf, 0, pigData);
-  // Spectral table (render only): per pigment 16 K then 16 S bands; then
-  // the ground (paper) spectrum; then maps from the stain layer's RGB K and
-  // S totals to spectra (the stain layer keeps only RGB sums, see stainDep).
   const specData = new Float32Array(SPEC_FLOATS);
-  PIGMENTS.slice(0, MAX_PIGMENTS).forEach((pg, k) => specData.set([...pg.Kspec, ...pg.Sspec], k * 32));
-  specData.set(STAIN_MAP.K.flat(), MAX_PIGMENTS * 32 + NB);
-  specData.set(STAIN_MAP.S.flat(), MAX_PIGMENTS * 32 + NB + 3 * NB);
+  const uploadPigments = () => {
+    pigData.fill(0);
+    PIGMENTS.slice(0, MAX_PIGMENTS).forEach((pg, k) => {
+      pigData.set([...pg.K, 0, ...pg.S, 0,
+        pg.density, pg.staining, pg.granulation, pg.flocculation,
+        pg.mobility, pg.wick, pg.load ?? 1, pg.magnetic ?? 0], k * 16);
+    });
+    device.queue.writeBuffer(pigBuf, 0, pigData);
+    refitStainMap();
+    PIGMENTS.slice(0, MAX_PIGMENTS).forEach((pg, k) => specData.set([...pg.Kspec, ...pg.Sspec], k * 32));
+    specData.set(STAIN_MAP.K.flat(), MAX_PIGMENTS * 32 + NB);
+    specData.set(STAIN_MAP.S.flat(), MAX_PIGMENTS * 32 + NB + 3 * NB);
+    device.queue.writeBuffer(specBuf, 0, specData);
+  };
+  // The painter's paint box: edits to the built-in recipes and pigments of
+  // their own, kept in this browser and in saved paintings. Editing a
+  // pigment changes it everywhere, paint already on the sheet included
+  // (except the colour of paint that has stained into the fibres, which is
+  // fixed when it stains).
+  const BOX_KEY = 'hyperreal-watercolor.pigments';
+  const RECIPE_KEYS = ['name', 'code', 'kind', 'masstone', 'tint', 'opacity', 'scatter', 'spectrum', 'density', 'staining', 'granulation', 'flocculation', 'mobility', 'wick', 'load', 'magnetic', 'custom'];
+  const recipeOf = pg => Object.fromEntries(RECIPE_KEYS.filter(k => pg[k] !== undefined).map(k => [k, pg[k]]));
+  const box = {
+    changed: [],
+    get(name) { const pg = PIGMENTS.find(pg => pg.name === name); if (!pg) throw new Error(`unknown pigment ${name}`); return recipeOf(pg); },
+    // Change some of a pigment's recipe: box.edit('Transparent Red Oxide', { masstone: '#5A2010', staining: 0.8 }).
+    edit(name, changes) {
+      const i = PIGMENTS.findIndex(pg => pg.name === name);
+      if (i < 0) throw new Error(`unknown pigment ${name}`);
+      const recipe = { ...recipeOf(PIGMENTS[i]), ...changes, name: changes.name ?? name };
+      PIGMENTS[i] = buildPigment(recipe);
+      box.commit();
+      return recipeOf(PIGMENTS[i]);
+    },
+    // A new pan, starting from an existing pigment's recipe.
+    add(from, name, changes = {}) {
+      if (PIGMENTS.length >= MAX_PIGMENTS) throw new Error(`the paint box holds ${MAX_PIGMENTS} pigments`);
+      if (PIGMENTS.some(pg => pg.name === name)) throw new Error(`there is already a pigment called ${name}`);
+      PIGMENTS.push(buildPigment({ ...box.get(from), code: 'custom', ...changes, name, custom: true }));
+      box.commit();
+      return PIGMENTS.length - 1;
+    },
+    // Back to the built-in recipe (built-in pigments only).
+    reset(name) {
+      const r = RECIPES.find(r => r.name === name);
+      if (!r) throw new Error(`${name} isn't a built-in pigment`);
+      PIGMENTS[PIGMENTS.findIndex(pg => pg.name === name)] = buildPigment(r);
+      box.commit();
+    },
+    // Remove a pigment of the painter's own (only if it isn't on the sheet
+    // or in the brush: ids are GPU slots, so it has to be the last one).
+    remove(name) {
+      const i = PIGMENTS.findIndex(pg => pg.name === name);
+      if (!PIGMENTS[i]?.custom) throw new Error(`${name} isn't a pigment of your own`);
+      if (i !== PIGMENTS.length - 1) throw new Error('only the newest pigment of your own can be removed');
+      PIGMENTS.pop();
+      state.brush = state.brush.filter(b => b.pigment < PIGMENTS.length);
+      if (!state.brush.length) state.brush = [{ pigment: 0, frac: 1 }];
+      box.commit();
+    },
+    edited(name) {
+      const pg = PIGMENTS.find(pg => pg.name === name), r = RECIPES.find(r => r.name === name);
+      return !!pg && (!r || JSON.stringify(recipeOf(pg)) !== JSON.stringify(recipeOf(buildPigment(r))));
+    },
+    // Every pigment that differs from the built-in box, as recipes.
+    recipes() { return PIGMENTS.filter(pg => pg.custom || box.edited(pg.name)).map(recipeOf); },
+    // Apply saved recipes (from this browser or a painting): edits to
+    // built-ins by name, pigments of the painter's own added.
+    apply(recipes) {
+      for (const r of recipes ?? []) {
+        const i = PIGMENTS.findIndex(pg => pg.name === r.name);
+        if (i >= 0) PIGMENTS[i] = buildPigment(r);
+        else if (PIGMENTS.length < MAX_PIGMENTS) PIGMENTS.push(buildPigment({ ...r, custom: true }));
+      }
+      box.commit(false);
+    },
+    commit(persist = true) {
+      uploadPigments();
+      if (persist && !state.headless) try { localStorage.setItem(BOX_KEY, JSON.stringify(box.recipes())); } catch {}
+      for (const f of box.changed) f();
+    },
+  };
+  try { box.apply(JSON.parse(localStorage.getItem(BOX_KEY) ?? '[]')); } catch { uploadPigments(); }
   let groundKey = '';
   const writeGround = rgb => {
     const key = rgb.join(',');
@@ -576,6 +650,7 @@ async function init() {
     }
     await device.queue.onSubmittedWorkDone(); pending = 0;
   }
+  window.__sim.pigments = box;
   window.__sim.headless = {
     begin() { state.headless = true; },
     end() { state.headless = false; },
@@ -820,7 +895,7 @@ async function init() {
     };
     const meta = {
       version: STATE_VERSION, W, H, simTime: state.simTime, paper: state.paper, tone: state.tone,
-      magnets: state.magnets, values, pigments: PIGMENTS.map(pg => pg.name),
+      magnets: state.magnets, values, pigments: PIGMENTS.map(pg => pg.name), recipes: window.__sim.pigments.recipes(),
       sizes: Object.fromEntries(Object.entries(parts).map(([k, v]) => [k, v.byteLength])),
     };
     const head = new TextEncoder().encode(JSON.stringify(meta));
@@ -876,6 +951,8 @@ async function init() {
     const take = n => { const b = raw.slice(off, off + n); off += n; return b; };
     const a = take(meta.sizes.A); let g = take(meta.sizes.G), d = take(meta.sizes.D); const ax = take(meta.sizes.aux);
     if ((meta.version ?? 1) < 2) { const f = new Float32Array(ax); for (let c = 0; c < N; c++) f[c * 4 + 2] = 0; }
+    // The painting's own pigments (edited or the painter's own) join the box.
+    if (meta.recipes) window.__sim.pigments.apply(meta.recipes);
     // Pigment ids refer to the library at save time; remap by name.
     const remap = meta.pigments.map(name => Math.max(PIGMENTS.findIndex(pg => pg.name === name), 0));
     // Version 5 holds eight packed suspended components (see GP).
@@ -1255,15 +1332,114 @@ function buildUI({ clear, newPaper, acts }) {
   let mixing = false;
   mixToggle.addEventListener('click', () => { mixing = !mixing; mixToggle.classList.toggle('on', mixing); });
 
-  const pans = PIGMENTS.map((pg, i) => {
-    const pan = document.createElement('button');
-    pan.className = 'pan';
-    pan.title = `${pg.name} (${pg.code}, ${pg.kind})`;
-    pan.style.background = swatchColor(pg);
-    pan.addEventListener('click', e => (e.shiftKey || mixing) ? addDab(i) : setPigment(i));
-    palette.appendChild(pan);
-    return pan;
-  });
+  let pans = [];
+  const renderPans = () => {
+    palette.replaceChildren();
+    pans = PIGMENTS.map((pg, i) => {
+      const pan = document.createElement('button');
+      pan.className = 'pan';
+      pan.title = `${pg.name} (${pg.code}, ${pg.kind})${window.__sim.pigments.edited(pg.name) ? ', edited' : ''}`;
+      pan.style.background = swatchColor(pg);
+      if (window.__sim.pigments.edited(pg.name)) pan.classList.add('edited');
+      pan.addEventListener('click', e => (e.shiftKey || mixing) ? addDab(i) : setPigment(i));
+      palette.appendChild(pan);
+      return pan;
+    });
+    if (state.brush.length === 1) pans[state.brush[0].pigment]?.classList.add('on');
+  };
+  renderPans();
+
+  // The pigment editor: the recipe of the pigment in the brush (a pan
+  // click still just loads the brush; the editor follows it).
+  const editor = document.getElementById('pigEditor');
+  const editBtn = document.getElementById('editPigment');
+  editBtn.addEventListener('click', () => { editor.hidden = !editor.hidden; editBtn.classList.toggle('on', !editor.hidden); renderEditor(); });
+  const refs = key => {
+    const vals = RECIPES.map(r => [r[key] ?? (key === 'load' ? 1 : 0), r.name]).sort((a, b) => a[0] - b[0]);
+    const ub = RECIPES.find(r => r.name === 'French Ultramarine');
+    const pick = [vals[0], [ub[key] ?? 1, ub.name], vals[vals.length - 1]];
+    return pick.filter((v, i) => pick.findIndex(w => w[1] === v[1]) === i).map(([v, n]) => `${n} ${+(+v).toFixed(2)}`).join(' · ');
+  };
+  function renderEditor() {
+    if (editor.hidden) return;
+    const box = window.__sim.pigments;
+    const pg = PIGMENTS[state.brush[0]?.pigment ?? 0], r = box.get(pg.name);
+    const edit = changes => { try { box.edit(pg.name, changes); editor.querySelector('.msg').textContent = ''; } catch (e) { editor.querySelector('.msg').textContent = e.message; } };
+    editor.replaceChildren();
+    const head = document.createElement('div');
+    head.className = 'edHead';
+    head.innerHTML = `<b></b> <span class="hint"></span>`;
+    head.querySelector('b').textContent = pg.name;
+    head.querySelector('span').textContent = `${pg.code}${box.edited(pg.name) ? ' · edited' : ''}${state.brush.length > 1 ? ' · first pigment of the mix' : ''}`;
+    editor.appendChild(head);
+    const line = (label, doc, ...els) => {
+      const row = document.createElement('label');
+      row.className = 'studio';
+      row.title = doc;
+      const name = document.createElement('span');
+      name.textContent = label;
+      const cell = document.createElement('div');
+      cell.className = 'edCell';
+      cell.append(...els);
+      row.append(name, cell);
+      editor.appendChild(row);
+      return row;
+    };
+    const color = (key, label, doc) => {
+      const inp = Object.assign(document.createElement('input'), { type: 'color', value: r[key] ?? '#ffffff' });
+      inp.addEventListener('change', () => edit({ [key]: inp.value }));
+      const els = [inp];
+      if (key === 'tint') {
+        const none = Object.assign(document.createElement('button'), { textContent: r.tint ? 'no tint' : 'add tint' });
+        none.addEventListener('click', e => { e.preventDefault(); edit({ tint: r.tint ? null : r.masstone }); });
+        els.push(none);
+      }
+      line(label, doc, ...els);
+    };
+    color('masstone', 'Masstone', 'The colour of a heavy, concentrated application over white paper. Together with the tint this sets the hue, the value and the tinting strength.');
+    if (r.tint !== null) color('tint', 'Tint', 'The colour of a light wash over white paper. Far from the masstone (a pale tint of a dark masstone) = a strong tinter; close to it = a weak one.');
+    else color('tint', 'Tint', 'No tint colour: the fit uses the masstone and the opacity alone (usual for whites and metallics).');
+    const opSel = document.createElement('select');
+    for (const o of OPACITIES) opSel.add(new Option(o, o));
+    opSel.value = r.opacity;
+    opSel.addEventListener('change', () => edit({ opacity: opSel.value }));
+    const low = Object.assign(document.createElement('input'), { type: 'checkbox', checked: r.scatter !== undefined, title: 'Low refractive index (organics, ultramarine, fine oxides): scatters little light, so a heavy film is dark and can\'t lighten a dark ground; the colours then set its tinting strength.' });
+    low.addEventListener('change', () => edit({ scatter: low.checked ? 0.04 : undefined }));
+    const lowLbl = Object.assign(document.createElement('span'), { className: 'hint', textContent: 'low index' });
+    line('Body', 'How much the pigment scatters light: whether it shows on a dark ground (opaque) or glazes over it (transparent).', opSel, low, lowLbl);
+    const spSel = document.createElement('select');
+    spSel.add(new Option('from the colours', 'colours'));
+    for (const k of SPECTRA) spSel.add(new Option(`measured: ${k}`, k));
+    spSel.value = r.spectrum ?? (SPECTRA.includes(pg.name) ? pg.name : 'colours');
+    spSel.addEventListener('change', () => edit({ spectrum: spSel.value }));
+    line('Spectrum', 'Where the spectral render gets the shape of its absorption (which decides how it mixes): a measured pigment, or a smooth spectrum fitted to the colours. Its strength always follows the colours above.', spSel);
+    for (const f of RECIPE_FIELDS) {
+      const v = r[f.key] ?? (f.key === 'load' ? 1 : 0);
+      const range = Object.assign(document.createElement('input'), { type: 'range', min: f.min, max: f.max, step: (f.max - f.min) / 200, value: v });
+      const num = Object.assign(document.createElement('span'), { className: 'hint', textContent: (+v).toFixed(2) });
+      range.addEventListener('input', () => { num.textContent = (+range.value).toFixed(2); });
+      range.addEventListener('change', () => edit({ [f.key]: +range.value }));
+      line(f.label, `${f.doc}\nFor comparison: ${refs(f.key)}.`, range, num);
+    }
+    const actions = document.createElement('div');
+    actions.className = 'row';
+    const btn = (label, title, fn) => { const b = Object.assign(document.createElement('button'), { textContent: label, title }); b.addEventListener('click', fn); actions.appendChild(b); };
+    if (!pg.custom) btn('Reset', 'Back to the built-in recipe', () => { window.__sim.pigments.reset(pg.name); });
+    btn('New pan from this', 'A pigment of your own, starting from this one', () => {
+      let n = 2; while (PIGMENTS.some(p => p.name === `${pg.name} ${n}`)) n++;
+      try { const i = window.__sim.pigments.add(pg.name, `${pg.name} ${n}`); setPigment(i); } catch (e) { editor.querySelector('.msg').textContent = e.message; }
+    });
+    if (pg.custom) {
+      const nm = Object.assign(document.createElement('input'), { value: pg.name, title: 'Name' });
+      nm.addEventListener('change', () => { if (nm.value && !PIGMENTS.some(p => p.name === nm.value)) edit({ name: nm.value }); });
+      actions.prepend(nm);
+      btn('Remove', 'Remove this pigment of your own', () => { try { window.__sim.pigments.remove(pg.name); setPigment(0); } catch (e) { editor.querySelector('.msg').textContent = e.message; } });
+    }
+    editor.appendChild(actions);
+    editor.appendChild(Object.assign(document.createElement('div'), { className: 'hint msg', style: 'color:#e98a7a' }));
+    editor.appendChild(Object.assign(document.createElement('p'), { className: 'hint doc', textContent: 'Changes apply to this pigment everywhere, paint already on the sheet included (colour that has stained into the fibres stays). Kept in this browser and saved with paintings.' }));
+  }
+  window.__sim.pigments.changed.push(() => { renderPans(); renderEditor(); updateBrushLabel(); renderWells(); });
 
   const setPigment = i => {
     if (state.brushType === 'water') {
@@ -1282,6 +1458,7 @@ function buildUI({ clear, newPaper, acts }) {
     renderWells();
     pans.forEach((pan, j) => pan.classList.toggle('on', j === i));
     updateBrushLabel();
+    renderEditor();
   };
   function updateBrushLabel() {
     const names = state.brush.map(b => PIGMENTS[b.pigment].code);
@@ -1345,6 +1522,7 @@ function buildUI({ clear, newPaper, acts }) {
       brushLabel.textContent = `Well ${k + 1} is empty: shift-click pans (or turn on Mix) to add dabs`;
     }
     renderWells();
+    renderEditor();
   };
 
   function addDab(i) {

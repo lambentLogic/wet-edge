@@ -105,7 +105,7 @@ function fitChannels(Rm, Rt, opacity, scatter) {
 const organic = { kind: 'organic', magnetic: 0, scatter: 0.04, density: 0.3, granulation: 0, flocculation: 0, mobility: 1.5, wick: 0.5 };
 const mineral = { kind: 'mineral', magnetic: 0, density: 1.3, flocculation: 0.2, mobility: 0.8, wick: 0 };
 
-const PANS = [
+export const RECIPES = [
   { name: 'Phthalo Green', code: 'PG7', masstone: '#00594A', tint: '#1FA58C', opacity: 'transparent',
     ...organic, staining: STAIN.high, mobility: 2.2, wick: 0.7 },
   { name: 'Phthalo Blue (GS)', code: 'PB15:3', masstone: '#0B3A7E', tint: '#1C8FD8', opacity: 'transparent',
@@ -207,6 +207,7 @@ const saunderson = R => R.map(v => Math.max((v - 0.03) / (1 - 0.03 - 0.65 + 0.65
 // much more it absorbs in one than another.
 function measuredFor(name) {
   const m = MEASURED[name];
+  if (name === 'colours') return null;
   // A transparent film over paper (process cyan ink): measured without
   // gloss, already a glaze's shape.
   if (m?.film) return { film: m.film };
@@ -246,7 +247,7 @@ function kShape(m, opaque) {
 // watercolour.
 function fitSpectral(p, rgbFit) {
   const S = rgbFit.S[0];
-  const m = measuredFor(p.name);
+  const m = measuredFor(p.spectrum ?? p.name);
   const lin = hex => hexToLinear(hex);
   if (m) {
     const opaque = !m.film && (p.opacity === 'opaque' || p.opacity === 'semiopaque');
@@ -273,7 +274,36 @@ function fitSpectral(p, rgbFit) {
   return { Kspec: K, Sspec: new Array(NB).fill(S) };
 }
 
-export const PIGMENTS = PANS.map(p => { const rgb = fitKM(p.masstone, p.tint, p.opacity, p.scatter); return { ...p, ...rgb, ...fitSpectral(p, rgb) }; });
+// Spectra a pigment can take its absorption shape from: measurements with
+// a tint or a transparent film (see measuredFor), or 'colours' (fitted from
+// the masstone and tint alone).
+export const SPECTRA = Object.keys(MEASURED).filter(k => MEASURED[k].tint || MEASURED[k].film);
+
+// A pigment built from its recipe: colour (masstone, tint, opacity,
+// scatter, spectrum) fitted to Kubelka-Munk K and S, plus the physical
+// ratings as given. The painter's pigment editor changes recipes and
+// rebuilds them.
+export function buildPigment(recipe) {
+  const rgb = fitKM(recipe.masstone, recipe.tint, recipe.opacity, recipe.scatter);
+  return { ...recipe, ...rgb, ...fitSpectral(recipe, rgb) };
+}
+
+// The paint box: built pigments, indexed by id (their slot on the GPU).
+// Edited in place, so ids stay stable.
+export const PIGMENTS = RECIPES.map(buildPigment);
+
+// The recipe fields the editor shows, with what they mean.
+export const RECIPE_FIELDS = [
+  { key: 'density',      label: 'Weight', min: 0, max: 2.5, doc: 'How heavy and coarse the particles are: heavy pigments settle out of a wash fast (and lie in the paper\'s valleys); fine ones stay suspended and travel.' },
+  { key: 'staining',     label: 'Staining', min: 0, max: 4, doc: 'How hard it grips the fibres once settled. High stains (phthalos, quinacridones) resist lifting and rewetting; low ones lift back to white.' },
+  { key: 'granulation',  label: 'Granulation', min: 0, max: 1.5, doc: 'How strongly settling favours the paper\'s valleys, for a speckled, textured wash.' },
+  { key: 'flocculation', label: 'Flocculation', min: 0, max: 1.5, doc: 'How strongly particles clump together into soft flecks as the wash settles (ultramarine\'s mottling).' },
+  { key: 'mobility',     label: 'Spreads wet-in-wet', min: 0, max: 3, doc: 'How far it travels and blooms in wet paint. Phthalos push through a wash; "inert" pigments stay where they are put.' },
+  { key: 'wick',         label: 'Halo past the edge', min: 0, max: 1, doc: 'How much the paper\'s capillary flow carries it past the wet edge: the soft halo staining organics leave.' },
+  { key: 'load',         label: 'Pigment per brushful', min: 0, max: 4, doc: 'Pigment carried per brushful relative to watercolour (1). Gouache is about 3.' },
+  { key: 'magnetic',     label: 'Magnetic', min: 0, max: 1, doc: 'Pull under a magnet, relative to Mars black (magnetite). 0 for almost everything.' },
+];
+export const OPACITIES = Object.keys(OPACITY_S);
 
 // The stain layer keeps only RGB sums of its pigments' K and S. For the
 // spectral render, map those to spectra: least squares over the palette,
@@ -297,4 +327,9 @@ function solve3(A, b) {
   const d = det(A);
   return [0, 1, 2].map(c => det(A.map((row, r) => row.map((v, k) => (k === c ? b[r] : v)))) / d);
 }
-export const STAIN_MAP = { K: fitMap(pg => pg.K, pg => pg.Kspec), S: fitMap(pg => pg.S, pg => pg.Sspec) };
+export const STAIN_MAP = {};
+export function refitStainMap() {
+  STAIN_MAP.K = fitMap(pg => pg.K, pg => pg.Kspec);
+  STAIN_MAP.S = fitMap(pg => pg.S, pg => pg.Sspec);
+}
+refitStainMap();
