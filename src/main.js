@@ -1086,7 +1086,7 @@ async function init() {
   // The Wash tool: a little mind a person can use too. Fills an outline
   // with the loaded brush, in real time, as one undo step. The painter's
   // lasso and scripts both call this.
-  window.__sim.washOptions = { kind: 'flat', fadeTo: 0.2, dampen: true, water: false, dampenOnly: false, area: 'lasso', scrubWidth: 40 };
+  window.__sim.washOptions = { kind: 'flat', fadeTo: 0.2, dampen: true, water: false, dampenOnly: false, into: null, direction: 'down', area: 'lasso', scrubWidth: 40 };
   // Show an area on the overlay (faint blue) while it's being washed.
   const drawArea = mask => {
     drawMagnets();
@@ -1094,9 +1094,57 @@ async function init() {
     for (let c = 0; c < N; c++) if (mask[c]) { img.data[c * 4] = 60; img.data[c * 4 + 1] = 100; img.data[c * 4 + 2] = 190; img.data[c * 4 + 3] = 40; }
     g.putImageData(img, 0, 0);
   };
+  // A variegated wash's brush load at (x, y): the brush's own colour
+  // blending into `into` (a pigment name, a mixing well 0-5 as { well }, or
+  // a mix [[name, parts], ...]) down the area, across it, or in soft
+  // patches. At most four pigments in the brush at once.
+  const loadOf = into => {
+    if (typeof into === 'string') return [[into, 1]];
+    if (into && Number.isInteger(into.well)) return window.__sim.wells.get()[into.well].map(d => [d.name, d.dabs]);
+    return into ?? [];
+  };
+  const variegate = (mask, into, direction = 'down') => {
+    const A = state.brush.map(b => [PIGMENTS[b.pigment].name, b.frac]), B = loadOf(into);
+    if (!B.length) throw new Error('pick a colour to variegate into');
+    const norm = L => { const t = L.reduce((a, [, f]) => a + f, 0) || 1; return L.map(([n, f]) => [n, f / t]); };
+    const nA = norm(A), nB = norm(B);
+    let x0 = W, x1 = 0, y0 = H, y1 = 0;
+    for (let c = 0; c < N; c++) if (mask[c]) { const x = c % W, y = (c / W) | 0; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    // Soft patches: smooth value noise about 30 mm across.
+    const hash = (i, j) => { const v = Math.sin(i * 127.1 + j * 311.7 + state.simTime) * 43758.5453; return v - Math.floor(v); };
+    const noise = (x, y) => {
+      const s = 150, gx = x / s, gy = y / s, i = Math.floor(gx), j = Math.floor(gy), fx = gx - i, fy = gy - j;
+      const u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
+      return (hash(i, j) * (1 - u) + hash(i + 1, j) * u) * (1 - v) + (hash(i, j + 1) * (1 - u) + hash(i + 1, j + 1) * u) * v;
+    };
+    const tAt = (x, y) => direction === 'across' ? (x - x0) / Math.max(1, x1 - x0)
+      : direction === 'patches' ? Math.min(1, Math.max(0, (noise(x, y) - 0.25) * 2))
+      : (y - y0) / Math.max(1, y1 - y0);
+    return (x, y) => {
+      const t = Math.min(1, Math.max(0, tAt(x, y))), m = new Map();
+      for (const [n, f] of nA) m.set(n, (m.get(n) ?? 0) + f * (1 - t));
+      for (const [n, f] of nB) m.set(n, (m.get(n) ?? 0) + f * t);
+      return [...m].filter(([, f]) => f > 0.02).sort((p, q) => q[1] - p[1]).slice(0, 4);
+    };
+  };
+  // Soften an edge: trace roughly along a wet edge; the soften mind finds
+  // the edge and runs a damp brush half over it. One undo step.
+  window.__sim.softenEdge = async line => {
+    if (state.washing) throw new Error('a wash is already running');
+    window.__sim.checkpoint();
+    state.washing = true; state.cancelWash = false; state.washReturn = state.mode; state.onWash?.();
+    const mode0 = state.mode;
+    try { await window.__minds.soften(line.map(([x, y]) => [x, y])); return true; }
+    catch (e) { if (e.message !== 'cancelled') throw e; return false; }
+    finally {
+      state.washing = false; state.cancelWash = false;
+      window.__sim.headless.setMode(state.washReturn ?? mode0); state.washReturn = null;
+      uiSync(); drawMagnets(); state.onWash?.();
+    }
+  };
   window.__sim.wash = async (outline, opts = {}) => {
     if (state.washing) throw new Error('a wash is already running');
-    const { kind, fadeTo, water, dampenOnly } = { ...window.__sim.washOptions, ...opts };
+    const { kind, fadeTo, water, dampenOnly, into, direction } = { ...window.__sim.washOptions, ...opts };
     const dampen = opts.dampen ?? opts.mist ?? window.__sim.washOptions.dampen;
     const M = window.__minds, h = window.__sim.headless;
     // The area: a polygon; null for the whole sheet (a little past its
@@ -1112,12 +1160,14 @@ async function init() {
     const areaMask = M.maskOf(outline);
     const keep = ['brushRadius', 'brushPigment', 'mistRadius'].map(k => [k, values[k]]);
     const mode0 = state.mode;   // (the pigment isn't restored: switching pans mid-wash variegates it)
+    const load0 = state.brush.map(b => ({ ...b }));
     window.__sim.checkpoint();
     state.washing = true; state.cancelWash = false; state.washReturn = mode0; state.onWash?.();
     try {
       h.setMode(water ? 1 : 0);
       if (dampen || dampenOnly) await window.__sim.dampen(areaMask);
       if (dampenOnly) return true;
+      const brushAt = kind === 'variegated' ? variegate(areaMask, into, direction) : null;
       // A found or scrubbed shape is cut in along its edge with the tip and
       // filled with rows that fit the room (washAround): flat rows would
       // spill a big brush over a thin painted outline.
@@ -1129,8 +1179,8 @@ async function init() {
           const pig0 = values.brushPigment;
           pigmentAt = (x, y) => pig0 * (1 + (fadeTo - 1) * Math.min(1, Math.max(0, (y - top) / Math.max(1, bottom - top))));
         }
-        await M.washAround(outline, { mist: false, pigmentAt, even: true });
-      } else await M.fill(outline, { grade: kind === 'graded' ? [1, fadeTo] : null, even: true });
+        await M.washAround(outline, { mist: false, pigmentAt, brushAt, even: true });
+      } else await M.fill(outline, { grade: kind === 'graded' ? [1, fadeTo] : null, brushAt, even: true });
       return true;
     } catch (e) {
       // Stopped midway: the minds didn't get to put back what they change
@@ -1141,6 +1191,7 @@ async function init() {
       return false;
     } finally {
       state.washing = false; state.cancelWash = false;
+      if (kind === 'variegated') state.brush = load0;   // back to the colour it started from
       h.setMode(state.washReturn ?? mode0); state.washReturn = null;
       uiSync(); drawMagnets(); state.onWash?.();
     }
@@ -1285,11 +1336,11 @@ function bindPointer(canvas) {
     g.beginPath(); pts.forEach(([x, y], k) => (k ? g.lineTo(x, y) : g.moveTo(x, y))); g.closePath(); g.stroke();
     g.restore();
   };
-  const drawScrub = pts => {
+  const drawScrub = (pts, width = null) => {
     drawMagnets();
     const g = document.getElementById('overlay').getContext('2d');
     g.save();
-    g.lineCap = g.lineJoin = 'round'; g.lineWidth = 2 * window.__sim.washOptions.scrubWidth; g.strokeStyle = 'rgba(60,100,190,.18)';
+    g.lineCap = g.lineJoin = 'round'; g.lineWidth = width ?? 2 * window.__sim.washOptions.scrubWidth; g.strokeStyle = width ? 'rgba(40,80,170,.7)' : 'rgba(60,100,190,.18)';
     g.beginPath(); pts.forEach(([x, y], k) => (k ? g.lineTo(x, y) : g.moveTo(x, y))); g.stroke();
     g.restore();
   };
@@ -1297,7 +1348,7 @@ function bindPointer(canvas) {
   // can run off the sheet without leaving a sliver at its edge.
   canvas.closest('main').addEventListener('pointerdown', e => {
     if (e.target === canvas || state.mode !== 7 || state.washing) return;
-    if (!['rect', 'lasso', 'scrub'].includes(window.__sim.washOptions.area)) return;
+    if (!['rect', 'lasso', 'scrub', 'soften'].includes(window.__sim.washOptions.area)) return;
     lasso = [toGrid(e)];
     try { canvas.setPointerCapture(e.pointerId); } catch {}
   });
@@ -1346,8 +1397,8 @@ function bindPointer(canvas) {
   canvas.addEventListener('pointermove', e => {
     if (lasso) {
       const p = toGrid(e), q = lasso[lasso.length - 1];
-      if (window.__sim.washOptions.area === 'scrub') {
-        if (Math.hypot(p[0] - q[0], p[1] - q[1]) > 3) { lasso.push(p); drawScrub(lasso); }
+      if (window.__sim.washOptions.area === 'scrub' || window.__sim.washOptions.area === 'soften') {
+        if (Math.hypot(p[0] - q[0], p[1] - q[1]) > 3) { lasso.push(p); drawScrub(lasso, window.__sim.washOptions.area === 'soften' ? 3 : null); }
       } else if (window.__sim.washOptions.area === 'rect') {
         const [a] = lasso;
         lasso = [a, p];
@@ -1395,7 +1446,10 @@ function bindPointer(canvas) {
         [ax, bx] = [snapX(ax), snapX(bx)]; [ay, by] = [snapY(ay), snapY(by)];
         pts = Math.abs(bx - ax) > 4 && Math.abs(by - ay) > 4 ? [[ax, ay], [bx, ay], [bx, by], [ax, by]] : [];
       }
-      if (window.__sim.washOptions.area === 'scrub') {
+      if (window.__sim.washOptions.area === 'soften') {
+        drawMagnets();
+        if (pts.length >= 2) window.__sim.softenEdge(pts).catch(err => fail(`Soften: ${err.message}`));
+      } else if (window.__sim.washOptions.area === 'scrub') {
         window.__sim.wash({ scrub: pts }).catch(err => fail(`Wash: ${err.message}`));
       } else if (pts.length >= 3) {
         drawLasso(pts, true);
@@ -1807,18 +1861,38 @@ function buildUI({ clear, newPaper, acts }) {
   const wo = window.__sim.washOptions;
   const washKind = document.getElementById('washKind'), washWith = document.getElementById('washWith');
   const washFade = document.getElementById('washFade'), washMist = document.getElementById('washMist');
+  // Variegated: blend into a pan or a mixing well, down, across or in patches.
+  const washInto = document.getElementById('washInto'), washDir = document.getElementById('washDir');
+  const fillInto = () => {
+    const keep = washInto.value;
+    washInto.replaceChildren(new Option('into…', ''));
+    window.__sim.wells.get().forEach((w, k) => { if (w.length) washInto.add(new Option(`Well ${k + 1}: ${w.map(d => d.name).join(' + ')}`, `well:${k}`)); });
+    PIGMENTS.forEach(pg => washInto.add(new Option(pg.name, `pan:${pg.name}`)));
+    washInto.value = keep;
+  };
+  washInto.addEventListener('focus', fillInto);
+  washInto.addEventListener('change', () => {
+    const v = washInto.value;
+    wo.into = v.startsWith('well:') ? { well: +v.slice(5) } : v.startsWith('pan:') ? v.slice(4) : null;
+  });
+  washDir.addEventListener('change', () => { wo.direction = washDir.value; });
   const showWash = () => {
-    document.getElementById('washFadeRow').hidden = wo.kind !== 'graded';
+    const soften = wo.area === 'soften';
+    washKind.hidden = washWith.hidden = soften;
+    document.getElementById('washVarRow').hidden = soften || wo.kind !== 'variegated';
+    if (!document.getElementById('washVarRow').hidden) fillInto();
+    document.getElementById('washMistRow').hidden = soften;
+    document.getElementById('washFadeRow').hidden = soften || wo.kind !== 'graded';
   };
   washKind.addEventListener('change', () => { wo.kind = washKind.value; showWash(); });
   washWith.addEventListener('change', () => { wo.water = washWith.value === 'water'; wo.dampenOnly = washWith.value === 'dampen'; });
   const washArea = document.getElementById('washArea');
-  washArea.addEventListener('change', () => { wo.area = washArea.value; washHint.textContent = WASH_HINTS[wo.area]; });
+  washArea.addEventListener('change', () => { wo.area = washArea.value; washHint.textContent = WASH_HINTS[wo.area]; showWash(); });
   const washHint = document.getElementById('washHint');
   const washScrub = document.getElementById('washScrub');
   washScrub.addEventListener('input', () => { wo.scrubWidth = +washScrub.value; });
   washArea.addEventListener('change', () => { document.getElementById('washScrubRow').hidden = wo.area !== 'scrub'; });
-  const WASH_HINTS = { shape: 'Click inside a shape bounded by paint or masking fluid (small gaps are bridged); the brush fills it. Esc stops.', scrub: 'Scrub roughly over the area; the brush lays an even wash where you scrubbed. Esc stops.', lasso: 'Draw a loose outline on the paper; the brush fills it. Esc stops.', rect: 'Drag a rectangle on the paper; the brush fills it. Esc stops.', sheet: 'Click the paper to wash the whole sheet. Esc stops.' };
+  const WASH_HINTS = { soften: 'Trace roughly along the edge of wet paint; a damp brush finds the edge and runs half over it so it fades out. Wetness sets how damp. Esc stops.', shape: 'Click inside a shape bounded by paint or masking fluid (small gaps are bridged); the brush fills it. Esc stops.', scrub: 'Scrub roughly over the area; the brush lays an even wash where you scrubbed. Esc stops.', lasso: 'Draw a loose outline on the paper; the brush fills it. Esc stops.', rect: 'Drag a rectangle on the paper; the brush fills it. Esc stops.', sheet: 'Click the paper to wash the whole sheet. Esc stops.' };
   washFade.addEventListener('input', () => { wo.fadeTo = +washFade.value; });
   washMist.addEventListener('change', () => { wo.dampen = washMist.checked; });
   washFade.addEventListener('dblclick', () => { washFade.value = wo.fadeTo = 0.2; });

@@ -231,13 +231,43 @@ export function makeMinds(sim) {
     h.setMode(mode0); V.brushRadius = r0; V.mistRadius = m0;
   }
 
+  // Lay a stroke; with brushAt (a variegated wash), in pieces about two
+  // brush-widths long, each loaded for where it lands and overlapping the
+  // last a little, so the colour changes along the stroke too.
+  async function layStroke(pts, framesPerSeg, brushAt) {
+    if (!brushAt) { await sim.path(pts, framesPerSeg); return; }
+    const piece = Math.max(4 * V.brushRadius, 60);
+    let cur = [pts[0]], len = 0;
+    const flush = async () => {
+      if (cur.length < 2) return;
+      const [mx, my] = cur[Math.floor(cur.length / 2)];
+      h.setBrush(brushAt(mx, my));
+      h.lift(); await sim.path(cur, framesPerSeg);
+    };
+    // Resample finely so pieces can end anywhere.
+    const fine = [pts[0]];
+    for (let k = 1; k < pts.length; k++) {
+      const [ax, ay, ap = 1] = pts[k - 1], [bx, by, bp = 1] = pts[k];
+      const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / 10));
+      for (let i = 1; i <= n; i++) fine.push([ax + (bx - ax) * i / n, ay + (by - ay) * i / n, ap + (bp - ap) * i / n]);
+    }
+    for (let k = 1; k < fine.length; k++) {
+      cur.push(fine[k]);
+      len += Math.hypot(fine[k][0] - fine[k - 1][0], fine[k][1] - fine[k - 1][1]);
+      if (len >= piece && k < fine.length - 2) { await flush(); cur = cur.slice(-2); len = 0; }
+    }
+    await flush();
+  }
+
   // A flat brush lays its rows broadside (its width across the stroke).
   const broadside = () => { const a = V.flatAngle; if (V.brushShape > 0.5) V.flatAngle = 90; return () => { V.flatAngle = a; }; };
 
   //   even     match one stroke's strength (makeDoser)
   //   dampen   a quick pass of clean water over the area first, so the
   //            rows land on damp paper and melt together
-  async function fill(poly, { mode = null, wetEdge = 0.05, framesPerSeg = 2, spacing = 2, grade = null, even = false, dampen = false, log = () => {} } = {}) {
+  //   brushAt  optional (x, y) => brush load, for a variegated wash (rows
+  //            are laid in pieces, each loaded for where it goes)
+  async function fill(poly, { mode = null, wetEdge = 0.05, framesPerSeg = 2, spacing = 2, grade = null, even = false, dampen = false, brushAt = null, log = () => {} } = {}) {
     // Paint in the mode it was called in (a water fill stays water after a
     // rewet; restoring a fixed paint mode laid the brush's pigment instead).
     if (mode === null) mode = h.mode();
@@ -287,14 +317,15 @@ export function makeMinds(sim) {
             // brush (clean water there left a pale frame round the wash).
             rewets++;
             const edge = [[start, py + core * 0.5], [pdir > 0 ? p1 : p0, py + core * 0.5]];
-            await sim.path(edge, framesPerSeg);
+            await layStroke(edge, framesPerSeg, brushAt);
           }
         }
         // A graded wash: the brush's paint strength goes from grade[0] at
         // the top row to grade[1] at the bottom (multiples of brushPigment).
         V.brushPigment = basePigment * gradeAt(y) * (doser?.k ?? 1);
         const row = rowAt(y, a, b);
-        await sim.path(dir > 0 ? row : row.reverse(), framesPerSeg);
+        if (dir < 0) row.reverse();
+        await layStroke(row, framesPerSeg, brushAt);
         prev = [a, b, y, dir];
       }
       if (doser && prev?.[2] === y) await doser.row(y, core);
@@ -313,12 +344,30 @@ export function makeMinds(sim) {
   // Limited for now: the sim's brush lays water but doesn't drag wet paint
   // along with it, which is most of how a real damp brush softens an edge.
   // A graded fill that fades to almost nothing (fill's grade) reads softer.
-  async function soften(line, out, { framesPerSeg = 2, pressure = 0.7, reach = 80, log = () => {} } = {}) {
-    const [ox, oy] = (l => [out[0] / l, out[1] / l])(Math.hypot(out[0], out[1]));
+  // out: [dx, dy] away from the paint, or null to work it out: for each
+  // point, whichever side of the line holds less water (decided once for
+  // the whole line, so a wobbly trace doesn't flip sides).
+  async function soften(line, out = null, { framesPerSeg = 2, pressure = 0.7, reach = 80, log = () => {} } = {}) {
     const a = await sim.read(), W = 1024, H = a.length / 4 / W, r = V.brushRadius;
     const wetAt = (x, y) => { const xi = Math.round(x), yi = Math.round(y); return xi >= 0 && yi >= 0 && xi < W && yi < H ? a[(yi * W + xi) * 4] : 0; };
+    const normalAt = k => {
+      if (out) { const l = Math.hypot(out[0], out[1]); return [out[0] / l, out[1] / l]; }
+      const [ax, ay] = line[Math.max(0, k - 1)], [bx, by] = line[Math.min(line.length - 1, k + 1)];
+      const l = Math.hypot(bx - ax, by - ay) || 1;
+      return [-(by - ay) / l, (bx - ax) / l];
+    };
+    let side = 1;
+    if (!out) {
+      let bias = 0;
+      line.forEach(([x, y], k) => {
+        const [nx, ny] = normalAt(k);
+        for (let d = 4; d <= reach; d += 4) bias += wetAt(x + nx * d, y + ny * d) - wetAt(x - nx * d, y - ny * d);
+      });
+      side = bias > 0 ? -1 : 1;   // out = away from the wetter side
+    }
     let found = 0;
-    const pts = line.map(([x, y, p = pressure]) => {
+    const pts = line.map(([x, y, p = pressure], k) => {
+      const [nx, ny] = normalAt(k), ox = nx * side, oy = ny * side;
       // From inside (reach back) walk outward to the last wet cell.
       let edge = null;
       for (let d = -reach; d <= reach; d += 2) if (wetAt(x + ox * d, y + oy * d) > 0.02) edge = d;
@@ -511,7 +560,7 @@ export function makeMinds(sim) {
       const before0 = rows;
       V.brushRadius = bigR;
       let run = [];
-      const flush = async () => { if (run.length > 1) { setLoad(run[0][0], y); h.lift(); await sim.path(run, framesPerSeg); rows++; } run = []; };
+      const flush = async () => { if (run.length > 1) { setLoad(run[0][0], y); h.lift(); await layStroke(run, framesPerSeg, brushAt); rows++; } run = []; };
       for (let k = 0; k <= Math.ceil(W / 10); k++) {
         const x = dirx > 0 ? k * 10 : W - k * 10;
         const d = at(x, y);
@@ -526,7 +575,7 @@ export function makeMinds(sim) {
       while (todo.length && todo[0].top < y + rowStep) {
         const { l } = todo.shift();
         V.brushRadius = bigR; setLoad(l[0][0], l[0][1]);
-        h.lift(); await sim.path(l.map(([x, yy]) => [x, yy, 0]), framesPerSeg); cut++;
+        h.lift(); await layStroke(l.map(([x, yy]) => [x, yy, 0]), framesPerSeg, brushAt); cut++;
       }
       if (y >= H) continue;
       await row(y, true);
