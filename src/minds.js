@@ -213,6 +213,24 @@ export function makeMinds(sim) {
     };
   }
 
+  // Dampen an area with one sweep of the spray bottle, kept a spray's reach
+  // in from its edge so the paper outside stays dry.
+  async function mistOver(inside, reach = 40) {
+    const fromEdge = chamfer(inside.map(v => 1 - v));
+    const mode0 = h.mode(), r0 = V.brushRadius, m0 = V.mistRadius;
+    h.setMode(4); V.brushRadius = reach; V.mistRadius = reach;
+    for (let y = reach * 0.6, d = 1; y < SH; y += reach * 1.1, d = -d) {
+      let run = [];
+      const flush = async () => { if (run.length > 1) { h.lift(); await sim.path(run, 1); } run = []; };
+      for (let k = 0; k <= Math.ceil(SW / 16); k++) {
+        const x = d > 0 ? k * 16 : SW - k * 16, c = Math.round(y) * SW + Math.min(SW - 1, x);
+        if (fromEdge[c] > reach * 0.9) run.push([x, y, 0.9]); else await flush();
+      }
+      await flush();
+    }
+    h.setMode(mode0); V.brushRadius = r0; V.mistRadius = m0;
+  }
+
   // A flat brush lays its rows broadside (its width across the stroke).
   const broadside = () => { const a = V.flatAngle; if (V.brushShape > 0.5) V.flatAngle = 90; return () => { V.flatAngle = a; }; };
 
@@ -227,7 +245,10 @@ export function makeMinds(sim) {
     // Effective width: a soft brush wets fully only near its core, so rows
     // overlap more (spacing is in core widths).
     const r = V.brushRadius, core = r * (1 - 0.5 * V.brushSoftness);
-    const dy = Math.max(2, core * spacing);
+    // Rows spaced by the core, but never closer than 0.75 of the brush's
+    // width: a big brush lays wide bands in few passes.
+    // (A graded wash overlaps more, so its steps in strength blend.)
+    const dy = Math.max(2, core * spacing, r * (grade ? 0.9 : 1.5));
     const reg = region(poly), top = reg.top, bottom = reg.bottom;
     // Keep the brush's spread inside the outline, but never so far in that
     // a shape narrower than the brush gets skipped: then one row down the
@@ -239,16 +260,7 @@ export function makeMinds(sim) {
     const first = Math.min(top + inset, (top + bottom) / 2);
     const unturn = broadside();
     const rowAt = (y, a, b) => { const n = Math.max(2, Math.ceil((b - a) / 30)); return Array.from({ length: n + 1 }, (_, k) => [a + (b - a) * k / n + (b === a ? k - n / 2 : 0), y]); };
-    const rowsOf = y => reg.spans(y).map(([x0, x1]) => { let a = x0 + inset * 0.6, b = x1 - inset * 0.6; if (b <= a) a = b = (x0 + x1) / 2; return [a, b]; });
-    if (dampen) {
-      // Damp, not wet: clean water, less of it, rows a little further apart.
-      const w0 = V.brushWater;
-      h.setMode(1); V.brushWater = w0 * 0.6;
-      for (let y = first, d = 1; y <= Math.max(first, bottom - inset * 0.5); y += dy * 1.3, d = -d) {
-        for (const [a, b] of rowsOf(y)) { const r = rowAt(y, a, b); await sim.path(d > 0 ? r : r.reverse(), 1); }
-      }
-      V.brushWater = w0; h.setMode(mode);
-    }
+    if (dampen) await mistOver(insideOf(reg));
     const gradeAt = y => (grade ? grade[0] + (grade[1] - grade[0]) * Math.min(1, Math.max(0, (y - first) / Math.max(1, bottom - inset * 0.5 - first))) : 1);
     const doser = even && mode !== 1 ? await makeDoser(insideOf(reg), gradeAt) : null;
     for (let y = first; y <= Math.max(first, bottom - inset * 0.5); y += dy, dir = -dir) {
@@ -459,7 +471,11 @@ export function makeMinds(sim) {
       const mode0 = h.mode();
       h.setMode(4);
       const reach0 = V.mistRadius;
-      for (const [mistR, step] of [[40, 16], [Math.max(tipR * 3, 8), 6]]) {
+      // A wide spray; then a fine one close in around shapes inside the area
+      // (not for a found or scrubbed shape, whose edge is the shape).
+      const passes = [[40, 16]];
+      if (!area?.mask) passes.push([Math.max(tipR * 3, 8), 6]);
+      for (const [mistR, step] of passes) {
         V.brushRadius = mistR; V.mistRadius = mistR;   // the spray has its own reach; keep it this size
         for (let y = mistR * 0.6, dirx = 1; y < H; y += mistR * 1.1, dirx = -dirx) {
           let run = [];

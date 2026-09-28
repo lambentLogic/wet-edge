@@ -1106,10 +1106,13 @@ async function init() {
       } else await M.fill(outline, { grade: kind === 'graded' ? [1, fadeTo] : null, even: true, dampen });
       return true;
     } catch (e) {
+      // Stopped midway: the minds didn't get to put back what they change
+      // while working (size, strength, spray reach). Otherwise they do,
+      // and a Size the painter changes during the wash stays.
+      for (const [k, v] of keep) values[k] = v;
       if (e.message !== 'cancelled') throw e;
       return false;
     } finally {
-      for (const [k, v] of keep) values[k] = v;
       state.washing = false; state.cancelWash = false;
       h.setMode(state.washReturn ?? mode0); state.washReturn = null;
       uiSync(); drawMagnets(); state.onWash?.();
@@ -1619,9 +1622,23 @@ function buildUI({ clear, newPaper, acts }) {
   // Brush presets set the brush knobs and type together.
   const brushSel = document.getElementById('brushType');
   for (const [key, b] of Object.entries(BRUSHES)) brushSel.add(new Option(b.name, key));
+  // Each brush remembers the size it was last given (in this browser), so
+  // picking a brush again doesn't snap Size back to the preset's.
+  const SIZE_KEY = 'hyperreal-watercolor.brushSizes';
+  let sizes = {};
+  try { sizes = JSON.parse(localStorage.getItem(SIZE_KEY) ?? '{}') ?? {}; } catch {}
+  let applying = false;
+  (setters.brushRadius ??= []).push(v => {
+    if (applying || state.washing || !brushSel.value) return;
+    sizes[brushSel.value] = v;
+    try { localStorage.setItem(SIZE_KEY, JSON.stringify(sizes)); } catch {}
+  });
   const applyBrush = key => {
     const b = BRUSHES[key];
+    applying = true;
     for (const [k, v] of Object.entries(b.knobs)) inputs[k](v);
+    if (Number.isFinite(sizes[key])) inputs.brushRadius(sizes[key]);
+    applying = false;
     document.getElementById('brushDetails').querySelector('summary').textContent = `Build: brush (${b.name})`;
     state.brushType = b.type;
     state.reservoir = 1; state.pigStore = 1;
