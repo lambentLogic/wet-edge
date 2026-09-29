@@ -6,6 +6,7 @@
 //   --looks: sim.look('name') calls in the script save dir/NN-name.png
 //   sim.note('text') in the script adds an entry to notes/journal.md
 //   --replay: replay a stroke recording (Record strokes in the app) after opening
+//   --bug file.wcbug [--bug-to N]: load a bug report and replay it (to entry N)
 //   (--layer writes prefix-filter-multiply.png and prefix-body-add.png)
 //
 // The script is evaluated in the page (window.__sim, window.__minds) and
@@ -22,7 +23,7 @@ const CHROME = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Conte
 const APP_URL = process.env.APP_URL ?? 'http://127.0.0.1:8765/';
 
 const args = process.argv.slice(2);
-let script = null, open = null, save = null, shot = null, layer = null, looks = null, replay = null;
+let script = null, open = null, save = null, shot = null, layer = null, looks = null, replay = null, bug = null, bugUpTo = null;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--open') open = args[++i];
   else if (args[i] === '--save') save = args[++i];
@@ -30,6 +31,8 @@ for (let i = 0; i < args.length; i++) {
   else if (args[i] === '--layer') layer = args[++i];
   else if (args[i] === '--looks') looks = args[++i];
   else if (args[i] === '--replay') replay = args[++i];
+  else if (args[i] === '--bug') bug = args[++i];
+  else if (args[i] === '--bug-to') bugUpTo = +args[++i];
   else script = args[i];
 }
 
@@ -71,6 +74,14 @@ try {
       await window.__sim.open(new Blob([bytes]));
     }, b64);
     console.error(`opened ${open}`);
+  }
+  if (bug) {
+    const b64 = (await readFile(bug)).toString('base64');
+    const r = await page.evaluate(async (b64, upTo) => {
+      const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+      return window.__sim.openBugReport(new Blob([bytes]), { upTo: upTo ?? Infinity });
+    }, b64, bugUpTo);
+    console.error(`bug report ${bug}: replayed ${r.replayed}/${r.entries} entries${r.replayed === r.entries ? (r.identical ? ', identical to when it was saved' : ', DIFFERENT from when it was saved') : ''}${r.snapshotOK === false ? ' (the snapshot itself loaded differently)' : ''}${r.note ? ` (${r.note})` : ''}`);
   }
   if (replay) {
     const rec = JSON.parse(await readFile(replay, 'utf8'));

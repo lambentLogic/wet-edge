@@ -68,6 +68,7 @@ window.__paintDone = (async () => {
 | `restore` |  | Reopen the autosave (kept in this browser every few seconds), newest first; click again for the one before. |
 | `savePNG` |  | Download the painting as it looks. Scripts: tools/paint.mjs --shot file. |
 | `saveLayer` |  | Download just the paint on a transparent background: a filter layer (multiply) and a body layer (add). Scripts: sim.layerBlobs(). |
+| `bugReport` |  | Saw something strange? Save a bug report (.wcbug) right after: the painting as far back as undo reaches and exactly how it got here, which replays bit for bit (tools/paint.mjs --bug file). Scripts: sim.bugReportBlob(), sim.openBugReport(blob). |
 | `record` |  | *Human only.* Record pointer strokes and settings to a file that replays exactly. Scripts replay them with sim.replay(rec) or tools/paint.mjs --replay file. |
 
 Other keys: [ ] previous / next pigment · Shift-drag side of the brush · Z / X lighter / heavier touch · R, scroll turn a flat brush or a magnet.

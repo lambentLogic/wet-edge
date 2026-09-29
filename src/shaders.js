@@ -389,13 +389,11 @@ fn brushDragAt(q: vec2f) -> vec4f {
   let t = clamp(dot(q - A, AB) / max(dot(AB, AB), 1e-6), 0.0, 1.0);
   let dist = length(q - (A + AB * t));
   let r = max(fr.radius, 0.5);
-  // Only the front of the brush pushes (a bead ahead of it); behind its
-  // middle it leaves the film it laid. Pushing with the whole footprint
-  // drew water out of the stroke just laid, so its start went thin, dried
-  // first and left an edge instead of joining the wash.
-  let len = length(AB);
-  let ahead = select(1.0, smoothstep(-0.3 * r, 0.2 * r, dot(q - (A + AB), AB / max(len, 1e-6))), len > 1e-4);
-  let hold = smoothstep(r, r * 0.5, dist) * ahead * clamp(p.brushDrag, 0.0, 1.0);
+  // The whole footprint moves the water under it along with the brush.
+  // (Pushing with only its front sent a bead out past the brush that was
+  // left beyond a stroke's end, drying as a ghost rim; the start of a
+  // stroke thinning as water is carried off it is made up by startWet.)
+  let hold = smoothstep(r, r * 0.5, dist) * clamp(p.brushDrag, 0.0, 1.0);
   return vec4f(AB / max(p.dt, 1e-6), hold, 0.0);
 }
 

@@ -63,6 +63,8 @@ export const ACTIONS = [
     doc: 'Download the painting as it looks. Scripts: tools/paint.mjs --shot file.' },
   { name: 'saveLayer',  group: 'file',    label: 'Save layer',
     doc: 'Download just the paint on a transparent background: a filter layer (multiply) and a body layer (add). Scripts: sim.layerBlobs().' },
+  { name: 'bugReport',  group: 'file',    label: 'Save bug report',
+    doc: 'Saw something strange? Save a bug report (.wcbug) right after: the painting as far back as undo reaches and exactly how it got here, which replays bit for bit (tools/paint.mjs --bug file). Scripts: sim.bugReportBlob(), sim.openBugReport(blob).' },
   { name: 'record',     group: 'file',    label: 'Record strokes', toggle: true, human: true,
     doc: 'Record pointer strokes and settings to a file that replays exactly. Scripts replay them with sim.replay(rec) or tools/paint.mjs --replay file.' },
 ];

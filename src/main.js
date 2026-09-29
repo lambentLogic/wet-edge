@@ -885,14 +885,14 @@ async function init() {
   // (see sim.history.check). values.undoDepth snapshots at most.
   const freeSnap = snap => { if (snap) undoPool.push(snap); };
   const fpsNote = t => { document.getElementById('fps').textContent = t; };
-  async function replayLog(from, to) {
+  async function replayLog(from, to, log = hist.log) {
     state.replaying = true; hist.recording = false;
-    const total = hist.log.slice(from, to).reduce((t, e) => t + (e.n ?? 0), 0);
+    const total = log.slice(from, to).reduce((t, e) => t + (e.n ?? 0), 0);
     let done = 0;
     try {
       let k = 0;
       for (let i = from; i < to; i++) {
-        const e = hist.log[i];
+        const e = log[i];
         if (e.t === 'step') {
           const enc = device.createCommandEncoder();
           runStep(enc, e);
@@ -1027,6 +1027,111 @@ async function init() {
     },
     size() { return this.info(); },
   };
+  // ---- bug reports: the oldest snapshot history has, everything logged
+  // since (up to the sheet as it is now), the paint box, the knobs, and the
+  // hashes of the sheet now. Replayed (sim.openBugReport, tools/paint.mjs
+  // --bug), it has to come out identical: a one-off glitch the painter saw
+  // can be reproduced exactly, and stepped through.
+  // Typed arrays in the log go into one binary block after a JSON header.
+  function packLog(entries) {
+    const chunks = []; let off = 0;
+    const walk = v => {
+      if (ArrayBuffer.isView(v)) {
+        const bytes = new Uint8Array(v.buffer, v.byteOffset, v.byteLength).slice();
+        const pad = (4 - (off % 4)) % 4; if (pad) { chunks.push(new Uint8Array(pad)); off += pad; }
+        chunks.push(bytes); const r = { __ta: v.constructor.name, off, len: v.length }; off += bytes.byteLength; return r;
+      }
+      if (Array.isArray(v)) return v.map(walk);
+      if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x)]));
+      return v;
+    };
+    return { entries: walk(entries), bin: chunks };
+  }
+  function unpackLog(entries, bin) {
+    const types = { Uint8Array, Uint32Array, Float32Array, Int32Array, Float64Array };
+    const walk = v => {
+      if (v && typeof v === 'object' && v.__ta) return new types[v.__ta](bin.slice(v.off, v.off + v.len * types[v.__ta].BYTES_PER_ELEMENT));
+      if (Array.isArray(v)) return v.map(walk);
+      if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x)]));
+      return v;
+    };
+    return walk(entries);
+  }
+  const SNAP_SIZES = Object.fromEntries(SNAP);
+  async function bugReportBlob(note = '') {
+    // Paused while the log and the sheet's hashes are taken, so they're of
+    // the same moment (the sheet ran on while the hashes were read back).
+    const paused = state.paused;
+    state.paused = true;
+    await device.queue.onSubmittedWorkDone();
+    try { return await captureReport(note); } finally { state.paused = paused; }
+  }
+  async function captureReport(note) {
+    const first = hist.marks.find(m => m.snap);
+    const end = hist.cursor ?? hist.log.length;
+    const entries = hist.log.slice(first.at, end).concat(hist.cursor !== null ? hist.tail : []);
+    const snap = {};
+    for (const [k, size] of SNAP) snap[k] = await readBuffer(first.snap[k], size);
+    const hex = async buf => [...new Uint8Array(await crypto.subtle.digest('SHA-256', buf))].slice(0, 8).map(b => b.toString(16).padStart(2, '0')).join('');
+    const snapHashes = { A: await hex(snap.A), G: await hex(snap.G), D: await hex(snap.D), aux: await hex(snap.aux) };
+    const { entries: packed, bin } = packLog(entries);
+    const meta = {
+      kind: 'hyperreal-watercolor bug report', version: 1, at: new Date().toISOString(), note, W, H,
+      snapshot: { simTime: first.snap.simTime, magnets: first.snap.magnets, params: first.snap.params ? [...first.snap.params] : null, sizes: SNAP_SIZES },
+      paper: state.paper, tone: state.tone, values, recipes: window.__sim.pigments.recipes(), pigments: PIGMENTS.map(pg => pg.name),
+      entries: packed, binBytes: bin.reduce((t, b) => t + b.byteLength, 0),
+      hashes: await window.__sim.stateHashes(), simTime: state.simTime, snapHashes,
+    };
+    const head = new TextEncoder().encode(JSON.stringify(meta));
+    const blob = new Blob([new Uint32Array([head.byteLength]), head, ...SNAP.map(([k]) => snap[k]), ...bin]);
+    return new Response(blob.stream().pipeThrough(new CompressionStream('gzip'))).blob();
+  }
+  window.__sim.bugReportBlob = bugReportBlob;
+  window.__sim.saveBugReport = async () => {
+    fpsNote('saving bug report…');
+    try { download(await bugReportBlob(), `bug-${stamp()}.wcbug`); } finally { fpsNote(''); }
+  };
+  // Load a bug report and replay it (to entry upTo, default all). Returns
+  // whether the sheet came out identical to when the report was saved.
+  window.__sim.openBugReport = async (file, { upTo = Infinity } = {}) => {
+    state.stopWash();
+    // Hold the live loop off from here (it stepped the sheet between loading
+    // the snapshot and replaying, and a fresh page's replay came out
+    // different); replayLog lets go when it's done.
+    state.replaying = true;
+    const raw = await new Response(file.stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+    const len = new Uint32Array(raw, 0, 1)[0];
+    const meta = JSON.parse(new TextDecoder().decode(new Uint8Array(raw, 4, len)));
+    let off = 4 + len;
+    const bufs = {};
+    for (const [k, size] of SNAP) { bufs[k] = raw.slice(off, off + size); off += size; }
+    const entries = unpackLog(meta.entries, raw.slice(off, off + meta.binBytes));
+    // The paint box and knobs as they were; then the snapshot.
+    window.__sim.pigments.apply(meta.recipes);
+    Object.assign(values, meta.values);
+    state.paper = meta.paper; state.tone = meta.tone;
+    for (const b of A) device.queue.writeBuffer(b, 0, bufs.A);
+    for (const b of B) device.queue.writeBuffer(b, 0, bufs.B);
+    for (const b of G) device.queue.writeBuffer(b, 0, bufs.G);
+    device.queue.writeBuffer(Dbuf, 0, bufs.D);
+    device.queue.writeBuffer(auxBuf, 0, bufs.aux);
+    device.queue.writeBuffer(tilesBuf, 0, bufs.tiles);
+    device.queue.writeBuffer(magPhiBuf, 0, bufs.mag);
+    if (meta.snapshot.params) { hist.lastParams = Float32Array.from(meta.snapshot.params); device.queue.writeBuffer(paramBuf, 0, hist.lastParams); }
+    state.simTime = meta.snapshot.simTime; state.magnets = meta.snapshot.magnets ?? []; drawMagnets();
+    uiSync();
+    const loaded = await window.__sim.stateHashes();
+    const snapshotOK = !meta.snapHashes || JSON.stringify(loaded) === JSON.stringify(meta.snapHashes);
+    // Paused at the replayed moment, to look at (space to carry on): the
+    // live loop stepping on before the check made every replay "differ".
+    state.paused = true;
+    await replayLog(0, Math.min(upTo, entries.length), entries);
+    window.__sim.act('pause', true);
+    const now = await window.__sim.stateHashes();
+    window.__sim.history.barrier();
+    return { entries: entries.length, replayed: Math.min(upTo, entries.length), identical: JSON.stringify(now) === JSON.stringify(meta.hashes), snapshotOK, note: meta.note, savedAt: meta.at };
+  };
+
   // The sheet as the page opened: the first snapshot history replays from.
   hist.log = []; mark(true);
   window.__sim.fix = () => { window.__sim.checkpoint(); state.fixPending = true; state.lastEdit = performance.now(); };
@@ -1455,6 +1560,7 @@ async function init() {
     savePainting: () => savePainting().catch(e => fail(e.message)),
     open: () => openInput.click(),
     restore: () => restoreNext(),
+    bugReport: () => window.__sim.saveBugReport().catch(e => fail(`Bug report: ${e.message}`)),
   } });
   // Restore: offer the autosaves, newest first.
   const restoreBtn = btns.restore;
