@@ -40,6 +40,8 @@ window.__paintDone = (async () => {
 | `blot` | 7 | Press a crumpled paper towel on wet paint to soak it up, leaving a mottled crease texture. |
 | `mask` | 6 | Masking fluid: a rubber film on dry paper or dried paint that washes flow around. Peel it with Remove mask. |
 | `wash` | 8 | Choose an area (lasso, rectangle, click inside a shape bounded by paint or mask, scrub over it, or the whole sheet) and the loaded brush lays a wash in it, in real time: flat, graded, or around whatever is already painted there. Esc stops it; Cmd+Z takes the whole wash back. |
+| `pencil` | 9 | A light mechanical pencil for sketching: graphite on the tooth, darker as you press. It shows through transparent washes and isn't moved by them. |
+| `eraser` | 0 | Rub out pencil. Only graphite nothing has been painted over since: once glazed over, the drawing is sealed in. |
 | `magnet` | 4 | Place a magnet under the paper (it pulls magnetic pigments such as Mars black). Drag to move; double-click, drag off the sheet or press Delete to remove; R or scroll to rotate. |
 
 ## Actions
@@ -142,6 +144,9 @@ All in `sim.values` by key. The page shows the studio ones always, the brush and
 | `tiltY` | Tilt (down) | Tilt the board so wet paint runs down the sheet (negative: up). Real painters tilt constantly to move a wash. |
 | `tiltX` | Tilt (right) | Tilt the board sideways. |
 | `flatAngle` | Angle | Which way the flat brush faces (R / Shift+R, or scroll over the paper). |
+| `pencilRadius` | Line width | Width of the pencil line (2.5 cells: a 0.5 mm lead). |
+| `pencilDark` | Lead | Hard (light) to soft (dark) lead. |
+| `eraserRadius` | Eraser size | Size of the eraser. |
 | `mistRadius` | Spray reach | How wide the spray bottle's cone is. |
 | `blotRadius` | Towel size | Size of the paper-towel wad. |
 | `blotScale` | Crease size | How coarse the towel's crumpled creases are (mm). |
@@ -268,6 +273,7 @@ All in `sim.values` by key. The page shows the studio ones always, the brush and
 | `mistWater` | 0.14 | mist: droplet water | Mist: how much water each droplet leaves. More: bigger beads that can merge into a wet film. |
 | `mistDensity` | 0.5 | mist: droplets per pass | Mist: how many droplets land per pass. More: fuller coverage. |
 | `mistDamp` | 0.04 | mist: dampens the paper | Mist: how much the spray dampens the paper itself, so later strokes soften and melt together instead of drying with hard edges. |
+| `eraseRate` | 1 | eraser: how much a pass takes | How much of the graphite under it one eraser pass takes. Graphite that paint has been laid over since is sealed in and can't be erased. |
 | `maskTear` | 0.15 | mask peel lifts paint under it | How much dried paint peeling off masking fluid tears away with it. More: more lost; lifts non-staining pigments most, phthalos barely. |
 | `blotRate` | 0.9 | blot: how much it soaks up per press | Blot: how much water and paint each press soaks up where a crease touches. More: cleaner, whiter blotted areas. |
 | `liftWater` | 0.35 | lift: how much a thirsty brush takes (Wetness down = thirstier) | Lift: how much wet paint and water a thirsty brush soaks up. Lower Wetness is thirstier; at full Wetness it barely lifts. |

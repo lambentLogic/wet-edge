@@ -15,6 +15,8 @@ export const TOOLS = [
   { name: 'blot',   mode: 6, key: '7', label: 'Blot',   doc: 'Press a crumpled paper towel on wet paint to soak it up, leaving a mottled crease texture.' },
   { name: 'mask',   mode: 5, key: '6', label: 'Mask',   doc: 'Masking fluid: a rubber film on dry paper or dried paint that washes flow around. Peel it with Remove mask.' },
   { name: 'wash',   mode: 7, key: '8', label: 'Wash',   doc: 'Choose an area (lasso, rectangle, click inside a shape bounded by paint or mask, scrub over it, or the whole sheet) and the loaded brush lays a wash in it, in real time: flat, graded, or around whatever is already painted there. Esc stops it; Cmd+Z takes the whole wash back.' },
+  { name: 'pencil', mode: 8, key: '9', label: 'Pencil', doc: 'A light mechanical pencil for sketching: graphite on the tooth, darker as you press. It shows through transparent washes and isn\'t moved by them.' },
+  { name: 'eraser', mode: 9, key: '0', label: 'Eraser', doc: 'Rub out pencil. Only graphite nothing has been painted over since: once glazed over, the drawing is sealed in.' },
   { name: 'magnet', mode: 3, key: '4', label: 'Magnet', doc: 'Place a magnet under the paper (it pulls magnetic pigments such as Mars black). Drag to move; double-click, drag off the sheet or press Delete to remove; R or scroll to rotate.' },
 ];
 
@@ -76,6 +78,9 @@ export const STUDIO = [
   { key: 'tiltY',        label: 'Tilt (down)', doc: 'Tilt the board so wet paint runs down the sheet (negative: up). Real painters tilt constantly to move a wash.' },
   { key: 'tiltX',        label: 'Tilt (right)', doc: 'Tilt the board sideways.' },
   { key: 'flatAngle',    label: 'Angle', flat: true, doc: 'Which way the flat brush faces (R / Shift+R, or scroll over the paper).' },
+  { key: 'pencilRadius', label: 'Line width', tool: 'pencil', doc: 'Width of the pencil line (2.5 cells: a 0.5 mm lead).' },
+  { key: 'pencilDark',   label: 'Lead', tool: 'pencil', doc: 'Hard (light) to soft (dark) lead.' },
+  { key: 'eraserRadius', label: 'Eraser size', tool: 'eraser', doc: 'Size of the eraser.' },
   { key: 'mistRadius',   label: 'Spray reach', tool: 'mist', doc: 'How wide the spray bottle\'s cone is.' },
   { key: 'blotRadius',   label: 'Towel size', tool: 'blot', doc: 'Size of the paper-towel wad.' },
   { key: 'blotScale',    label: 'Crease size', tool: 'blot', doc: 'How coarse the towel\'s crumpled creases are (mm).' },

@@ -193,6 +193,11 @@ export const RECIPES = [
   // now as an opaque gold scatterer. See the flake layer on the roadmap.
   { name: 'Arabic Gold (Coliro)', code: 'mica', masstone: '#C9A24A', tint: null, opacity: 'opaque',
     ...mineral, density: 1.6, staining: STAIN.low, granulation: GRAN.slight, flocculation: 0, mobility: 0.7 },
+  // Pencil lead, not a paint: the pencil tool lays it dry (hidden from the
+  // paint box). Graphite flakes: dark, neutral, a slight sheen; insoluble,
+  // so it never rewets (staining high) or travels.
+  { name: 'Graphite', code: 'pencil', masstone: '#3C3D40', tint: '#A6A8AB', opacity: 'semitransparent',
+    ...mineral, scatter: 0.3, density: 2, staining: 10, granulation: 0, flocculation: 0, mobility: 0, wick: 0, hidden: true },
 ];
 
 // Measured spectra (src/spectra-data.js; data/spectra/sources.md) are

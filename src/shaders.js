@@ -47,7 +47,7 @@ struct Frame {
   strokeStart: f32,   // sim time this stroke touched down
   substeps: f32,      // sim steps this frame (the brush's segment is split among them)
   stepSec: f32,       // simulated seconds per step
-  _f3: f32,
+  graphiteId: f32,    // the pencil's pigment (a hidden one in the paint box)
   _cid: vec4u,
   carryConc: vec4f,   // x: 1 / the water the brush's carried paint is diluted in
 };
@@ -548,6 +548,8 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   // Brush: stamped along the segment the pointer travelled this frame. Its
   // load can hold up to 4 pigments (a palette mix).
   var liftK = 0.0;   // lifting agitation from the brush this step
+  var pencilAdd = 0.0;   // graphite the pencil lays here this step
+  var eraseK = 0.0;      // share of unsealed graphite the eraser takes
   let maskV = D[i].mask;
   var maskNew = maskV;
   if (fr.brushOn == 1u) {
@@ -750,6 +752,20 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
       // Masking fluid, on dry paper (or over dried paint): a rubbery film.
       // Its edge follows the paper's tooth a little, as liquid latex does.
       if (a.x <= p.wEps) { maskNew = max(maskNew, step(0.45 + 0.2 * (0.5 - aux[i].x), fall)); }
+    } else if (fr.mode == 8u) {
+      // Pencil: graphite rubbed off onto the tooth's peaks (the opposite of
+      // granulation); pressing harder pushes it down into the valleys. A
+      // hard-edged point, each spot it crosses darkened once per pass.
+      let fallP = clamp(cover / max(r * 0.35, 0.3), 0.0, 1.0);
+      let pr = clamp(fr.pressure, 0.0, 1.0);
+      let tooth = clamp(smoothstep(0.35, 0.75, aux[i].x) + 0.7 * pr * pr, 0.0, 1.0);
+      // (Each substep draws only its slice of the stroke, so a spot gets
+      // about one substep's worth a pass.)
+      pencilAdd = p.pencilDark * 0.02 * fallP * tooth * (0.3 + 0.7 * pr);
+    } else if (fr.mode == 9u) {
+      // Eraser: takes graphite that no paint has been laid over since.
+      // (A spot is under the eraser for a few substeps of each pass.)
+      eraseK = clamp(p.eraseRate * 0.5 * fall * fr.pressure, 0.0, 1.0);
     } else {
       // Lifting works by time: scrubbing longer lifts more.
       let kl = clamp(p.liftStrength * fall * fr.pressure * 8.0 / nSub, 0.0, 1.0);
@@ -841,6 +857,28 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
 
   var dOcc: array<bool, 8>;
   for (var k = 0; k < ND; k++) { dOcc[k] = dep.amt[k] > 0.0; }
+  // Pencil and eraser work on the graphite layer directly: it's laid dry,
+  // already set (bound), and never dissolves (graphite isn't soluble).
+  // Anything deposited after it seals it in: glazed over, it can't be
+  // erased.
+  if (pencilAdd > 0.0 || eraseK > 0.0) {
+    let gid = u32(fr.graphiteId);
+    var gs = -1;
+    for (var k = 0; k < ND; k++) { if (dOcc[k] && dep.id[k] == gid) { gs = k; } }
+    if (pencilAdd > 0.0) {
+      if (gs < 0) { for (var k = 0; k < ND; k++) { if (!dOcc[k]) { gs = k; break; } } }
+      if (gs >= 0) {
+        if (!dOcc[gs]) { dOcc[gs] = true; dep.id[gs] = gid; dep.amt[gs] = 0.0; dep.stamp[gs] = -fr.time - 1.0; }
+        dep.amt[gs] = min(dep.amt[gs] + pencilAdd, max(dep.amt[gs], p.pencilDark * 0.06));
+      }
+    }
+    if (eraseK > 0.0 && gs >= 0) {
+      let tg = stampTime(dep.stamp[gs]);
+      var sealed = false;
+      for (var k = 0; k < ND; k++) { if (k != gs && dOcc[k] && stampTime(dep.stamp[k]) > tg) { sealed = true; } }
+      if (!sealed) { dep.amt[gs] *= 1.0 - eraseK; }
+    }
+  }
   if (bindNow) {
     // The set fraction of each free deposit becomes bound, split off into
     // a spare component (if none is free, the whole deposit goes whichever

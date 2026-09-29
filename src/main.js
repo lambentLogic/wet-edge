@@ -62,7 +62,7 @@ const values = Object.fromEntries(PARAMS.map(p => [p.key, p.v]));
 const stopWashNow = () => { if (state.washing) { state.cancelWash = true; state.pointer.down = false; } };
 const state = {
   stopWash: () => stopWashNow(),
-  mode: 0,          // 0 paint, 1 water, 2 lift, 3 magnet, 4 mist, 5 mask, 6 blot, 7 wash
+  mode: 0,          // 0 paint, 1 water, 2 lift, 3 magnet, 4 mist, 5 mask, 6 blot, 7 wash, 8 pencil, 9 eraser
   // What the brush is loaded with: up to 4 pigments (PIGMENTS indices) and
   // their fractions of the load. One pigment straight from a pan, or a mix.
   brush: [{ pigment: 0, frac: 1 }],
@@ -274,7 +274,7 @@ async function init() {
   // (except the colour of paint that has stained into the fibres, which is
   // fixed when it stains).
   const BOX_KEY = 'hyperreal-watercolor.pigments';
-  const RECIPE_KEYS = ['name', 'code', 'kind', 'masstone', 'tint', 'opacity', 'scatter', 'spectrum', 'density', 'staining', 'granulation', 'flocculation', 'mobility', 'wick', 'load', 'magnetic', 'custom'];
+  const RECIPE_KEYS = ['name', 'code', 'kind', 'masstone', 'tint', 'opacity', 'scatter', 'spectrum', 'density', 'staining', 'granulation', 'flocculation', 'mobility', 'wick', 'load', 'magnetic', 'custom', 'hidden'];
   const recipeOf = pg => Object.fromEntries(RECIPE_KEYS.filter(k => pg[k] !== undefined).map(k => [k, pg[k]]));
   const box = {
     changed: [],
@@ -408,6 +408,10 @@ async function init() {
       // The mist is a spray bottle: its own reach, whatever brush is loaded.
       if (state.mode === 4) frameF32[13] = values.mistRadius;
       if (state.mode === 6) frameF32[13] = values.blotRadius;   // the towel, not the brush
+      // The pencil's point and the eraser: their own sizes (pressure widens
+      // a pencil line only a little).
+      if (state.mode === 8) frameF32[13] = values.pencilRadius * (0.7 + 0.3 * pr);
+      if (state.mode === 9) frameF32[13] = values.eraserRadius;
       // Wet-in-wet charge: strongest at touchdown, then the reservoir is spent.
       const dur = Math.max(values.chargeDuration, 1e-3);
       frameF32[11] = Math.exp(-(brush.age ?? 0) / dur);
@@ -435,6 +439,7 @@ async function init() {
     }
     frameF32[29] = substeps;
     frameF32[30] = 1 / Math.max(values.simSpeed, 1);   // seconds per step
+    frameF32[31] = PIGMENTS.findIndex(pg => pg.name === 'Graphite');
     frameF32[9] = dwell / substeps;
     frameF32[10] = drying ? values.dryerStrength : 1;
     frameF32[12] = state.simTime;
@@ -1810,6 +1815,7 @@ function buildUI({ clear, newPaper, acts }) {
   const renderPans = () => {
     palette.replaceChildren();
     pans = PIGMENTS.map((pg, i) => {
+      if (pg.hidden) return null;   // (graphite: the pencil's, not a paint)
       const pan = document.createElement('button');
       pan.className = 'pan';
       pan.title = `${pg.name} (${pg.code}, ${pg.kind})${window.__sim.pigments.edited(pg.name) ? ', edited' : ''}`;
@@ -1820,6 +1826,7 @@ function buildUI({ clear, newPaper, acts }) {
       return pan;
     });
     if (state.brush.length === 1) pans[state.brush[0].pigment]?.classList.add('on');
+    pans = pans.map(p => p ?? { classList: { toggle() {}, remove() {}, add() {} } });
   };
   renderPans();
 
@@ -2095,7 +2102,7 @@ function buildUI({ clear, newPaper, acts }) {
     const keep = washInto.value;
     washInto.replaceChildren(new Option('into…', ''));
     window.__sim.wells.get().forEach((w, k) => { if (w.length) washInto.add(new Option(`Well ${k + 1}: ${w.map(d => d.name).join(' + ')}`, `well:${k}`)); });
-    PIGMENTS.forEach(pg => washInto.add(new Option(pg.name, `pan:${pg.name}`)));
+    PIGMENTS.filter(pg => !pg.hidden).forEach(pg => washInto.add(new Option(pg.name, `pan:${pg.name}`)));
     washInto.value = keep;
   };
   washInto.addEventListener('focus', fillInto);
@@ -2271,7 +2278,9 @@ function buildUI({ clear, newPaper, acts }) {
     else if (e.key === 'f') act.flipMagnets();
     else if (e.key === '[' || e.key === ']') {
       const n = PIGMENTS.length;
-      setPigment((state.brush[0].pigment + (e.key === ']' ? 1 : n - 1)) % n);
+      let i = state.brush[0].pigment;
+      do { i = (i + (e.key === ']' ? 1 : n - 1)) % n; } while (PIGMENTS[i].hidden);
+      setPigment(i);
     }
     else if (e.key === 'd' && !e.repeat) setDry(true);
     else if (e.key === ' ') { e.preventDefault(); togglePause(); }
