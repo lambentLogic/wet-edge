@@ -119,35 +119,48 @@ export function makeMinds(sim) {
   // Gaps in the boundary up to `gap` cells wide are bridged, so a loosely
   // painted outline still holds. Returns { mask, cells } or null when the
   // point is on paint.
-  async function areaAt(x, y, { threshold = 0.004, gap = 3 } = {}) {
-    const a = await sim.read(), masked = await sim.maskField(), N = SW * SH;
+  async function areaAt(x, y, { threshold = 0.004, pencil = 0.0003, gaps = [3, 6, 10, 16, 24, 36] } = {}) {
+    const a = await sim.read(), masked = await sim.maskField(), gr = await sim.readPigment('Graphite'), N = SW * SH;
+    // Paint, masking fluid, and pencil (even a light line) bound a shape.
     const blocked = new Uint8Array(N);
-    for (let c = 0; c < N; c++) blocked[c] = a[c * 4 + 1] + a[c * 4 + 2] > threshold || masked[c] > 0.5 ? 1 : 0;
-    const d = chamfer(blocked), open = c => d[c] > gap;
-    let start = Math.round(y) * SW + Math.round(x);
-    if (!(start >= 0 && start < N) || !open(start)) {
-      // Nudge off a thin line or out of a narrow gap, if clicked close by.
-      let best = -1;
-      for (let dy = -gap * 2; dy <= gap * 2; dy++) for (let dx = -gap * 2; dx <= gap * 2; dx++) {
-        const cx = Math.round(x) + dx, cy = Math.round(y) + dy, c = cy * SW + cx;
-        if (cx >= 0 && cy >= 0 && cx < SW && cy < SH && open(c) && (best < 0 || d[c] > d[best])) best = c;
+    for (let c = 0; c < N; c++) blocked[c] = a[c * 4 + 1] + a[c * 4 + 2] - gr[c] > threshold || gr[c] > pencil || masked[c] > 0.5 ? 1 : 0;
+    const d = chamfer(blocked);
+    // A sketchy outline doesn't quite close: try bridging bigger and bigger
+    // gaps until the fill stops leaking out (to the sheet's edge, or over
+    // most of the sheet), and use the smallest that holds.
+    let result = null;
+    for (const gap of gaps) {
+      const open = c => d[c] > gap;
+      let start = Math.round(y) * SW + Math.round(x);
+      if (!(start >= 0 && start < N) || !open(start)) {
+        // Nudge off a line or out of a narrow spot, if clicked close by.
+        let best = -1;
+        for (let dy = -gap * 2; dy <= gap * 2; dy++) for (let dx = -gap * 2; dx <= gap * 2; dx++) {
+          const cx = Math.round(x) + dx, cy = Math.round(y) + dy, c = cy * SW + cx;
+          if (cx >= 0 && cy >= 0 && cx < SW && cy < SH && open(c) && (best < 0 || d[c] > d[best])) best = c;
+        }
+        if (best < 0) continue;
+        start = best;
       }
-      if (best < 0) return null;
-      start = best;
-    }
-    const core = new Uint8Array(N), stack = [start];
-    core[start] = 1;
-    while (stack.length) {
-      const c = stack.pop(), cx = c % SW;
-      for (const n of [cx > 0 ? c - 1 : -1, cx < SW - 1 ? c + 1 : -1, c - SW, c + SW]) {
-        if (n >= 0 && n < N && !core[n] && open(n)) { core[n] = 1; stack.push(n); }
+      const core = new Uint8Array(N), stack = [start];
+      core[start] = 1;
+      let size = 1, edge = false;
+      while (stack.length) {
+        const c = stack.pop(), cx = c % SW, cy = (c / SW) | 0;
+        if (cx <= gap || cy <= gap || cx >= SW - 1 - gap || cy >= SH - 1 - gap) edge = true;
+        for (const n of [cx > 0 ? c - 1 : -1, cx < SW - 1 ? c + 1 : -1, c - SW, c + SW]) {
+          if (n >= 0 && n < N && !core[n] && open(n)) { core[n] = 1; size++; stack.push(n); }
+        }
       }
+      const leaked = edge || size > 0.5 * N;
+      // Grow back out to the lines the gap-closing kept it from.
+      const back = chamfer(core), mask = new Uint8Array(N);
+      let cells = 0;
+      for (let c = 0; c < N; c++) if (!blocked[c] && back[c] <= gap + 1) { mask[c] = 1; cells++; }
+      result = { mask, cells, gap, leaked };
+      if (!leaked) break;
     }
-    // Grow back out to the boundary the gap-closing kept it from.
-    const back = chamfer(core), mask = new Uint8Array(N);
-    let cells = 0;
-    for (let c = 0; c < N; c++) if (!blocked[c] && back[c] <= gap + 1) { mask[c] = 1; cells++; }
-    return { mask, cells };
+    return result;
   }
 
   // "Scrub over the area": everything within r of a rough scribble.
@@ -437,7 +450,7 @@ export function makeMinds(sim) {
   //   area       polygon to wash (default: the whole sheet)
   //   pigmentAt  optional (x, y) => brushPigment, for a graded wash
   //   brushAt    optional (x, y) => brush load, for a variegated wash
-  async function washAround(area = null, { margin = 3, threshold = 0.004, pigmentAt = null, brushAt = null, mist = true, framesPerSeg = 2, fine = 0.5, even = false, avoidPaint = true, log = () => {} } = {}) {
+  async function washAround(area = null, { margin = 3, threshold = 0.004, pigmentAt = null, brushAt = null, mist = true, framesPerSeg = 2, fine = 0.5, even = false, avoidPaint = true, bead = false, log = () => {} } = {}) {
     const W = 1024, a = await sim.read(), H = a.length / 4 / W, N = W * H;
     const bigR = V.brushRadius, pig0 = V.brushPigment;
     // The margin keeps a wash off paint it goes around; a glaze (not
@@ -452,27 +465,33 @@ export function makeMinds(sim) {
         for (let x = Math.max(0, Math.ceil(x0)); x <= Math.min(W - 1, Math.floor(x1)); x++) inside[y * W + x] = 1;
       }
     } else inside.fill(1);
-    // Distance (cells) to the nearest painted cell: two-pass chamfer.
-    const INF = 1e9, dist = new Float32Array(N);
+    // How much room there is at each cell: the distance to paint to go
+    // around (less the margin that keeps off wet paint) or to the area's own
+    // edge, whichever is nearer. Everything below is measured against the
+    // margin, so the area's edge counts as margin + its distance: the wash
+    // reaches right to its own edge (a wall and a table left a hairline
+    // between them), and keeps its margin only from paint.
     // The area's own edge counts like a shape's: the tip traces it and the
     // rows narrow toward it (rows had run full width up to it and stopped
     // in steps along a slanted edge).
     // avoidPaint false: a glaze over whatever is there, cut in along the
-    // area's edge only.
-    for (let c = 0; c < N; c++) dist[c] = (avoidPaint && a[c * 4 + 1] + a[c * 4 + 2] > threshold) || !inside[c] ? 0 : INF;
-    const D1 = 1, D2 = Math.SQRT2;
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-      const c = y * W + x; let d = dist[c];
-      if (x > 0) d = Math.min(d, dist[c - 1] + D1);
-      if (y > 0) { d = Math.min(d, dist[c - W] + D1); if (x > 0) d = Math.min(d, dist[c - W - 1] + D2); if (x < W - 1) d = Math.min(d, dist[c - W + 1] + D2); }
-      dist[c] = d;
+    // area's edge only. Pencil lines aren't paint to go around (a wall and
+    // a table both kept off the table's pencil line, leaving a white band).
+    const gr = avoidPaint ? await sim.readPigment('Graphite') : null;
+    const painted = c => a[c * 4 + 1] + a[c * 4 + 2] - (gr ? gr[c] : 0) > threshold;
+    // The margin keeps the wash from bleeding into paint that's still wet;
+    // next to dry paint it can come right up to it (a white halo otherwise).
+    if (avoidPaint) {
+      let wetNear = false;
+      for (let c = 0; c < N && !wetNear; c++) if (inside[c] && painted(c) && a[c * 4] > 0.004) wetNear = true;
+      if (!wetNear) margin = 0;
     }
-    for (let y = H - 1; y >= 0; y--) for (let x = W - 1; x >= 0; x--) {
-      const c = y * W + x; let d = dist[c];
-      if (x < W - 1) d = Math.min(d, dist[c + 1] + D1);
-      if (y < H - 1) { d = Math.min(d, dist[c + W] + D1); if (x < W - 1) d = Math.min(d, dist[c + W + 1] + D2); if (x > 0) d = Math.min(d, dist[c + W - 1] + D2); }
-      dist[c] = d;
-    }
+    const seedP = new Uint8Array(N), seedE = new Uint8Array(N);
+    let anyP = false, anyE = false;
+    for (let c = 0; c < N; c++) { if (avoidPaint && painted(c)) { seedP[c] = 1; anyP = true; } if (!inside[c]) { seedE[c] = 1; anyE = true; } }
+    const dP = anyP ? chamfer(seedP) : null, dE = anyE ? chamfer(seedE) : null;
+    const dist = new Float32Array(N).fill(1e9);
+    for (let c = 0; c < N; c++) dist[c] = Math.min(dP ? dP[c] : 1e9, dE ? dE[c] + margin : 1e9);
     // Distance in from the area's own edge: the spray is kept that far in,
     // so it doesn't dampen paper outside the wash.
     const fromEdge = area ? chamfer(inside.map(v => 1 - v)) : null;
@@ -486,7 +505,9 @@ export function makeMinds(sim) {
     // Separate small-brush rings dried apart into bands.
     const taper = Math.max(V.taperMin, 0.02), tipR = bigR * taper;
     const pressFor = room => Math.min(1, Math.max(0, (room / bigR - taper) / (1 - taper)));
-    const rowStep = Math.max(3, bigR * 0.7), cutL = margin + tipR * 1.2;
+    // The tip keeps clear of wet paint; next to dry paint (no margin) it
+    // overlaps it a little, so the two meet.
+    const rowStep = Math.max(3, bigR * 0.7), cutL = margin + tipR * (margin > 0 ? 1.2 : 0.8);
     const clearOf = cutL;   // rows run wherever the tip fits
     // Cut in with a few loops along every edge, each further in and pressed
     // harder (just touching the edge): the tip first, then wider, until the
@@ -591,13 +612,16 @@ export function makeMinds(sim) {
     // (at one spacing they left gaps: stripes beside each shape).
     const openAt = margin + bigR, fineStep = Math.max(2, tipR * 2.5, bigR * fine);
     let cut = 0, rows = 0, nextCoarse = rowStep / 2, dirx = 1;
+    const lastRuns = [];   // the full-width runs, for picking up the bead at the end
     const row = async (y, near) => {
       const before0 = rows;
       V.brushRadius = bigR;
       let run = [];
-      const flush = async () => { if (run.length > 1) { setLoad(run[0][0], y); h.lift(); await layStroke(run, framesPerSeg, brushAt); rows++; } run = []; };
-      for (let k = 0; k <= Math.ceil(W / 10); k++) {
-        const x = dirx > 0 ? k * 10 : W - k * 10;
+      const flush = async () => { if (run.length > 1) { setLoad(run[0][0], y); h.lift(); await layStroke(run, framesPerSeg, brushAt); rows++; if (!near) lastRuns.push({ y, run: run.slice() }); } run = []; };
+      // (From a brush-width off the sheet: rows starting at its edge showed
+      // their rounded ends.)
+      for (let k = 0; k <= Math.ceil((W + 2 * bigR) / 10); k++) {
+        const x = dirx > 0 ? -bigR + k * 10 : W + bigR - k * 10;
         const d = at(x, y);
         const ok = near ? d > clearOf && d <= openAt : d > openAt;
         if (ok) run.push([x, y, near ? pressFor(d - margin) : 1]); else await flush();
@@ -615,6 +639,20 @@ export function makeMinds(sim) {
       }
       if (y >= H) continue;
       while (y >= nextCoarse) { await row(nextCoarse, false); nextCoarse += rowStep; }
+    }
+    // Pick up the bead (off by default: this pass left a pale, hard-edged
+    // band where it lifted; needs a gentler touch): the last row leaves a
+    // bead of extra water along the
+    // bottom that would creep back into a bloom as the rest dries (a pale
+    // arc in the corner where the wash ended). A painter squeezes the brush
+    // and touches it along that row; a thirsty lift takes paint and water
+    // together, so the wash keeps its strength there.
+    if (bead && lastRuns.length && h.mode() !== 1) {
+      const yEnd = Math.max(...lastRuns.map(r => r.y));
+      const mode0 = h.mode(), load0 = V.dipLoad;
+      h.setMode(2); V.dipLoad = 0.3; V.brushRadius = bigR * 0.8;
+      for (const { run } of lastRuns.filter(r => r.y === yEnd)) { h.lift(); await sim.path(run.map(([x, yy]) => [x, yy, 0.6]), framesPerSeg); }
+      h.setMode(mode0); V.dipLoad = load0;
     }
     V.brushRadius = bigR; V.brushPigment = pig0;
     unturn();

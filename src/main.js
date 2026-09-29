@@ -1303,7 +1303,7 @@ async function init() {
   // The Wash tool: a little mind a person can use too. Fills an outline
   // with the loaded brush, in real time, as one undo step. The painter's
   // lasso and scripts both call this.
-  window.__sim.washOptions = { kind: 'flat', fadeTo: 0.2, dampen: true, water: false, dampenOnly: false, into: null, direction: 'down', area: 'lasso', scrubWidth: 40 };
+  window.__sim.washOptions = { kind: 'flat', fadeTo: 0.2, dampen: true, water: false, dampenOnly: false, around: false, into: null, direction: 'down', area: 'lasso', scrubWidth: 40 };
   // Show an area on the overlay (faint blue) while it's being washed.
   const drawArea = mask => {
     drawMagnets();
@@ -1361,7 +1361,7 @@ async function init() {
   };
   window.__sim.wash = async (outline, opts = {}) => {
     if (state.washing) throw new Error('a wash is already running');
-    const { kind, fadeTo, water, dampenOnly, into, direction } = { ...window.__sim.washOptions, ...opts };
+    const { kind, fadeTo, water, dampenOnly, into, direction, around } = { ...window.__sim.washOptions, ...opts };
     const dampen = opts.dampen ?? opts.mist ?? window.__sim.washOptions.dampen;
     const M = window.__minds, h = window.__sim.headless;
     // The area: a polygon; null for the whole sheet (a little past its
@@ -1415,7 +1415,7 @@ async function init() {
         // toward it, so a big brush doesn't spill past the outline (plain
         // rows stopped only the brush's middle short of it). Only 'around'
         // goes around paint already inside; the rest glaze over it.
-        await M.washAround(outline, { mist: false, pigmentAt, brushAt, even: true, avoidPaint: kind === 'around' });
+        await M.washAround(outline, { mist: false, pigmentAt, brushAt, even: true, avoidPaint: kind === 'around' || !!around });
       }
       return true;
     } catch (e) {
@@ -2133,6 +2133,8 @@ function buildUI({ clear, newPaper, acts }) {
   const WASH_HINTS = { soften: 'Trace roughly along the edge of wet paint; a damp brush finds the edge and runs half over it so it fades out. Wetness sets how damp. Esc stops.', shape: 'Click inside a shape bounded by paint or masking fluid (small gaps are bridged); the brush fills it. Esc stops.', scrub: 'Scrub roughly over the area; the brush lays an even wash where you scrubbed. Esc stops.', lasso: 'Draw a loose outline on the paper; the brush fills it. Esc stops.', rect: 'Drag a rectangle on the paper; the brush fills it. Esc stops.', sheet: 'Click the paper to wash the whole sheet. Esc stops.' };
   washFade.addEventListener('input', () => { wo.fadeTo = +washFade.value; });
   washMist.addEventListener('change', () => { wo.dampen = washMist.checked; });
+  const washAroundEl = document.getElementById('washAround');
+  washAroundEl.addEventListener('change', () => { wo.around = washAroundEl.checked; });
   washFade.addEventListener('dblclick', () => { washFade.value = wo.fadeTo = 0.2; });
   showWash();
   // During a wash the wash switches between paint and water itself
