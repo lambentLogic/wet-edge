@@ -7,7 +7,7 @@ import { TOOLS, ACTIONS, STUDIO, KEYS } from './actions.js';
 import { KNOB_DOCS } from './knob-docs.js';
 import { makePaper, PAPERS, DEFAULT_PAPER, TONES } from './paper.js';
 import { PIGMENTS, STAIN_MAP, RECIPES, RECIPE_FIELDS, SPECTRA, OPACITIES, buildPigment, refitStainMap } from './pigments.js';
-import { NB, upsample, srgbToLinear, TO_RGB } from './spectral.js';
+import { NB, upsample, srgbToLinear, TO_RGB, spectrumToLinear } from './spectral.js';
 
 const W = 1024, H = 768, N = W * H;
 const WG = 16;
@@ -2432,15 +2432,19 @@ function swatchColor(pg, thickness = 2) {
 // Display colour of a mix of pigments, given as [pigment, parts] pairs:
 // absorption and scattering add in proportion, as on the paper.
 function mixColor(parts, thickness = 2) {
+  // In the spectral render's terms (K and S per band), like the paper, so a
+  // pan shows the colour it paints.
   const total = parts.reduce((t, [, n]) => t + n, 0) || 1;
-  const c = [0, 1, 2].map(ch => {
-    const K = parts.reduce((t, [pg, n]) => t + pg.K[ch] * n / total, 0);
-    const S = Math.max(parts.reduce((t, [pg, n]) => t + pg.S[ch] * n / total, 0), 1e-4);
+  const R = new Array(NB).fill(0).map((_, k) => {
+    const K = parts.reduce((t, [pg, n]) => t + pg.Kspec[k] * n / total, 0);
+    const S = Math.max(parts.reduce((t, [pg, n]) => t + pg.Sspec[k] * n / total, 0), 1e-4);
     const a = 1 + K / S, b = Math.max(Math.sqrt(a * a - 1), 1e-4);
     const bs = Math.min(b * S * thickness, 20), sh = Math.sinh(bs), c = a * sh + b * Math.cosh(bs);
-    const R = sh / c, T = b / c, Rg = 0.97;
-    return Math.round(255 * Math.min(1, R + T * T * Rg / (1 - R * Rg)));
+    const Rr = sh / c, T = b / c, Rg = 0.97;
+    return Rr + T * T * Rg / (1 - Rr * Rg);
   });
+  const lin = spectrumToLinear(R);
+  const c = lin.map(v => Math.round(255 * Math.min(1, Math.max(0, v <= 0.0031308 ? 12.92 * v : 1.055 * v ** (1 / 2.4) - 0.055))));
   return `rgb(${c.join(',')})`;
 }
 

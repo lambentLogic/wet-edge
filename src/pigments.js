@@ -105,12 +105,19 @@ function fitChannels(Rm, Rt, opacity, scatter) {
 const organic = { kind: 'organic', magnetic: 0, scatter: 0.04, density: 0.3, granulation: 0, flocculation: 0, mobility: 1.5, wick: 0.5 };
 const mineral = { kind: 'mineral', magnetic: 0, density: 1.3, flocculation: 0.2, mobility: 0.8, wick: 0 };
 
+// 2026-09-29: masstone / mid / tint for most of the box were measured from
+// reference swatches the painter gathered (brand paint-outs and value
+// scales: Daniel Smith, QoR, Winsor & Newton, Holbein, Schmincke, Jane
+// Blundell's cards), white-balanced to each image's paper, several brands
+// averaged. The painter's own earlier calibrations were kept where they
+// conflict (rubine's dark masstone, PY110's tint, PY128, transparent red
+// oxide's strength). PB80 awaits a better reference.
 export const RECIPES = [
   { name: 'Phthalo Green', code: 'PG7', masstone: '#00594A', tint: '#1FA58C', opacity: 'transparent',
     ...organic, staining: STAIN.high, mobility: 2.2, wick: 0.7 },
   { name: 'Phthalo Blue (GS)', code: 'PB15:3', masstone: '#0B3A7E', tint: '#1C8FD8', opacity: 'transparent',
     ...organic, staining: STAIN.high, mobility: 2.2, wick: 0.7 },
-  { name: 'Phthalo Turquoise', code: 'PB16', masstone: '#005F6E', tint: '#2CB3C2', opacity: 'transparent',
+  { name: 'Phthalo Turquoise', code: 'PB16', masstone: '#065076', mid: '#1893B9', tint: '#A2DEF7', opacity: 'transparent',
     ...organic, staining: STAIN.high, mobility: 2, wick: 0.6 },
   // Hostaperm Blue R5R; discontinued industrially, sold by handmade makers.
   // Painter's note: dark and strong, lower chroma than PV23 or PB29 either
@@ -125,7 +132,7 @@ export const RECIPES = [
     ...mineral, scatter: 0.06, density: 1, staining: STAIN.lowmed, granulation: GRAN.strong, flocculation: 1, mobility: 1 },
   { name: 'Dioxazine Violet', code: 'PV23', masstone: '#3A1F5E', tint: '#8A6FC0', opacity: 'semitransparent',
     ...organic, staining: STAIN.high, mobility: 1.5 },
-  { name: 'Perylene Violet', code: 'PV29', masstone: '#4A2331', tint: '#B08090', opacity: 'semitransparent',
+  { name: 'Perylene Violet', code: 'PV29', masstone: '#45282A', mid: '#7E515D', tint: '#C7B0BE', opacity: 'semitransparent',
     ...organic, staining: STAIN.medium, mobility: 1.2 },
   // Painter (2026-09-26): quin rose and magenta didn't get as dark as
   // rubine at the same load; heavy quinacridone is deep. Masstones deepened.
@@ -138,29 +145,29 @@ export const RECIPES = [
     ...organic, staining: STAIN.high, mobility: 1.7 },
   // Painter: "a lil less ruby-dark than I'd expect and more pink" with the
   // tint at #E07090 (2026-09-26): deeper ruby masstone, raspberry-red tint.
-  { name: 'Pyrrole Rubine', code: 'PR264', masstone: '#760B28', tint: '#CC4058', opacity: 'semitransparent',
+  { name: 'Pyrrole Rubine', code: 'PR264', masstone: '#760B28', mid: '#CC4058', tint: '#FDADBD', opacity: 'semitransparent',
     ...organic, staining: STAIN.medium, mobility: 1.3 },
   // "Blooms very readily" yet "inert wet in wet" (handprint).
-  { name: 'Pyrrole Scarlet', code: 'PR255', masstone: '#D8321E', tint: '#F2826A', opacity: 'semitransparent',
+  { name: 'Pyrrole Scarlet', code: 'PR255', masstone: '#D82A22', mid: '#EE4535', tint: '#FDAD9F', opacity: 'semitransparent',
     ...organic, scatter: undefined, staining: STAIN.high, granulation: 0.1, mobility: 0.8 },
   // Rated transparent, but shows up on a dark ground (painter's
   // observation), so its scattering is fitted rather than fixed low.
-  { name: 'Perylene Maroon', code: 'PR179', masstone: '#5A1A1E', tint: '#B8606A', opacity: 'semitransparent',
+  { name: 'Perylene Maroon', code: 'PR179', masstone: '#6E2324', mid: '#AA4A48', tint: '#F0A49C', opacity: 'semitransparent',
     ...organic, scatter: undefined, staining: STAIN.high, mobility: 1.2 },
-  { name: 'Perylene Green', code: 'PBk31', masstone: '#1E2B24', tint: '#5E7F74', opacity: 'semitransparent',
+  { name: 'Perylene Green', code: 'PBk31', masstone: '#243330', mid: '#5F8A7E', tint: '#BFD6CE', opacity: 'semitransparent',
     ...organic, staining: STAIN.medium, mobility: 1.2 },
   // "Inactive wet in wet but blossoms when rewetted" (handprint).
   // Painter (2026-09-26): tints can be a very rich, bright yellow; with
   // phthalo blue it makes a very warm green, not an olive.
   // Colours sampled from the painter's reference (Daniel Smith Permanent
   // Yellow Deep and an Indian yellow, both PY110; scans read a little light).
-  { name: 'Isoindolinone Yellow', code: 'PY110', masstone: '#F0A00A', tint: '#FCD440', opacity: 'transparent',
+  { name: 'Isoindolinone Yellow', code: 'PY110', masstone: '#F0820C', mid: '#FFBC22', tint: '#FCD440', opacity: 'transparent',
     ...organic, staining: STAIN.medium, mobility: 0.8 },
   // Painter (2026-09-26): about as bright as bismuth vanadate in glazes,
   // but a middle yellow leaning lemon (bismuth is lemon leaning middle;
   // both a little warmer than PY3). Was #E8D400 / #F2E24A, dull and green.
   // Van Gogh Transparent Yellow Medium chart reads #F3DC38 at strength.
-  { name: 'Azo Condensation Yellow', code: 'PY128', masstone: '#F4D81C', tint: '#F9E654', opacity: 'transparent',
+  { name: 'Azo Condensation Yellow', code: 'PY128', masstone: '#F4D81C', mid: '#F7E845', tint: '#F9EF7C', opacity: 'transparent',
     ...organic, staining: STAIN.high, mobility: 1.4 },
   // Inorganic but fine; "very inert with water" (handprint).
   // Painter (2026-09-26): lemon, a mite neon (as neon as it gets without a
@@ -168,7 +175,7 @@ export const RECIPES = [
   // rendered dark and golden from #F4D020 / #F8E27A. Colours sampled from
   // references they shared: a watercolour chart (#F5E640 strong, #F5E856
   // lighter) and Golden's acrylic masstone (#FAF215).
-  { name: 'Bismuth Vanadate Yellow', code: 'PY184', masstone: '#FAE81A', tint: '#F7EE70', opacity: 'semiopaque',
+  { name: 'Bismuth Vanadate Yellow', code: 'PY184', masstone: '#F9EC1E', mid: '#FBF55C', tint: '#FCF99A', opacity: 'semiopaque',
     ...mineral, staining: STAIN.medium, granulation: GRAN.none, flocculation: 0, mobility: 0.5 },
   { name: 'Indian Red', code: 'PR101', masstone: '#7A2E24', tint: '#C08070', opacity: 'semiopaque',
     ...mineral, density: 1.5, staining: STAIN.lowmed, granulation: GRAN.moderate },
@@ -177,7 +184,7 @@ export const RECIPES = [
   // grey. Deep brown-red masstone, strong tinter (was #9A3A1A / #D88050).
   { name: 'Transparent Red Oxide', code: 'PR101', masstone: '#6A2412', tint: '#C86A3E', opacity: 'transparent',
     ...mineral, scatter: 0.04, density: 0.9, staining: STAIN.low, granulation: GRAN.moderate, flocculation: 0.5 },
-  { name: 'Transparent Yellow Oxide', code: 'PY42', masstone: '#B37A1E', tint: '#E0B060', opacity: 'transparent',
+  { name: 'Transparent Yellow Oxide', code: 'PY42', masstone: '#C8761E', mid: '#F5AA35', tint: '#FFE092', opacity: 'transparent',
     ...mineral, scatter: 0.04, density: 0.9, staining: STAIN.low, granulation: GRAN.moderate, flocculation: 0.3 },
   // Da Vinci natural raw umber; granulation seen wet largely vanishes dry.
   { name: 'Raw Umber', code: 'PBr7', masstone: '#4A3F2E', tint: '#A09A80', opacity: 'transparent',
@@ -185,7 +192,7 @@ export const RECIPES = [
   // Synthetic magnetite, Fe3O4: a heavy, granulating, low-staining warm black
   // with a high refractive index, and ferrimagnetic. It moves under a magnet
   // while wet (the magnetism feature in the spec). Colours are estimates.
-  { name: 'Mars Black', code: 'PBk11', masstone: '#1F1D1C', tint: '#7B7874', opacity: 'semiopaque',
+  { name: 'Mars Black', code: 'PBk11', masstone: '#2F2D29', mid: '#8A857C', tint: '#C9C3BA', opacity: 'semiopaque',
     ...mineral, density: 1.7, staining: STAIN.low, granulation: GRAN.moderate, flocculation: 0.4, mobility: 0.7,
     magnetic: 1 },
   // A dropped brushload displaces pigment in a moist wash (DS).
