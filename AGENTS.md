@@ -107,7 +107,7 @@ Other keys: [ ] previous / next pigment · Shift-drag side of the brush · Z / X
 - `M.alongBand(path, halfWidth, mask, { brushAt, pigmentAt })`: Wash a band along a path in parallel lanes that follow it (what a scrub along a shape gets; M.isBand(points, r, mask) tells a band from a scribble).
 - `M.soften(line, out)`: Find the wet edge along a line and run a damp brush along it to soften it.
 - `M.mark(points, { target })`: A stroke that checks it actually left paint, and repeats if it skipped.
-- `M.waitDry(points)`: Wait (with the dryer) until those points are dry and the gum has set. Returns seconds.
+- `M.waitDry(points)`: Wait until those points are dry and the gum has set: air-drying until the shine has gone, then the dryer (blow-drying a wet wash stops it settling). Returns seconds.
 - `M.waitDamp(points, { below })`: Wait until those points are only damp (for soft-but-held marks).
 
 ## Looking and history

@@ -404,7 +404,19 @@ export function makeMinds(sim) {
   async function waitDry(points, { maxS = 90, dryer = true, set = 1.5 } = {}) {
     const t0 = performance.now();
     const pts = points.length >= 3 ? gridIn(points, 6) : points;
-    if (dryer) sim.setDrying(true);
+    // The dryer only once the shine has gone, as a painter uses one: blowing
+    // on a wet wash freezes the pigment before it settles into the grain or
+    // drifts to the edges (a blow-dried wash granulated and darkened at its
+    // edges far less than an air-dried one).
+    if (dryer) {
+      for (;;) {
+        let water = 0;
+        for (const [x, y] of pts) water = Math.max(water, (await sim.sense(x, y, 10)).water);
+        if (water < 0.003 || (performance.now() - t0) / 1000 > maxS) break;
+        await sleep(600);
+      }
+      sim.setDrying(true);
+    }
     try {
       for (;;) {
         let wet = 0;
