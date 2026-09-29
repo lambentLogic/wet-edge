@@ -117,8 +117,8 @@ window.__paintDone = (async () => {
     h.setBrush('Bismuth Vanadate Yellow');
     await S.wash({ at: [L.c[0] - 10, L.c[1] - 5] }, { kind: 'variegated', into: [['Isoindolinone Yellow', 2], ['Transparent Red Oxide', 1]], direction: 'across' });
     // The turning-away side dropped in while wet, so it melts in.
-    S.tool('paint'); h.setBrushPreset('round'); V.brushRadius = 16; V.brushPigment = 0.75;
-    h.setBrush([['Isoindolinone Yellow', 1], ['Transparent Red Oxide', 1]]);
+    S.tool('paint'); h.setBrushPreset('round'); V.brushRadius = 18; V.brushPigment = 1.0;
+    h.setBrush([['Isoindolinone Yellow', 3], ['Transparent Red Oxide', 2], ['Perylene Violet', 1]]);
     await S.path(pts(s => { const a = 0.1 + s * 1.5; return [L.c[0] + Math.cos(a) * L.r[0] * 0.62, L.c[1] + Math.sin(a) * L.r[1] * 0.55, 0.6]; }, 8), 3);
     h.setBrushPreset('mop'); V.brushRadius = 24; V.brushPigment = 0.35; S.tool('wash');
   }

@@ -119,7 +119,7 @@ export function makeMinds(sim) {
   // Gaps in the boundary up to `gap` cells wide are bridged, so a loosely
   // painted outline still holds. Returns { mask, cells } or null when the
   // point is on paint.
-  async function areaAt(x, y, { threshold = 0.004, pencil = 0.0003, gaps = [3, 6, 10, 16, 24, 36] } = {}) {
+  async function areaAt(x, y, { threshold = 0.004, pencil = 0.0003, gaps = [3, 6, 10, 16, 24, 36], lineWidth = 6 } = {}) {
     const a = await sim.read(), masked = await sim.maskField(), gr = await sim.readPigment('Graphite'), N = SW * SH;
     // Paint, masking fluid, and pencil (even a light line) bound a shape.
     const blocked = new Uint8Array(N);
@@ -157,6 +157,14 @@ export function makeMinds(sim) {
       const back = chamfer(core), mask = new Uint8Array(N);
       let cells = 0;
       for (let c = 0; c < N; c++) if (!blocked[c] && back[c] <= gap + 1) { mask[c] = 1; cells++; }
+      // Over the pencil line bounding it, as a painter washes over their
+      // drawing (stopping at it left a pale sliver of the line's width all
+      // round, most visible where masking fluid had covered its inner half).
+      // Pencil only: never onto paint or masking fluid.
+      const over = chamfer(mask);
+      for (let c = 0; c < N; c++) {
+        if (!mask[c] && over[c] <= lineWidth && gr[c] > pencil && masked[c] <= 0.5 && a[c * 4 + 1] + a[c * 4 + 2] - gr[c] <= threshold) { mask[c] = 1; cells++; }
+      }
       result = { mask, cells, gap, leaked };
       if (!leaked) break;
     }
