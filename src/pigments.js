@@ -117,7 +117,10 @@ export const RECIPES = [
     ...organic, staining: STAIN.high, mobility: 2.2, wick: 0.7 },
   { name: 'Phthalo Blue (GS)', code: 'PB15:3', masstone: '#0B3A7E', tint: '#1C8FD8', opacity: 'transparent',
     ...organic, staining: STAIN.high, mobility: 2.2, wick: 0.7 },
-  { name: 'Phthalo Turquoise', code: 'PB16', masstone: '#065076', mid: '#1893B9', tint: '#A2DEF7', opacity: 'transparent',
+  // Painter (2026-09-29): read as a redundant cyan beside PB15:3; their
+  // PB16 leans greener. Matched to Holbein Marine Blue (Jane Blundell's
+  // card) and a PB16 vs PB15:3 comparison: a clear teal.
+  { name: 'Phthalo Turquoise', code: 'PB16', masstone: '#00505A', mid: '#0E97A8', tint: '#8FD9DF', opacity: 'transparent',
     ...organic, staining: STAIN.high, mobility: 2, wick: 0.6 },
   // Hostaperm Blue R5R; discontinued industrially, sold by handmade makers.
   // Painter's note: dark and strong, lower chroma than PV23 or PB29 either
