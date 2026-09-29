@@ -143,12 +143,12 @@ export const PAPERS = {
       capillarySpread: 0.1, capillaryMin: 0.02, dampThreshold: 0.06, staining: 1, paperShade: 0.14,
     },
   },
-  // After Strathmore 500 mixed media, vellum (190 gsm): 100% cotton,
+  // After a heavyweight cotton mixed-media vellum (190 gsm): 100% cotton,
   // internally sized, light tooth. Values mapped from maker specs and user
   // reports (absorbs about like 140 lb cold press, lifts moderately, soft
   // edges, little texture); tooth and capacity are estimates.
   vellum: {
-    name: 'Mixed-media vellum (Strathmore 500-like)',
+    name: 'Mixed-media vellum',
     color: [0.975, 0.972, 0.96],
     gen: {
       noise: [[20, 0.2], [5, 0.12], [0.6, 0.12]],
