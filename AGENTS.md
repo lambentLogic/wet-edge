@@ -112,6 +112,7 @@ Other keys: [ ] previous / next pigment · Shift-drag side of the brush · Z / X
 
 ## Looking and history
 
+- `await sim.note(text)`: Add an entry to the painting journal, notes/journal.md (filed under the script's name when run by tools/paint.mjs; node tools/note.mjs does the same from the command line). Read the journal before painting; note what worked, what didn't and what the painter said.
 - `sim.look(name)`: Save a screenshot under that name (tools/paint.mjs --looks dir collects them), to look at mid-painting.
 - `await sim.undo() / await sim.redo(); sim.checkpoint()`: Undo points: strokes by hand mark themselves; scripts call checkpoint() before something they may want to take back. Undo and redo are exact (a log of everything that went into the simulation is replayed from the nearest snapshot) and can take a few seconds far back, so await them.
 - `sim.history.info() / await sim.history.replayAll()`: The history log (entries, bytes, marks, snapshots). replayAll() goes back to the first snapshot and replays everything since: compare sim.stateHashes() before and after to check replay is exact.

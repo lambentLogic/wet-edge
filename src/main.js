@@ -960,6 +960,9 @@ async function init() {
     hist.marks.push({ at: hist.log.length, snap: takeSnap(), magnets: copyMagnets(), barrier });
     thin();
   }
+  // A note in the painting journal (notes/journal.md) when run by
+  // tools/paint.mjs; otherwise just logged.
+  window.__sim.note = async text => { if (window.__saveNote) await window.__saveNote(String(text)); else console.log('[note]', text); };
   window.__sim.checkpoint = () => { if (!state.replaying) mark(); };
   window.__sim.undo = async () => {
     state.stopWash();

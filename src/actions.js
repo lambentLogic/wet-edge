@@ -131,6 +131,7 @@ export const SCRIPT_API = [
   { call: 'M.waitDry(points)', probe: '__minds.waitDry', doc: 'Wait (with the dryer) until those points are dry and the gum has set. Returns seconds.' },
   { call: 'M.waitDamp(points, { below })', probe: '__minds.waitDamp', doc: 'Wait until those points are only damp (for soft-but-held marks).' },
   { section: 'Looking and history' },
+  { call: 'await sim.note(text)', probe: 'sim.note', doc: 'Add an entry to the painting journal, notes/journal.md (filed under the script\'s name when run by tools/paint.mjs; node tools/note.mjs does the same from the command line). Read the journal before painting; note what worked, what didn\'t and what the painter said.' },
   { call: 'sim.look(name)', probe: 'sim.look', doc: 'Save a screenshot under that name (tools/paint.mjs --looks dir collects them), to look at mid-painting.' },
   { call: 'await sim.undo() / await sim.redo(); sim.checkpoint()', probe: 'sim.checkpoint', doc: 'Undo points: strokes by hand mark themselves; scripts call checkpoint() before something they may want to take back. Undo and redo are exact (a log of everything that went into the simulation is replayed from the nearest snapshot) and can take a few seconds far back, so await them.' },
   { call: 'sim.history.info() / await sim.history.replayAll()', probe: 'sim.history.info', doc: 'The history log (entries, bytes, marks, snapshots). replayAll() goes back to the first snapshot and replays everything since: compare sim.stateHashes() before and after to check replay is exact.' },

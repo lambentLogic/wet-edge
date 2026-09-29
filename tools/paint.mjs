@@ -4,6 +4,7 @@
 //   node tools/paint.mjs script.js [--open in.wcpaint] [--save out.wcpaint] [--shot out.png] [--layer prefix]
 //                              [--looks dir] [--replay strokes.json]
 //   --looks: sim.look('name') calls in the script save dir/NN-name.png
+//   sim.note('text') in the script adds an entry to notes/journal.md
 //   --replay: replay a stroke recording (Record strokes in the app) after opening
 //   (--layer writes prefix-filter-multiply.png and prefix-body-add.png)
 //
@@ -14,7 +15,8 @@
 import puppeteer from 'puppeteer-core';
 import { readFile, writeFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, basename } from 'node:path';
+import { appendNote } from './journal.mjs';
 
 const CHROME = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const APP_URL = process.env.APP_URL ?? 'http://127.0.0.1:8765/';
@@ -45,6 +47,11 @@ try {
     else if (m.type() === 'error' && !t.includes('404')) console.error('[page]', t);
   });
   if (process.env.PRE_JS) await page.evaluateOnNewDocument(process.env.PRE_JS);
+  // sim.note('text') in the script: an entry in the painting journal.
+  await page.exposeFunction('__saveNote', async text => {
+    await appendNote(text, script ? basename(script, '.js') : null);
+    console.error('noted in notes/journal.md');
+  });
   let lookN = 0;
   if (looks) {
     const { mkdir } = await import('node:fs/promises');
