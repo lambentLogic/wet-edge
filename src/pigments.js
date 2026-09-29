@@ -175,8 +175,12 @@ export const RECIPES = [
   // rendered dark and golden from #F4D020 / #F8E27A. Colours sampled from
   // references they shared: a watercolour chart (#F5E640 strong, #F5E856
   // lighter) and Golden's acrylic masstone (#FAF215).
-  { name: 'Bismuth Vanadate Yellow', code: 'PY184', masstone: '#F9EC1E', mid: '#FBF55C', tint: '#FCF99A', opacity: 'semiopaque',
-    ...mineral, staining: STAIN.medium, granulation: GRAN.none, flocculation: 0, mobility: 0.5 },
+  // Painter (2026-09-29): extremely saturated; from one angle a slightly
+  // darker yellow, from the other brighter than the paper it's on (a
+  // high-index scatterer). Strong scattering lets pale washes reflect more
+  // yellow than bare paper.
+  { name: 'Bismuth Vanadate Yellow', code: 'PY184', masstone: '#FCE81C', mid: '#FFF24A', tint: '#FFF88A', opacity: 'semiopaque',
+    ...mineral, staining: STAIN.medium, granulation: GRAN.none, flocculation: 0, mobility: 0.5 , scatter: 0.6},
   { name: 'Indian Red', code: 'PR101', masstone: '#7A2E24', tint: '#C08070', opacity: 'semiopaque',
     ...mineral, density: 1.5, staining: STAIN.lowmed, granulation: GRAN.moderate },
   // Sub-micron oxide, but granulates "in threads" in DS's formulation.
