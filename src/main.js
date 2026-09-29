@@ -391,7 +391,7 @@ async function init() {
       // No landing dot: a stroke lays nothing while the brush sits at its
       // first point, until it moves (a flick lands already moving) or is
       // held still on purpose for dabDelay (a dab).
-      if (newStroke) state.strokeMoved = false;
+      if (newStroke) { state.strokeMoved = false; state.strokeTravel = 0; }
       if (segNow >= 0.5) state.strokeMoved = true;
       const ptrS = state.pointer;
       const dabbing = ptrS.down && ptrS.scripted ? ptrS.dabIntended : (brush.age ?? 1) >= values.dabDelay;
@@ -415,6 +415,10 @@ async function init() {
       // Wet-in-wet charge: strongest at touchdown, then the reservoir is spent.
       const dur = Math.max(values.chargeDuration, 1e-3);
       frameF32[11] = Math.exp(-(brush.age ?? 0) / dur);
+      // How fresh the stroke is, by distance (a fast stroke's start is as
+      // fresh as a slow one's): 1 at touchdown, fading over ~3 brush-widths.
+      if (state.strokeMoved) state.strokeTravel = (state.strokeTravel ?? 0) + segNow;
+      frameF32[26] = Math.exp(-(state.strokeTravel ?? 0) / Math.max(6 * frameF32[13], 1));
     }
     // Dwell: a fast stroke spends less time over each spot and lays less
     // there. Measured from the smoothed per-frame travel, since mouse events
@@ -445,7 +449,7 @@ async function init() {
     frameF32[12] = state.simTime;
     frameF32[14] = brushLoad();
     frameF32[15] = concMul();
-    if (!brush) { frameF32[13] = values.brushRadius; frameF32[24] = 0; }
+    if (!brush) { frameF32[13] = values.brushRadius; frameF32[24] = 0; frameF32[26] = 0; }
     frameF32[25] = values.fixTooth;
     if (newStroke) {
       state.strokeStart = state.simTime;

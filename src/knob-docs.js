@@ -90,6 +90,7 @@ export const KNOB_DOCS = {
   flatThickness: { tier: 'studio', doc: 'Thickness of the flat brush\'s chisel edge as a fraction of its width. Less: a sharper, thinner edge line.' },
   lingerRate: { tier: 'lab', doc: 'How fast paint builds up while the brush rests in one place. More: a held brush blots out a darker, wetter spot.' },
   dabDelay: { tier: 'lab', doc: 'Seconds the brush must be held still before it lays a dab. Stops an accidental dot at the start of every stroke.' },
+  startWet: { tier: 'lab', doc: 'A freshly loaded brush lets out more water (and paint) at the start of a stroke, fading over its first few brush-widths. Without it a stroke\'s start came out thinner, dried first and took an edge as the wetter paint ran back in. 0: an even level all along.' },
   brushDrag: { tier: 'lab', doc: 'How much the hairs push wet paint along with them. More: dragging through wet paint smears and shoves it in the stroke direction.' },
   brushPickup: { tier: 'lab', doc: 'How much the paint and clear-water brushes trade pigment with wet paint they cross: picks up from strong areas, lays down in weak. More: smearing and softening.' },
   carryVolume: { tier: 'lab', doc: 'How much water the picked-up paint is diluted in, relative to the brush tip. More: carried colour comes off weaker when it\'s laid down elsewhere.' },

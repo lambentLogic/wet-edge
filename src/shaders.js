@@ -43,7 +43,8 @@ struct Frame {
   brushFrac: vec4f,   // ... and their fractions of the load (sum 1)
   touch: f32,         // how lightly the brush skims (0 = full contact), from the CPU
   fixTooth: f32,      // how much a fixative spray fills the paper's tooth
-  _t0: f32, _t1: f32,
+  startFresh: f32,   // 1 as a stroke begins, fading over its first few brush-widths
+  _t1: f32,
   strokeStart: f32,   // sim time this stroke touched down
   substeps: f32,      // sim steps this frame (the brush's segment is split among them)
   stepSec: f32,       // simulated seconds per step
@@ -388,7 +389,13 @@ fn brushDragAt(q: vec2f) -> vec4f {
   let t = clamp(dot(q - A, AB) / max(dot(AB, AB), 1e-6), 0.0, 1.0);
   let dist = length(q - (A + AB * t));
   let r = max(fr.radius, 0.5);
-  let hold = smoothstep(r, r * 0.5, dist) * clamp(p.brushDrag, 0.0, 1.0);
+  // Only the front of the brush pushes (a bead ahead of it); behind its
+  // middle it leaves the film it laid. Pushing with the whole footprint
+  // drew water out of the stroke just laid, so its start went thin, dried
+  // first and left an edge instead of joining the wash.
+  let len = length(AB);
+  let ahead = select(1.0, smoothstep(-0.3 * r, 0.2 * r, dot(q - (A + AB), AB / max(len, 1e-6))), len > 1e-4);
+  let hold = smoothstep(r, r * 0.5, dist) * ahead * clamp(p.brushDrag, 0.0, 1.0);
   return vec4f(AB / max(p.dt, 1e-6), hold, 0.0);
 }
 
@@ -630,7 +637,12 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     let wetBefore = a.x > p.wEps && aux[i].w > 0.0 && aux[i].w < fr.strokeStart - 0.02;
     let charge = select(0.0, min(p.brushCharge * fr.charge * k, chargeRoom), wetBefore);
     // Water the brush can still lay down falls as its reservoir empties.
-    let level = p.brushWater * mix(p.emptyLevel, 1.0, clamp(fr.load, 0.0, 1.0));
+    // A freshly loaded brush lets out a little more at the start of a
+    // stroke. Laid at an even level, a stroke's start came out thinner (a
+    // spot there is only ever under the front of the brush), dried first,
+    // and got an edge as the wetter paint ran back into it.
+    let fresh = 1.0 + p.startWet * fr.startFresh;
+    let level = p.brushWater * mix(p.emptyLevel, 1.0, clamp(fr.load, 0.0, 1.0)) * fresh;
     // The brush drags wet paint the way a real one does: where it passes
     // over wet paint, the paint in the paper's water and in the brush's
     // hairs trade toward the same concentration. Where the paper's is
@@ -703,7 +715,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
       }
       w = max(w, mix(w, level, k)) + charge;
     } else if (fr.mode == 1u) {
-      w = max(w, mix(w, p.brushWater, k)) + charge;
+      w = max(w, mix(w, p.brushWater * fresh, k)) + charge;
     } else if (fr.mode == 4u) {
       // Mist: a spray bottle, not the brush. fr.radius is the spray's reach
       // (mistRadius); droplets are densest in the middle and thin out, and

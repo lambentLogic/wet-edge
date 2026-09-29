@@ -109,7 +109,7 @@ export const PAPERS = {
     },
     knobs: {
       sizing: 0.8,
-      paperRelief: 0.03, absorption: 0.05, capacityMin: 0.03, capacityMax: 0.12,
+      paperRelief: 0.01, absorption: 0.05, capacityMin: 0.03, capacityMax: 0.12,
       capillarySpread: 0.1, capillaryMin: 0.02, dampThreshold: 0.05, staining: 1, paperShade: 0.05,
     },
   },
@@ -124,7 +124,7 @@ export const PAPERS = {
     },
     knobs: {
       sizing: 0.9,
-      paperRelief: 0.01, absorption: 0.06, capacityMin: 0.03, capacityMax: 0.07,
+      paperRelief: 0.0035, absorption: 0.06, capacityMin: 0.03, capacityMax: 0.07,
       capillarySpread: 0.06, capillaryMin: 0.025, dampThreshold: 0.05, staining: 0.7, paperShade: 0.06,
     },
   },
@@ -139,7 +139,7 @@ export const PAPERS = {
     },
     knobs: {
       sizing: 0.75,
-      paperRelief: 0.12, absorption: 0.05, capacityMin: 0.02, capacityMax: 0.16,
+      paperRelief: 0.04, absorption: 0.05, capacityMin: 0.02, capacityMax: 0.16,
       capillarySpread: 0.1, capillaryMin: 0.02, dampThreshold: 0.06, staining: 1, paperShade: 0.14,
     },
   },
@@ -158,7 +158,7 @@ export const PAPERS = {
     },
     knobs: {
       sizing: 0.65,
-      paperRelief: 0.02, absorption: 0.03, capacityMin: 0.018, capacityMax: 0.072,
+      paperRelief: 0.007, absorption: 0.03, capacityMin: 0.018, capacityMax: 0.072,
       capillarySpread: 0.16, capillaryMin: 0.02, dampThreshold: 0.035, staining: 1.15, paperShade: 0.04,
     },
   },
@@ -173,7 +173,7 @@ export const PAPERS = {
     },
     knobs: {
       sizing: 0.15,
-      paperRelief: 0.04, absorption: 0.06, capacityMin: 0.06, capacityMax: 0.2,
+      paperRelief: 0.013, absorption: 0.06, capacityMin: 0.06, capacityMax: 0.2,
       capillarySpread: 0.2, capillaryMin: 0.01, dampThreshold: 0.03, staining: 1.5, paperShade: 0.12,
     },
   },
@@ -188,7 +188,7 @@ export const PAPERS = {
     },
     knobs: {
       sizing: 0,
-      paperRelief: 0.02, absorption: 0.0005, capacityMin: 0.002, capacityMax: 0.005,
+      paperRelief: 0.007, absorption: 0.0005, capacityMin: 0.002, capacityMax: 0.005,
       capillarySpread: 0.01, capillaryMin: 0.05, dampThreshold: 1.0, staining: 0.2, paperShade: 0.02,
     },
   },

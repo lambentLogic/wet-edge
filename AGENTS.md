@@ -170,15 +170,15 @@ All in `sim.values` by key. The page shows the studio ones always, the brush and
 | `gravity` | 1 | pressure (gravity) | How hard deeper water pushes toward shallower water. More: puddles level out and runs travel faster; also how strongly board tilt and paper texture steer water. |
 | `viscosity` | 0.1 | viscosity | Internal thickness of the water: more smooths out the flow so neighbouring water moves together, damping swirls and ripples. |
 | `drag` | 0.5 | paper drag | Friction of the paper on moving water. More: washes creep and stay where laid; less: water slides and runs freely. |
-| `dragMaxBoost` | 1 | thin-film drag cap | Cap on how much extra friction thin films get over deep water (1 = none). More: a thin damp wash sticks to the paper while puddles still flow. |
-| `dragDepth` | 0.1 | drag reference depth | Water depth below which thin-film friction starts growing. More: fairly deep washes already count as thin and stick; less: only a bare film sticks. |
-| `paperRelief` | 0.03 | paper relief | How much the paper's tooth (hills and valleys) steers surface water. More: water gathers in the valleys and follows the texture. |
+| `dragMaxBoost` | 100 | thin-film drag cap | Cap on how much extra friction thin films get over deep water (1 = none). More: a thin damp wash sticks to the paper while puddles still flow. |
+| `dragDepth` | 0.03 | drag reference depth | Water depth below which thin-film friction starts growing. More: fairly deep washes already count as thin and stick; less: only a bare film sticks. |
+| `paperRelief` | 0.01 | paper relief | How much the paper's tooth (hills and valleys) steers surface water. More: water gathers in the valleys and follows the texture. |
 | `surfaceTension` | 0.5 | surface tension | Surface tension of the water: more smooths a wash over the tooth, rounding bumps and filling dips in the film. Capped automatically in deep puddles. |
 | `capSuction` | 0 | thin-film suction | Meniscus pull toward thin water: more feeds a drying wash from its thick middle out to its thinning rim, so the edge recedes smoothly instead of in tide lines. 0 = off. |
 | `suctionDepth` | 0.02 | suction depth scale | Depth scale for thin-film suction: larger means deeper water still counts as thin and gets pulled toward. Only matters when thin-film suction is above 0. |
 | `pinning` | 0.35 | wet edges hold their line (pinning) | How firmly a wet edge holds on dry paper (contact-angle hysteresis). More: crisp edges that only break out under a big pool. Also caps how much a wet-in-wet charge can flood. |
 | `edgeDamp` | 3 | sheet edge damps rebound | The sheet's edge holds water like a wet edge, but a closed wall also bounced it straight back in. This slows flow toward and away from the edge within about 6 mm of it (flow along the edge is untouched). 0: a perfectly reflecting wall. |
-| `edgePull` | 0.15 | edge darkening (pull to the edge, Curtis η) | Draws water, and the pigment in it, outward toward the rim of a wet area as it dries (Curtis's edge darkening). More: darker, harder dried edges on washes. |
+| `edgePull` | 0 | edge darkening (pull to the edge, Curtis η) | Draws water, and the pigment in it, outward toward the rim of a wet area as it dries (Curtis's edge darkening). More: darker, harder dried edges on washes. |
 
 ### Paper & drying
 
@@ -255,7 +255,8 @@ All in `sim.values` by key. The page shows the studio ones always, the brush and
 | `flatThickness` | 0.18 | flat: edge thickness (x width) | Thickness of the flat brush's chisel edge as a fraction of its width. Less: a sharper, thinner edge line. |
 | `lingerRate` | 0.3 | resting brush adds (frames per frame) | How fast paint builds up while the brush rests in one place. More: a held brush blots out a darker, wetter spot. |
 | `dabDelay` | 0.25 | hold still this long to dab (s) | Seconds the brush must be held still before it lays a dab. Stops an accidental dot at the start of every stroke. |
-| `brushDrag` | 0.25 | brush pushes wet paint | How much the hairs push wet paint along with them. More: dragging through wet paint smears and shoves it in the stroke direction. |
+| `startWet` | 0.5 | stroke starts wetter (fresh brush) | A freshly loaded brush lets out more water (and paint) at the start of a stroke, fading over its first few brush-widths. Without it a stroke's start came out thinner, dried first and took an edge as the wetter paint ran back in. 0: an even level all along. |
+| `brushDrag` | 0.1 | brush pushes wet paint | How much the hairs push wet paint along with them. More: dragging through wet paint smears and shoves it in the stroke direction. |
 | `brushPickup` | 0.1 | brush picks up wet paint | How much the paint and clear-water brushes trade pigment with wet paint they cross: picks up from strong areas, lays down in weak. More: smearing and softening. |
 | `carryVolume` | 0.5 | carried paint dilutes in (x tip water) | How much water the picked-up paint is diluted in, relative to the brush tip. More: carried colour comes off weaker when it's laid down elsewhere. |
 | `carryKeep` | 0.2 | carried paint kept to the next stroke | Fraction of picked-up colour the brush still holds at the next stroke (rinsing). 0: clean each stroke; 1: never rinsed, colour gets dragged around. |
