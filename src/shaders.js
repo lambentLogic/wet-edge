@@ -548,6 +548,36 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
 
   if (VARIANT != 2u && (p.mixing > 0.5 || mag.anyMagnet > 0u)) { mixPigments(x, y, a, gi, aL, aR, aU, aD, gL, gR, gU, gD); }
 
+  // Pigment carried by the paper's wicking: water soaking sideways through
+  // the fibres takes fine pigment with it (each pigment's wick rating:
+  // phthalos far, heavy earths not at all), out past the surface water's
+  // edge into damp paper, where it settles. Unsized paper wicks most, so
+  // washi feathers instead of drying to a hard rim with a clean damp halo
+  // beyond it; sized cotton only softens its rims a little. Each face's
+  // flow uses the source cell's water and pigment and the same rate on
+  // both sides, so pigment is conserved.
+  if (VARIANT == 0u && p.pigmentWick > 0.0) {
+    let wr = p.capillarySpread * (1.0 - clamp(p.sizing, 0.0, 1.0)) * p.dt;
+    let sMin = p.capillaryMin;
+    let openI = D[i].mask < 0.5;
+    for (var f4 = 0; f4 < 4; f4++) {
+      var nx = x; var ny = y; var an = a; var gn = gi;
+      if (f4 == 0) { nx = x - 1; an = aL; gn = gL; } else if (f4 == 1) { nx = x + 1; an = aR; gn = gR; }
+      else if (f4 == 2) { ny = y - 1; an = aU; gn = gU; } else { ny = y + 1; an = aD; gn = gD; }
+      if (!inb(nx, ny) || !(an.w > sMin || a.w > sMin)) { continue; }
+      let fw = wr * (an.w - a.w);   // water through the fibres into this cell (+) or out (-)
+      // (Pigment rides in the surface water and in the water held by the
+      // fibres, so it keeps travelling through damp paper past the edge.)
+      if (fw > 0.0 && an.x + an.w > p.wEps && openI) {
+        let r = min(fw / (an.x + an.w) * p.pigmentWick, 0.1);
+        for (var k = 0; k < NG; k++) { if (gn.amt[k] > 0.0) { addCand(gn.id[k], gn.amt[k] * r * pig[gn.id[k]].phys2.y); } }
+      } else if (fw < 0.0 && a.x + a.w > p.wEps && D[ix(nx, ny)].mask < 0.5) {
+        let r = min(-fw / (a.x + a.w) * p.pigmentWick, 0.1);
+        for (var k = 0; k < NG; k++) { if (gi.amt[k] > 0.0) { addCand(gi.id[k], -gi.amt[k] * r * pig[gi.id[k]].phys2.y); } }
+      }
+    }
+  }
+
   var s = a.w;
 
   // Brush: stamped along the segment the pointer travelled this frame. Its
@@ -1038,11 +1068,23 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   // Paper only dries once no standing water covers it.
   if (w <= p.wEps) { s = max(s - p.paperEvaporation * fr.dryMul * p.dt, 0.0); }
 
-  // Once the surface water is gone, whatever pigment it carried settles.
+  // Once the surface water is gone, whatever pigment it carried settles:
+  // at once on dry paper, but in paper still damp enough to wick, a share
+  // per step (fibreSettle), so pigment wicked past a wet edge travels on a
+  // little before it settles and feathers out instead of piling up at the
+  // edge.
   if (w <= p.wEps) {
+    let held = p.pigmentWick > 0.0 && s > p.capillaryMin;
+    // Sized paper barely wicks, and holding pigment in its fibres only
+    // left it loose for the next wash to disturb (seams over a dry base):
+    // there it settles at once, as before.
+    let fs = select(1.0, mix(clamp(p.fibreSettle, 0.0, 1.0), 1.0, smoothstep(0.3, 0.6, p.sizing)), held);
     for (var k = 0; k < NG; k++) {
-      if (gOcc[k] && gAmt[k] > 0.0) { depositInto(&dep, &dOcc, gId[k], gAmt[k]); }
-      gAmt[k] = 0.0; gOcc[k] = false;
+      if (!gOcc[k] || gAmt[k] <= 0.0) { gAmt[k] = 0.0; gOcc[k] = false; continue; }
+      let settleNow = select(gAmt[k] * fs, gAmt[k], gAmt[k] * (1.0 - fs) < 1e-7);
+      depositInto(&dep, &dOcc, gId[k], settleNow);
+      gAmt[k] -= settleNow;
+      if (gAmt[k] <= 0.0) { gAmt[k] = 0.0; gOcc[k] = false; }
     }
   }
 

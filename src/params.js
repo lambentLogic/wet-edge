@@ -33,6 +33,8 @@ export const PARAMS = [
   { key: 'capacityMin',      v: 0.03,   min: 0, max: 0.3,   group: 'Paper & drying', target: 'sim', label: 'capacity (peaks)' },
   { key: 'capacityMax',      v: 0.12,   min: 0, max: 0.5,   group: 'Paper & drying', target: 'sim', label: 'capacity (valleys)' },
   { key: 'capillarySpread',  v: 0.1,    min: 0, max: 0.24,  group: 'Paper & drying', target: 'sim', label: 'capillary spread' },
+  { key: 'pigmentWick',      v: 1,      min: 0, max: 5,     group: 'Paper & drying', target: 'sim', label: 'wicking carries pigment' },
+  { key: 'fibreSettle',      v: 0.001,   min: 0, max: 1,     group: 'Paper & drying', target: 'sim', label: 'wicked pigment settles (per step)' },
   { key: 'capillaryMin',     v: 0.02,   min: 0, max: 0.2,   group: 'Paper & drying', target: 'sim', label: 'capillary threshold' },
   { key: 'dampThreshold',    v: 0.05,   min: 0, max: 0.3,   group: 'Paper & drying', target: 'sim', label: 'damp enough to flow (and dry-brush contact)' },
   { key: 'paperEvaporation', v: 0.00003, min: 0, max: 0.001, group: 'Paper & drying', target: 'sim', label: 'paper evaporation' },

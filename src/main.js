@@ -1079,6 +1079,7 @@ async function init() {
       kind: 'hyperreal-watercolor bug report', version: 1, at: new Date().toISOString(), note, W, H,
       snapshot: { simTime: first.snap.simTime, magnets: first.snap.magnets, params: first.snap.params ? [...first.snap.params] : null, sizes: SNAP_SIZES },
       paper: state.paper, tone: state.tone, values, recipes: window.__sim.pigments.recipes(), pigments: PIGMENTS.map(pg => pg.name),
+      paramKeys: SIM_PARAMS.map(p => p.key),
       entries: packed, binBytes: bin.reduce((t, b) => t + b.byteLength, 0),
       hashes: await window.__sim.stateHashes(), simTime: state.simTime, snapHashes,
     };
@@ -1106,6 +1107,17 @@ async function init() {
     const bufs = {};
     for (const [k, size] of SNAP) { bufs[k] = raw.slice(off, off + size); off += size; }
     const entries = unpackLog(meta.entries, raw.slice(off, off + meta.binBytes));
+    // Knobs added (or reordered) since the report was saved: remap each
+    // logged parameter block by name, new knobs at their current values.
+    const keysNow = SIM_PARAMS.map(p => p.key);
+    let remapped = false;
+    if (meta.paramKeys && meta.paramKeys.join() !== keysNow.join()) {
+      const at = Object.fromEntries(meta.paramKeys.map((k, i) => [k, i]));
+      const remap = old => { const out = new Float32Array(paramData.length); keysNow.forEach((k, i) => { out[i] = k in at ? old[at[k]] : values[k]; }); return out; };
+      for (const e of entries) if (e.params) e.params = remap(e.params);
+      if (meta.snapshot.params) meta.snapshot.params = [...remap(meta.snapshot.params)];
+      remapped = true;
+    }
     // The paint box and knobs as they were; then the snapshot.
     window.__sim.pigments.apply(meta.recipes);
     Object.assign(values, meta.values);
@@ -1129,7 +1141,7 @@ async function init() {
     window.__sim.act('pause', true);
     const now = await window.__sim.stateHashes();
     window.__sim.history.barrier();
-    return { entries: entries.length, replayed: Math.min(upTo, entries.length), identical: JSON.stringify(now) === JSON.stringify(meta.hashes), snapshotOK, note: meta.note, savedAt: meta.at };
+    return { entries: entries.length, replayed: Math.min(upTo, entries.length), identical: JSON.stringify(now) === JSON.stringify(meta.hashes), snapshotOK, remapped, unknownKnobs: !meta.paramKeys, note: meta.note, savedAt: meta.at };
   };
 
   // The sheet as the page opened: the first snapshot history replays from.

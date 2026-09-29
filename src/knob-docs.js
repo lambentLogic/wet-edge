@@ -30,6 +30,8 @@ export const KNOB_DOCS = {
   capacityMin: { tier: 'lab', doc: 'How much water the paper can hold at the peaks of its tooth. More: a thirstier sheet overall; with capacity (valleys) sets how unevenly soaking follows texture.' },
   capacityMax: { tier: 'lab', doc: 'How much water the paper can hold in the valleys of its tooth. More: a thirstier sheet. Also the most the mist can dampen the paper to.' },
   capillarySpread: { tier: 'lab', doc: 'How fast water creeps sideways through the fibres (reduced by sizing). More: damp halos spread past a wash\'s edge and edges feather.' },
+  pigmentWick: { tier: 'lab', doc: 'Water soaking sideways through the fibres carries fine pigment with it (by each pigment\'s wick rating), out past the wet edge into damp paper. Unsized papers like washi feather most; sized cotton softens its rims a little. 0: pigment stops at the surface water\'s edge.' },
+  fibreSettle: { tier: 'lab', doc: 'Pigment carried into damp paper beyond the surface water settles this share per step while the fibres are wet, so it travels on a little: lower, it feathers further; 1: it settles at once (a hard rim where it arrives).' },
   capillaryMin: { tier: 'lab', doc: 'How damp fibres must be before they wick sideways. More: only well-soaked paper spreads its water; less: even slightly damp paper wicks.' },
   dampThreshold: { tier: 'lab', doc: 'How damp the paper must be for a wash to flow onto it. More: water stays put on barely damp paper. Also where dry-brush stops working and when paint counts as dry.' },
   paperEvaporation: { tier: 'lab', doc: 'How fast the paper itself dries once the shine is gone. More: damp paper returns to bone dry quickly, so late strokes get hard edges sooner.' },
