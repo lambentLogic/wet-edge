@@ -57,7 +57,7 @@ window.__paintDone = (async () => {
 | `newPaper` |  | A fresh sheet of the chosen paper, with a new random texture. |
 | `flipMagnets` | F | Flip every magnet's pole: pigment is pushed instead of pulled. |
 | `removeMagnets` |  | Take every magnet away. |
-| `undo` | Cmd+Z | Undo the last stroke or sheet action. Wet paint comes back exactly as it was, mid-flow. |
+| `undo` | Cmd+Z | Undo the last stroke or sheet action, exactly, wet paint mid-flow included. Far back it replays the painting from the nearest snapshot, which can take a few seconds. |
 | `redo` | Shift+Cmd+Z | Redo what was undone (until the next stroke). |
 | `squeeze` (held: on/off) | Q | Water brush: squeeze water from the handle into the tip while held. |
 | `wipe` | E | Water brush: wipe the pigment out of the tip (it keeps its water). |
@@ -111,7 +111,8 @@ Other keys: [ ] previous / next pigment · Shift-drag side of the brush · Z / X
 ## Looking and history
 
 - `sim.look(name)`: Save a screenshot under that name (tools/paint.mjs --looks dir collects them), to look at mid-painting.
-- `sim.checkpoint() / sim.undo() / sim.redo()`: Undo points: strokes by hand checkpoint themselves; scripts call checkpoint() before something they may want to take back.
+- `await sim.undo() / await sim.redo(); sim.checkpoint()`: Undo points: strokes by hand mark themselves; scripts call checkpoint() before something they may want to take back. Undo and redo are exact (a log of everything that went into the simulation is replayed from the nearest snapshot) and can take a few seconds far back, so await them.
+- `sim.history.info() / await sim.history.replayAll()`: The history log (entries, bytes, marks, snapshots). replayAll() goes back to the first snapshot and replays everything since: compare sim.stateHashes() before and after to check replay is exact.
 - `sim.sense(x, y, r)`: What is on the paper around a point: water, suspended and deposited pigment.
 - `sim.cell(x, y)`: Everything stored in one cell (debugging).
 - `sim.replay(rec)`: Replay a recorded hand stroke file exactly (hand and scripted strokes take different code paths; use this to reproduce the painter's bugs).
@@ -153,7 +154,7 @@ All in `sim.values` by key. The page shows the studio ones always, the brush and
 | `dt` | 0.4 | timestep | Size of each simulation step. Larger runs the physics faster per step but less stably (puddles can wobble or blow up); it also scales every rate in the sim. |
 | `simSpeed` | 600 | steps / second | Simulation steps per real second. Higher makes water flow and dry faster in real time, if the GPU keeps up; 0 freezes the painting. |
 | `wEps` | 0.004 | wet threshold | Numerical threshold: water thinner than this counts as dry surface. Mostly a stability setting; raising it makes washes lose their shine and stop flowing earlier. |
-| `undoDepth` | 4 | undo levels (~145 MB each) | How many steps of undo are kept. Each costs about 145 MB of memory. |
+| `undoDepth` | 5 | undo snapshots (~175 MB each; history between them is replayed) | How many full snapshots of the sheet undo keeps on the GPU (about 175 MB each). Undo goes back past them by replaying the logged painting from the nearest one, so more snapshots mean faster undo far back, not a longer history. |
 | `suspendedWeight` | 1 | show suspended | How much pigment still floating in wet water shows (1 = true to life, 0 = hide it, show only settled paint). A diagnostic view. |
 
 ### Flow
@@ -249,7 +250,7 @@ All in `sim.values` by key. The page shows the studio ones always, the brush and
 | `lingerRate` | 0.3 | resting brush adds (frames per frame) | How fast paint builds up while the brush rests in one place. More: a held brush blots out a darker, wetter spot. |
 | `dabDelay` | 0.25 | hold still this long to dab (s) | Seconds the brush must be held still before it lays a dab. Stops an accidental dot at the start of every stroke. |
 | `brushDrag` | 0.25 | brush pushes wet paint | How much the hairs push wet paint along with them. More: dragging through wet paint smears and shoves it in the stroke direction. |
-| `brushPickup` | 0.3 | brush picks up wet paint | How much the paint and clear-water brushes trade pigment with wet paint they cross: picks up from strong areas, lays down in weak. More: smearing and softening. |
+| `brushPickup` | 0.1 | brush picks up wet paint | How much the paint and clear-water brushes trade pigment with wet paint they cross: picks up from strong areas, lays down in weak. More: smearing and softening. |
 | `carryVolume` | 0.5 | carried paint dilutes in (x tip water) | How much water the picked-up paint is diluted in, relative to the brush tip. More: carried colour comes off weaker when it's laid down elsewhere. |
 | `carryKeep` | 0.2 | carried paint kept to the next stroke | Fraction of picked-up colour the brush still holds at the next stroke (rinsing). 0: clean each stroke; 1: never rinsed, colour gets dragged around. |
 | `brushDose` | 2.1 | dose per spot crossed (frames) | How much paint each spot gets as the brush passes over it, at any speed. More: fuller strokes; less: lighter strokes. |

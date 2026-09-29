@@ -7,7 +7,7 @@ window.__paintDone = (async () => {
   await S.path(line(100, 200, 900, 200), 3); L('after stroke 1: ' + await tot());
   S.checkpoint();
   h.setBrush('Quinacridone Rose'); await S.path(line(100, 500, 900, 500), 3); L('after stroke 2: ' + await tot());
-  S.undo(); await new Promise(r => setTimeout(r, 100)); L('undo: ' + await tot() + ' rose at (500,500): ' + JSON.stringify((await S.sense(500, 500, 3)).wet));
-  S.redo(); await new Promise(r => setTimeout(r, 100)); L('redo: ' + await tot() + ' rose: ' + JSON.stringify((await S.sense(500, 500, 3)).wet));
-  S.undo(); await new Promise(r => setTimeout(r, 1500)); L('undo again, then 1.5 s of drying: ' + await tot());
+  await S.undo(); await new Promise(r => setTimeout(r, 100)); L('undo: ' + await tot() + ' rose at (500,500): ' + JSON.stringify((await S.sense(500, 500, 3)).wet));
+  await S.redo(); await new Promise(r => setTimeout(r, 100)); L('redo: ' + await tot() + ' rose: ' + JSON.stringify((await S.sense(500, 500, 3)).wet));
+  await S.undo(); await new Promise(r => setTimeout(r, 1500)); L('undo again, then 1.5 s of drying: ' + await tot());
 })();

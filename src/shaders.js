@@ -129,6 +129,16 @@ struct Tiles {
   state: array<u32, ${NTILES}>,       // frames left active
   list: array<u32, ${NTILES}>,        // active tiles this frame
   carry: array<atomic<u32>, ${MAXP}>, // pigment the brush holds, picked up from wet paint, by id (x1e5)
+  // Each step reads carry as it stood when the step began; what it picks up
+  // and lays down is tallied here and folded in at the next step (bumpStep).
+  // Integer sums come out the same in any order, so a replay is exact
+  // (threads reading and changing carry at once made it depend on timing).
+  carryAdd: array<atomic<u32>, ${MAXP}>,
+  carrySub: array<atomic<u32>, ${MAXP}>,
+  // How much water the brush trades with the paper in a step (sum of each
+  // cell's share, x1e5): this step's, and last step's (which scales this
+  // one's exchange, see transport).
+  exch: array<atomic<u32>, 2>,
 };
 @group(0) @binding(7) var<storage, read_write> tiles: Tiles;
 
@@ -158,8 +168,17 @@ var<workgroup> tileHot: atomic<u32>;
 
 // Counts substeps within a frame (tiles.brushAcc[2], reset each frame), so
 // transport knows which slice of the brush's segment is this step's.
+// Also folds the last step's pickups and lays into what the brush holds.
 @compute @workgroup_size(1)
-fn bumpStep() { atomicAdd(&tiles.brushAcc[2], 1u); }
+fn bumpStep() {
+  atomicAdd(&tiles.brushAcc[2], 1u);
+  for (var id = 0u; id < ${MAXP}u; id++) {
+    let held = i32(atomicLoad(&tiles.carry[id])) + i32(atomicLoad(&tiles.carryAdd[id])) - i32(atomicLoad(&tiles.carrySub[id]));
+    atomicStore(&tiles.carry[id], u32(max(held, 0)));
+    atomicStore(&tiles.carryAdd[id], 0u); atomicStore(&tiles.carrySub[id], 0u);
+  }
+  atomicStore(&tiles.exch[1], atomicLoad(&tiles.exch[0])); atomicStore(&tiles.exch[0], 0u);
+}
 
 // One workgroup per tile: is anything in it active this frame?
 @compute @workgroup_size(16, 16)
@@ -625,6 +644,15 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
       // pass picks up a little, lingering more.
       let kx = clamp(p.brushPickup * fall / nSub, 0.0, 0.5);
       let wx = min(w, p.brushWater);
+      // Every cell trades from the brush's contents as the step began. Done
+      // one cell after another, each would find the brush a little changed
+      // by the last: when the footprint's whole trade is X of the brush's
+      // water, the brush moves 1 - e^-X of the way toward the paper instead
+      // of X, so each cell trades (1 - e^-X) / X of its share (and the brush
+      // can never lay down more than it holds).
+      atomicAdd(&tiles.exch[0], u32(kx * wx * 1e5 + 0.5));
+      let X = f32(atomicLoad(&tiles.exch[1])) * 1e-5 * fr.carryConc.x;
+      let fX = select(1.0, (1.0 - exp(-X)) / X, X > 1e-4);
       for (var j = 0u; j < cn; j++) {
         let id = cid[j];
         var loaded = false;
@@ -632,11 +660,11 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
         if (loaded) { continue; }
         // The brush's own concentration, straight from what it holds (on the
         // GPU, so there's no lag on a fast stroke).
-        let cb = f32(atomicLoad(&tiles.carry[id])) * 1e-5 * fr.carryConc.x;
+        let cb = f32(atomicLoad(&tiles.carry[id])) * 1e-5 * fr.carryConc.x;   // as the step began
         let tk = kx * (camt[j] / w - cb) * wx;
         // Moved in whole tally units, so the brush's count is exact.
-        let n = floor(min(tk, camt[j]) * 1e5);
-        if (n >= 1.0) { camt[j] -= n * 1e-5; atomicAdd(&tiles.carry[id], u32(n)); }
+        let n = floor(min(tk * fX, camt[j]) * 1e5);
+        if (n >= 1.0) { camt[j] -= n * 1e-5; atomicAdd(&tiles.carryAdd[id], u32(n)); }
       }
       // Carried pigment: laid down toward the brush's concentration where
       // the paper's is weaker.
@@ -651,16 +679,8 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
         let ci = candIndex(id);
         let cur = select(0.0, camt[max(ci, 0)], ci >= 0);
         let tk = kx * (cb - cur / w) * wx;
-        let n = floor(tk * 1e5);
-        // Compare-and-swap, so two cells drawing at once can't overdraw.
-        if (n >= 1.0) {
-          let nn = u32(n);
-          for (var tries = 0; tries < 8; tries++) {
-            let have = atomicLoad(&tiles.carry[id]);
-            if (have < nn) { break; }
-            if (atomicCompareExchangeWeak(&tiles.carry[id], have, have - nn).exchanged) { addCand(id, n * 1e-5); break; }
-          }
-        }
+        let n = floor(tk * fX * 1e5);
+        if (n >= 1.0) { atomicAdd(&tiles.carrySub[id], u32(n)); addCand(id, n * 1e-5); }
       }
     }
     if (fr.mode == 0u) {

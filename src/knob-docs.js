@@ -122,7 +122,7 @@ export const KNOB_DOCS = {
   liftStrength: { tier: 'studio', doc: 'Lift: how hard the lifting brush scrubs. More: removes wet paint and dried paint faster.' },
 
   // --- Render ---
-  undoDepth: { tier: 'dev', doc: 'How many steps of undo are kept. Each costs about 145 MB of memory.' },
+  undoDepth: { tier: 'dev', doc: 'How many full snapshots of the sheet undo keeps on the GPU (about 175 MB each). Undo goes back past them by replaying the logged painting from the nearest one, so more snapshots mean faster undo far back, not a longer history.' },
   thickness: { tier: 'lab', doc: 'How dark and saturated a given amount of pigment looks (the paint film\'s optical thickness). More: the same paint reads stronger. Display only.' },
   wetDarken: { tier: 'lab', doc: 'How much standing water darkens the paint beneath it (up to 30%), so wet paint looks deeper than it dries. Display only.' },
   dampDarken: { tier: 'lab', doc: 'How much damp paper (no standing water) looks darker, up to 15%, so you can see where it hasn\'t dried. Display only.' },

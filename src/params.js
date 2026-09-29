@@ -90,7 +90,7 @@ export const PARAMS = [
   { key: 'lingerRate',    v: 0.3,  min: 0, max: 2,   group: 'Brush', target: 'js',  label: 'resting brush adds (frames per frame)' },
   { key: 'dabDelay',      v: 0.25, min: 0, max: 1,   group: 'Brush', target: 'js',  label: 'hold still this long to dab (s)' },
   { key: 'brushDrag',     v: 0.25, min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'brush pushes wet paint' },
-  { key: 'brushPickup',   v: 0.3,  min: 0, max: 2,   group: 'Brush', target: 'sim', label: 'brush picks up wet paint' },
+  { key: 'brushPickup',   v: 0.1,  min: 0, max: 2,   group: 'Brush', target: 'sim', label: 'brush picks up wet paint' },
   { key: 'carryVolume',   v: 0.5,  min: 0.1, max: 20, group: 'Brush', target: 'js', label: 'carried paint dilutes in (x tip water)' },
   { key: 'carryKeep',     v: 0.2,  min: 0, max: 1,   group: 'Brush', target: 'js',  label: 'carried paint kept to the next stroke' },
   { key: 'brushDose',     v: 2.1,  min: 0, max: 10,  group: 'Brush', target: 'js',  label: 'dose per spot crossed (frames)' },
@@ -121,7 +121,7 @@ export const PARAMS = [
   { key: 'liftStrength',  v: 0.24,  min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'lift strength' },
 
   // --- Render (Kubelka-Munk) ---
-  { key: 'undoDepth',       v: 4,    min: 1, max: 20, group: 'Render', target: 'js', label: 'undo levels (~145 MB each)' },
+  { key: 'undoDepth',       v: 5,    min: 3, max: 20, group: 'Render', target: 'js', label: 'undo snapshots (~175 MB each; history between them is replayed)' },
   { key: 'thickness',       v: 8,    min: 0, max: 40, group: 'Render', target: 'render', label: 'pigment thickness' },
   { key: 'wetDarken',       v: 0.5,  min: 0, max: 3,  group: 'Render', target: 'render', label: 'standing water darkens' },
   { key: 'dampDarken',      v: 0.8,  min: 0, max: 3,  group: 'Render', target: 'render', label: 'damp paper shows' },

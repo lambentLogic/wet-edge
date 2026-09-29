@@ -752,7 +752,7 @@
       await h.wait(1);
       h.setMode(0);
       await withValues({ brushRadius: 8, brushPigment: 0.8 }, async () => {
-        await h.paint(525, 400, 526, 400, 12);
+        await h.paint(525, 400, 525, 400, 40);   // a dab: held past dabDelay (a 12-frame one laid nothing)
         await h.wait(0.5); out.push(await radius(525, 400));
         await h.wait(2.5); out.push(await radius(525, 400));
       });

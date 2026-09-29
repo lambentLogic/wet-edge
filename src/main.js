@@ -135,22 +135,39 @@ async function init() {
   // state, then the list.
   state.carry = new Float64Array(MAX_PIGMENTS);
   const CARRY_OFF = 32 + TX * TY * 8;   // tiles.carry, MAX_PIGMENTS u32 (x1e5)
-  const tilesBuf = buf(CARRY_OFF + MAX_PIGMENTS * 4, S | CD);
+  const CARRY_WORDS = MAX_PIGMENTS * 3 + 2;   // carry, its step tallies, and the brush's trade (see Tiles)
+  const tilesBuf = buf(CARRY_OFF + CARRY_WORDS * 4, S | CD);
   // Indirect args are copied out of tilesBuf: a buffer can't be both bound as
   // writable storage and used for an indirect dispatch.
   const argsBuf = buf(16, CD | GPUBufferUsage.INDIRECT);
 
-  const newPaper = seed => {
-    state.stopWash();
-    const h = makePaper(W, H, PAPERS[state.paper], seed);
+  // The history log (undo and redo replay it; see "history" below). Ops
+  // that write the sheet from the CPU are logged by what they do, so replay
+  // can do them again.
+  const hist = { log: [], recording: true, lastParams: null, marks: [], cursor: null, tail: [], endSnap: null };
+  // After an undo, what the live sheet does goes to a tail, kept only if
+  // painting carries on from there (redo drops it).
+  const histPush = e => { if (hist.recording) (hist.cursor === null ? hist.log : hist.tail).push(e); };
+  const logOp = e => histPush({ t: 'op', ...e });
+  const paperNow = (key, seed) => {
+    const h = makePaper(W, H, PAPERS[key], seed);
     const aux = new Float32Array(N * 4);
     for (let i = 0; i < N; i++) aux[i * 4] = h[i];
     device.queue.writeBuffer(auxBuf, 0, aux);
+  };
+  const newPaper = (seed = (Math.random() * 1e9) | 0) => {
+    state.stopWash();
+    logOp({ op: 'paper', key: state.paper, seed });
+    paperNow(state.paper, seed);
   };
   // Anything that replaces the sheet stops a wash in progress first.
   const clear = () => {
     state.stopWash();
     window.__sim?.checkpoint?.();
+    logOp({ op: 'clear' });
+    clearNow();
+  };
+  function clearNow() {
     const z = new Float32Array(N * 4);
     for (const b of [...A, ...B]) device.queue.writeBuffer(b, 0, z);
     // A cleared sheet starts its clock again (deposit timestamps and
@@ -159,9 +176,9 @@ async function init() {
     for (const b of G) device.queue.writeBuffer(b, 0, new Float32Array(N * GB / 4));
     device.queue.writeBuffer(Dbuf, 0, new Float32Array(N * DB / 4));
     device.queue.writeBuffer(tilesBuf, 32, new Uint32Array(TX * TY));
-    device.queue.writeBuffer(tilesBuf, CARRY_OFF, new Uint32Array(MAX_PIGMENTS));   // a clean brush
+    device.queue.writeBuffer(tilesBuf, CARRY_OFF, new Uint32Array(CARRY_WORDS));   // a clean brush
     state.carry?.fill(0);
-  };
+  }
   newPaper();
 
   // ---- pipelines
@@ -249,6 +266,7 @@ async function init() {
     specData.set(STAIN_MAP.K.flat(), MAX_PIGMENTS * 32 + NB);
     specData.set(STAIN_MAP.S.flat(), MAX_PIGMENTS * 32 + NB + 3 * NB);
     device.queue.writeBuffer(specBuf, 0, specData);
+    logOp({ op: 'pig', pig: pigData.slice(), spec: specData.slice() });
   };
   // The painter's paint box: edits to the built-in recipes and pigments of
   // their own, kept in this browser and in saved paintings. Editing a
@@ -523,37 +541,56 @@ async function init() {
   // passes on those tiles only (indirect dispatch; the tile count never
   // leaves the GPU). Must be the only sim work in its command buffer, since
   // the tile counter is reset by writeBuffer at submit time.
+  // One frame's steps: its inputs are logged (see "history") and then run
+  // by runStep, the same code replay uses, so a replay does exactly what
+  // the painting did.
   function encodeSim(enc, substeps) {
-    state.simTime += substeps / Math.max(values.simSpeed, 1);
-    device.queue.writeBuffer(tilesBuf, 0, argsReset);
+    const e = { t: 'step', n: substeps, frame: new Uint8Array(frameData.slice(0)), fix: !!state.fixPending, unmask: !!state.unmaskPending };
+    // Parameters only when they've changed since the last logged step.
+    if (!hist.lastParams || paramData.some((v, i) => v !== hist.lastParams[i])) { e.params = paramData.slice(); hist.lastParams = e.params; }
     // Rinsed between strokes: keep carryKeep of what the brush held.
     if (state.rinsePending) {
-      device.queue.writeBuffer(tilesBuf, CARRY_OFF, new Uint32Array([...state.carry].map(v => Math.floor(v * values.carryKeep * 1e5))));
+      // (with its pending step tallies cleared, so they don't land after it)
+      e.carry = new Uint32Array(MAX_PIGMENTS * 3);
+      e.carry.set([...state.carry].map(v => Math.floor(v * values.carryKeep * 1e5)));
       state.rinsePending = false;
     }
-    const pass = enc.beginComputePass();
-    pass.setBindGroup(0, simBG[parity]);
-    pass.setPipeline(pipes.blurH); pass.dispatchWorkgroups(gx, gy);
-    pass.setPipeline(pipes.blurV); pass.dispatchWorkgroups(gx, gy);
     // Magnet field: only recomputed when a magnet or the depth changes.
     if (values.magnetDepth !== magDepthSeen) { state.magDirty = true; magDepthSeen = values.magnetDepth; }
     if (state.magDirty) {
       const charges = buildCharges(state.magnets, values.magnetDepth, MAX_CHARGES);
+      magU32.fill(0);
       magU32[0] = charges.length;
       magU32[1] = state.magnets.length > 0 ? 1 : 0;
       charges.forEach(([ax, ay, bx, by, z, q], k) => magF32.set([ax, ay, z, q, bx, by, 0, 0], 4 + k * 8));
-      device.queue.writeBuffer(magBuf, 0, magData);
-      pass.setPipeline(pipes.magField); pass.dispatchWorkgroups(gx, gy);
+      e.mag = new Uint8Array(magData.slice(0));
       state.magDirty = false;
     }
-    if (state.fixPending) { pass.setPipeline(pipes.fixSheet); pass.dispatchWorkgroups(gx, gy); state.fixPending = false; }
-    if (state.unmaskPending) { pass.setPipeline(pipes.unmaskSheet); pass.dispatchWorkgroups(gx, gy); state.unmaskPending = false; }
+    state.fixPending = false; state.unmaskPending = false;
+    state.simTime += substeps / Math.max(values.simSpeed, 1);
+    e.tAfter = state.simTime;
+    histPush(e);
+    runStep(enc, e);
+    return queueBrushReadback(enc);
+  }
+  function runStep(enc, e) {
+    if (e.params) device.queue.writeBuffer(paramBuf, 0, e.params);
+    device.queue.writeBuffer(frameBuf, 0, e.frame);
+    device.queue.writeBuffer(tilesBuf, 0, argsReset);
+    if (e.carry) device.queue.writeBuffer(tilesBuf, CARRY_OFF, e.carry);
+    const pass = enc.beginComputePass();
+    pass.setBindGroup(0, simBG[parity]);
+    pass.setPipeline(pipes.blurH); pass.dispatchWorkgroups(gx, gy);
+    pass.setPipeline(pipes.blurV); pass.dispatchWorkgroups(gx, gy);
+    if (e.mag) { device.queue.writeBuffer(magBuf, 0, e.mag); pass.setPipeline(pipes.magField); pass.dispatchWorkgroups(gx, gy); }
+    if (e.fix) { pass.setPipeline(pipes.fixSheet); pass.dispatchWorkgroups(gx, gy); }
+    if (e.unmask) { pass.setPipeline(pipes.unmaskSheet); pass.dispatchWorkgroups(gx, gy); }
     pass.setPipeline(pipes.markTiles); pass.dispatchWorkgroups(gx, gy);
     pass.setPipeline(pipes.compactTiles); pass.dispatchWorkgroups(Math.ceil(TX * TY / 64));
     pass.end();
     enc.copyBufferToBuffer(tilesBuf, 0, argsBuf, 0, 16);
     const step = enc.beginComputePass();
-    for (let s = 0; s < substeps; s++) {
+    for (let s = 0; s < e.n; s++) {
       step.setBindGroup(0, simBG[parity]);
       step.setPipeline(pipes.bumpStep); step.dispatchWorkgroups(1);
       step.setPipeline(pipes.velocity); step.dispatchWorkgroupsIndirect(argsBuf, 0);
@@ -561,7 +598,6 @@ async function init() {
       parity ^= 1;
     }
     step.end();
-    return queueBrushReadback(enc);
   }
 
   // Draw the current state immediately (for exporting the canvas).
@@ -579,13 +615,26 @@ async function init() {
   }
 
   function frame() {
+    if (state.replaying) {
+      // Replaying history: the sim is driven by the replay; just draw.
+      const enc = device.createCommandEncoder();
+      const rp = enc.beginRenderPass({ colorAttachments: [{ view: ctx.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: [1, 1, 1, 1] }] });
+      rp.setPipeline(renderPipe); rp.setBindGroup(0, renderBG[parity]); rp.draw(3); rp.end();
+      device.queue.submit([enc.finish()]);
+      lastFrame = performance.now();
+      requestAnimationFrame(frame);
+      return;
+    }
     const t = performance.now();
     const elapsed = Math.min((t - lastFrame) / 1000, 0.1);
     lastFrame = t;
     stepDebt = Math.min(stepDebt + values.simSpeed * elapsed, MAX_STEPS_PER_FRAME);
     const substeps = Math.floor(stepDebt);
     stepDebt -= substeps;
-    writeUniforms(Math.max(substeps, 1));
+    // (Not while a script drives the sim headless: writing the frame here
+    // changed its brush state between its steps, at the display's timing,
+    // and made headless runs differ.)
+    if (!state.headless) writeUniforms(Math.max(substeps, 1));
     const enc = device.createCommandEncoder();
     let rbk = -1;
     if (state.pointer.down || state.drying) state.lastEdit = t;
@@ -766,7 +815,8 @@ async function init() {
     requestAnimationFrame(step);
   });
   // Rinse the brush clean of paint it has picked up from the paper.
-  window.__sim.rinse = () => { state.carry.fill(0); device.queue.writeBuffer(tilesBuf, CARRY_OFF, new Uint32Array(MAX_PIGMENTS)); };
+  window.__sim.rinse = () => { state.carry.fill(0); logOp({ op: 'rinse' }); rinseNow(); };
+  const rinseNow = () => device.queue.writeBuffer(tilesBuf, CARRY_OFF, new Uint32Array(CARRY_WORDS));
   window.__sim.setDrying = on => window.__sim.act('dry', on);
   // Spray workable fixative over the whole sheet (applied on the next step).
   // ---- undo: full snapshots of the paper on the GPU (about 145 MB each;
@@ -774,29 +824,38 @@ async function init() {
   // before sprays, fixative, peeling the mask, clearing and opening. Undo
   // restores the paper exactly, wet paint mid-flow included (velocities
   // restart at rest). undoDepth levels; redo until the next change.
-  const SNAP = [['A', N * 16], ['G', N * GB], ['D', N * DB], ['aux', N * 16]];
-  const undoPool = [], undoStack = [], redoStack = [];
+  // Velocities and the tile/brush-carry buffer are kept too, so a replay
+  // from a snapshot carries on exactly as the painting did.
+  const TILES_SIZE = CARRY_OFF + CARRY_WORDS * 4;
+  const SNAP = [['A', N * 16], ['B', N * 16], ['G', N * GB], ['D', N * DB], ['aux', N * 16], ['tiles', TILES_SIZE], ['mag', N * 4]];
+  const undoPool = [];
   const allocSnap = () => undoPool.pop() ?? Object.fromEntries(SNAP.map(([k, size]) => [k, device.createBuffer({ size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC })]));
   function takeSnap() {
     const snap = allocSnap(), enc = device.createCommandEncoder();
     enc.copyBufferToBuffer(A[parity], 0, snap.A, 0, N * 16);
+    enc.copyBufferToBuffer(B[parity], 0, snap.B, 0, N * 16);
     enc.copyBufferToBuffer(G[parity], 0, snap.G, 0, N * GB);
     enc.copyBufferToBuffer(Dbuf, 0, snap.D, 0, N * DB);
     enc.copyBufferToBuffer(auxBuf, 0, snap.aux, 0, N * 16);
+    enc.copyBufferToBuffer(tilesBuf, 0, snap.tiles, 0, TILES_SIZE);
+    enc.copyBufferToBuffer(magPhiBuf, 0, snap.mag, 0, N * 4);
     device.queue.submit([enc.finish()]);
     snap.simTime = state.simTime; snap.magnets = JSON.parse(JSON.stringify(state.magnets));
+    snap.params = hist.lastParams;
     return snap;
   }
   function putSnap(snap) {
     const enc = device.createCommandEncoder();
     for (const b of A) enc.copyBufferToBuffer(snap.A, 0, b, 0, N * 16);
+    for (const b of B) enc.copyBufferToBuffer(snap.B, 0, b, 0, N * 16);
     for (const b of G) enc.copyBufferToBuffer(snap.G, 0, b, 0, N * GB);
     enc.copyBufferToBuffer(snap.D, 0, Dbuf, 0, N * DB);
     enc.copyBufferToBuffer(snap.aux, 0, auxBuf, 0, N * 16);
+    enc.copyBufferToBuffer(snap.tiles, 0, tilesBuf, 0, TILES_SIZE);
+    enc.copyBufferToBuffer(snap.mag, 0, magPhiBuf, 0, N * 4);
     device.queue.submit([enc.finish()]);
-    for (const b of B) device.queue.writeBuffer(b, 0, new Float32Array(N * 4));
-    device.queue.writeBuffer(tilesBuf, 32, new Uint32Array(TX * TY).fill(4));   // wake every tile
-    state.simTime = snap.simTime; state.magnets = snap.magnets; state.magDirty = true; drawMagnets();
+    if (snap.params) device.queue.writeBuffer(paramBuf, 0, snap.params);
+    state.simTime = snap.simTime; state.magnets = snap.magnets; drawMagnets();   // (its field came back with it)
     state.lastEdit = performance.now();
   }
   // A look at the painting mid-script: a PNG, handed to tools/paint.mjs if
@@ -810,25 +869,154 @@ async function init() {
     }
     return blob;
   };
-  window.__sim.checkpoint = () => {
-    while (undoStack.length >= Math.max(1, values.undoDepth)) undoPool.push(undoStack.shift());
-    undoPool.push(...redoStack.splice(0));
-    undoStack.push(takeSnap());
-  };
-  window.__sim.undo = () => {
+  // ---- history: undo and redo by replaying the logged inputs (steps and
+  // ops) from snapshots. Undo points are marks in the log (each stroke or
+  // action); recent ones keep a full snapshot, older ones are thinned so the
+  // snapshots stay spread out, and the gaps are replayed. Replay is exact
+  // (see sim.history.check). values.undoDepth snapshots at most.
+  const freeSnap = snap => { if (snap) undoPool.push(snap); };
+  const fpsNote = t => { document.getElementById('fps').textContent = t; };
+  async function replayLog(from, to) {
+    state.replaying = true; hist.recording = false;
+    const total = hist.log.slice(from, to).reduce((t, e) => t + (e.n ?? 0), 0);
+    let done = 0;
+    try {
+      let k = 0;
+      for (let i = from; i < to; i++) {
+        const e = hist.log[i];
+        if (e.t === 'step') {
+          const enc = device.createCommandEncoder();
+          runStep(enc, e);
+          device.queue.submit([enc.finish()]);
+          state.simTime = e.tAfter;
+          if (e.params) hist.lastParams = e.params;
+          done += e.n;
+          if (++k % 30 === 0) { await device.queue.onSubmittedWorkDone(); if (total > 3000) fpsNote(`replaying ${Math.round(100 * done / total)}%`); }
+        } else if (e.op === 'clear') { clearNow(); state.simTime = 0; }
+        else if (e.op === 'paper') paperNow(e.key, e.seed);
+        else if (e.op === 'rinse') rinseNow();
+        else if (e.op === 'dampen') { await device.queue.onSubmittedWorkDone(); await dampenNow(e); }
+        else if (e.op === 'pig') { device.queue.writeBuffer(pigBuf, 0, e.pig); device.queue.writeBuffer(specBuf, 0, e.spec); }
+      }
+      await device.queue.onSubmittedWorkDone();
+    } finally { state.replaying = false; hist.recording = true; }
+  }
+  const copyMagnets = () => JSON.parse(JSON.stringify(state.magnets));
+  // Make the sheet what it was at log position pos: the nearest snapshot at
+  // or before it, then replay.
+  async function restoreTo(pos) {
+    let from = null;
+    for (const m of hist.marks) if (m.snap && m.at <= pos && (!from || m.at >= from.at)) from = m;
+    if (hist.endSnap && pos === hist.log.length) from = { at: pos, snap: hist.endSnap };
+    if (!from) return false;
+    putSnap(from.snap); hist.lastParams = from.snap.params;
+    await replayLog(from.at, pos);
+    const mark = [...hist.marks].reverse().find(m => m.at <= pos);
+    state.magnets = pos === hist.log.length && hist.endMagnets ? JSON.parse(JSON.stringify(hist.endMagnets)) : JSON.parse(JSON.stringify(mark?.magnets ?? state.magnets));
+    state.magDirty = true; drawMagnets();
+    return true;
+  }
+  // Painting on after an undo: the redo future is dropped and what the
+  // sheet did since the undo joins the log.
+  function commit() {
+    if (hist.cursor === null) return;
+    hist.log.length = hist.cursor;
+    hist.log.push(...hist.tail); hist.tail = [];
+    hist.marks = hist.marks.filter(m => { if (m.at > hist.cursor) { freeSnap(m.snap); return false; } return true; });
+    freeSnap(hist.endSnap); hist.endSnap = null;
+    hist.cursor = null;
+  }
+  // Keep at most undoDepth snapshots: the newest two, the oldest (and any
+  // after an opened painting, which can't be replayed across), and among the
+  // rest drop whichever is closest to the one before it. With no room left
+  // at all, the oldest history goes.
+  function thin() {
+    const budget = Math.max(3, values.undoDepth);
+    for (;;) {
+      const snapped = hist.marks.filter(m => m.snap);
+      if (snapped.length + (hist.endSnap ? 1 : 0) <= budget) return;
+      let best = null, gap = Infinity;
+      for (let k = 1; k < snapped.length - 2; k++) {
+        if (snapped[k].barrier) continue;
+        const g = snapped[k].at - snapped[k - 1].at;
+        if (g < gap) { gap = g; best = snapped[k]; }
+      }
+      if (best) { freeSnap(best.snap); best.snap = null; continue; }
+      // Drop the oldest history, up to the second snapshot.
+      const keep = snapped[1], cut = keep.at;
+      hist.marks = hist.marks.filter(m => { if (m.at < cut) { freeSnap(m.snap); return false; } return true; });
+      hist.log.splice(0, cut);
+      for (const m of hist.marks) m.at -= cut;
+      if (hist.cursor !== null) hist.cursor -= cut;
+    }
+  }
+  function mark(barrier = false) {
+    commit();
+    hist.marks.push({ at: hist.log.length, snap: takeSnap(), magnets: copyMagnets(), barrier });
+    thin();
+  }
+  window.__sim.checkpoint = () => { if (!state.replaying) mark(); };
+  window.__sim.undo = async () => {
     state.stopWash();
-    if (!undoStack.length) return false;
-    redoStack.push(takeSnap());
-    const snap = undoStack.pop(); putSnap(snap); undoPool.push(snap);
+    if (state.replaying) return false;
+    const pos = hist.cursor ?? hist.log.length;
+    // (Barrier marks are only snapshots to replay from, not undo points.)
+    const target = [...hist.marks].reverse().find(m => m.at < pos && !m.barrier);
+    if (!target) return false;
+    if (hist.cursor === null) { freeSnap(hist.endSnap); hist.endSnap = takeSnap(); hist.endMagnets = copyMagnets(); }
+    const note = document.getElementById('fps').textContent;
+    fpsNote('undoing…');
+    await restoreTo(target.at);
+    hist.cursor = target.at; hist.tail = [];
+    fpsNote(note);
+    uploadPigments(); window.__sim.rinse();   // today's paint box; a clean brush
+    state.lastEdit = performance.now();
     return true;
   };
-  window.__sim.redo = () => {
+  window.__sim.redo = async () => {
     state.stopWash();
-    if (!redoStack.length) return false;
-    undoStack.push(takeSnap());
-    const snap = redoStack.pop(); putSnap(snap); undoPool.push(snap);
+    if (state.replaying || hist.cursor === null) return false;
+    const next = hist.marks.find(m => m.at > hist.cursor && !m.barrier);
+    const pos = next ? next.at : hist.log.length;
+    const note = document.getElementById('fps').textContent;
+    fpsNote('redoing…');
+    await restoreTo(pos);
+    hist.tail = [];
+    hist.cursor = pos === hist.log.length ? null : pos;
+    if (hist.cursor === null) { freeSnap(hist.endSnap); hist.endSnap = null; }
+    fpsNote(note);
+    uploadPigments(); window.__sim.rinse();
+    state.lastEdit = performance.now();
     return true;
   };
+  window.__sim.history = {
+    // Start over: one snapshot of the sheet as it is, an empty log.
+    begin() {
+      for (const m of hist.marks) freeSnap(m.snap);
+      freeSnap(hist.endSnap); hist.endSnap = null;
+      hist.log = []; hist.tail = []; hist.cursor = null; hist.lastParams = null; hist.marks = [];
+      mark(true);
+      return true;
+    },
+    // After opening a painting (not replayable): a snapshot to replay from.
+    barrier() { mark(true); },
+    // Determinism check: back to the first snapshot and replay everything
+    // since; the same sim.stateHashes() as before means replay is exact.
+    async replayAll() {
+      commit();
+      const first = hist.marks.find(m => m.snap), simTime = state.simTime;
+      putSnap(first.snap); hist.lastParams = first.snap.params;
+      await replayLog(first.at, hist.log.length);
+      return { entries: hist.log.length - first.at, steps: hist.log.slice(first.at).reduce((t, e) => t + (e.n ?? 0), 0), simTimeMatches: Math.abs(state.simTime - simTime) < 1e-6 };
+    },
+    info() {
+      let b = 0; for (const e of hist.log) b += (e.frame?.byteLength ?? 0) + (e.params?.byteLength ?? 0) + (e.carry?.byteLength ?? 0) + (e.mag?.byteLength ?? 0) + (e.mask?.runs.byteLength ?? 0) + (e.pig ? e.pig.byteLength + e.spec.byteLength : 0) + 32;
+      return { entries: hist.log.length, bytes: b, marks: hist.marks.length, snapshots: hist.marks.filter(m => m.snap).length + (hist.endSnap ? 1 : 0), undone: hist.cursor !== null };
+    },
+    size() { return this.info(); },
+  };
+  // The sheet as the page opened: the first snapshot history replays from.
+  hist.log = []; mark(true);
   window.__sim.fix = () => { window.__sim.checkpoint(); state.fixPending = true; state.lastEdit = performance.now(); };
   // Peel off all masking fluid (applied on the next step).
   window.__sim.unmask = () => { window.__sim.checkpoint(); state.unmaskPending = true; state.lastEdit = performance.now(); };
@@ -998,6 +1186,7 @@ async function init() {
     Object.assign(values, meta.values);
     uiSync();
     drawMagnets();
+    window.__sim.history.barrier();   // an opened painting can't be replayed into: history resumes from a snapshot of it
   }
   // What the brush would feel at (x, y), averaged over radius r: water,
   // paper dampness, and pigment amounts by name (wet and settled). Reads only
@@ -1045,19 +1234,36 @@ async function init() {
     state.paused = true;
     try {
       await device.queue.onSubmittedWorkDone();
-      const a = new Float32Array(await readBuffer(A[parity], N * 16));
-      const aux = new Float32Array(await readBuffer(auxBuf, N * 16));
-      const sizing = Math.min(1, Math.max(0, values.sizing));
-      for (let c = 0; c < N; c++) {
-        if (!mask[c]) continue;
-        const texture = (1 - aux[c * 4]) * (1 - sizing) + 0.5 * sizing;
-        const cap = values.capacityMin + (values.capacityMax - values.capacityMin) * texture;
-        a[c * 4 + 3] = Math.max(a[c * 4 + 3], level * cap);
-      }
-      for (const b of A) device.queue.writeBuffer(b, 0, a);
-      device.queue.writeBuffer(tilesBuf, 32, new Uint32Array(TX * TY).fill(4));   // wake every tile
+      const e = { op: 'dampen', mask: packMask(mask), level, sizing: values.sizing, capMin: values.capacityMin, capMax: values.capacityMax };
+      logOp(e);
+      await dampenNow(e);
     } finally { state.paused = paused; }
   };
+  // Masks are logged run-length encoded (a wash area is a few runs a row).
+  function packMask(mask) {
+    const runs = [];
+    for (let c = 0; c < N;) { const v = mask[c]; let k = c; while (k < N && mask[k] === v) k++; runs.push(k - c); c = k; }
+    return { first: mask[0] ? 1 : 0, runs: Uint32Array.from(runs) };
+  }
+  function unpackMask({ first, runs }) {
+    const m = new Uint8Array(N); let c = 0, v = first;
+    for (const r of runs) { if (v) m.fill(1, c, c + r); c += r; v = 1 - v; }
+    return m;
+  }
+  async function dampenNow(e) {
+    const mask = unpackMask(e.mask);
+    const a = new Float32Array(await readBuffer(A[parity], N * 16));
+    const aux = new Float32Array(await readBuffer(auxBuf, N * 16));
+    const sizing = Math.min(1, Math.max(0, e.sizing));
+    for (let c = 0; c < N; c++) {
+      if (!mask[c]) continue;
+      const texture = (1 - aux[c * 4]) * (1 - sizing) + 0.5 * sizing;
+      const cap = e.capMin + (e.capMax - e.capMin) * texture;
+      a[c * 4 + 3] = Math.max(a[c * 4 + 3], e.level * cap);
+    }
+    for (const b of A) device.queue.writeBuffer(b, 0, a);
+    device.queue.writeBuffer(tilesBuf, 32, new Uint32Array(TX * TY).fill(4));   // wake every tile
+  }
   // Masking fluid over the sheet (per cell, 0..1): what areaAt treats as a
   // boundary.
   window.__sim.maskField = async () => {
@@ -1375,7 +1581,7 @@ function bindPointer(canvas) {
     try { canvas.setPointerCapture(e.pointerId); } catch {}
   });
   canvas.addEventListener('pointerdown', e => {
-    if (state.washing) return;
+    if (state.washing || state.replaying) return;
     if (state.mode === 7) {
       const area = window.__sim.washOptions.area;
       if (area === 'sheet' || area === 'shape') {
