@@ -121,7 +121,7 @@ export const RECIPES = [
   // Painter (2026-09-29): too dull; matched to a brand comparison of
   // graded washes (idyllsketching.com): a vivid, slightly violet royal blue,
   // clean pale blue tints (was #20308E / #5A6FD0).
-  { name: 'French Ultramarine', code: 'PB29', masstone: '#1B2FA6', tint: '#4E78E4', opacity: 'semitransparent',
+  { name: 'French Ultramarine', code: 'PB29', masstone: '#1B2FA6', tint: '#769FF3', opacity: 'semitransparent',
     ...mineral, scatter: 0.06, density: 1, staining: STAIN.lowmed, granulation: GRAN.strong, flocculation: 1, mobility: 1 },
   { name: 'Dioxazine Violet', code: 'PV23', masstone: '#3A1F5E', tint: '#8A6FC0', opacity: 'semitransparent',
     ...organic, staining: STAIN.high, mobility: 1.5 },
@@ -129,9 +129,12 @@ export const RECIPES = [
     ...organic, staining: STAIN.medium, mobility: 1.2 },
   // Painter (2026-09-26): quin rose and magenta didn't get as dark as
   // rubine at the same load; heavy quinacridone is deep. Masstones deepened.
-  { name: 'Quinacridone Magenta', code: 'PR122', masstone: '#861A5C', tint: '#E07AB5', opacity: 'transparent',
+  // 2026-09-29, spectral render: fitted to the painter's references (a PR122
+  // swatch, Jane Blundell's cards, Daniel Smith's quinacridone rose):
+  // wine masstone, vivid mid, clean pink tints; mid colours anchor the hue.
+  { name: 'Quinacridone Magenta', code: 'PR122', masstone: '#5D0633', mid: '#E71A88', tint: '#F982BB', opacity: 'transparent',
     ...organic, staining: STAIN.high, mobility: 1.7 },
-  { name: 'Quinacridone Rose', code: 'PV19', masstone: '#A3164A', tint: '#EF8FA8', opacity: 'transparent',
+  { name: 'Quinacridone Rose', code: 'PV19', masstone: '#A0103A', mid: '#E35980', tint: '#EF8BAA', opacity: 'transparent',
     ...organic, staining: STAIN.high, mobility: 1.7 },
   // Painter: "a lil less ruby-dark than I'd expect and more pink" with the
   // tint at #E07090 (2026-09-26): deeper ruby masstone, raspberry-red tint.
@@ -261,21 +264,41 @@ function fitSpectral(p, rgbFit) {
     const opaque = !m.film && (p.opacity === 'opaque' || p.opacity === 'semiopaque');
     const shape = kShape(m, opaque).map(v => (opaque ? v * S : v));
     const mean = shape.reduce((a, v) => a + v, 0) / NB, unit = shape.map(v => v / mean);
-    // Strength: match the lightness of washes of this pigment as the RGB
-    // render (the one the painter has calibrated by eye) paints them, at a
-    // light, a medium and a heavy thickness. The spectrum decides hue and
-    // mixing; this keeps each pigment as strong a mixer as it was.
-    const Y = rgb => 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
-    const rgbWash = x => Y([0, 1, 2].map(c => srgbToLinear(Math.min(1, kmReflect(rgbFit.K[c], rgbFit.S[c], x, PAPER_WHITE)))));
-    const specWash = (K, x) => Y(spectrumToLinear(K.map(k => kmReflect(k, S, x, PAPER_WHITE))));
-    const XS = [0.1, 0.4, 1.2], targets = XS.map(rgbWash);
-    let best = Infinity, bestA = 1;
-    for (let la = Math.log(1e-3); la <= Math.log(100); la += 0.02) {
-      const K = unit.map(v => v * Math.exp(la));
-      const e = XS.reduce((a, x, i) => a + Math.log(specWash(K, x) / targets[i]) ** 2, 0);
-      if (e < best) { best = e; bestA = Math.exp(la); }
-    }
-    return { Kspec: unit.map(v => +(v * bestA).toFixed(5)), Sspec: new Array(NB).fill(S) };
+    // Hue: the measured shape (acrylic paints, one printing ink) keeps its
+    // narrow absorption features, but is tilted and bowed smoothly across
+    // the spectrum, and scaled, so a heavy application and a light wash
+    // render as the painter's masstone and tint (measured shapes alone made
+    // quinacridone magenta violet, rose too cool, ultramarine cyan). Without
+    // a tint, only the strength is fitted, to the masstone.
+    const Mt = lin(p.masstone), Tt = p.tint ? lin(p.tint) : null, Dt = p.mid ? lin(p.mid) : null;
+    const err = (rgb, t) => rgb.reduce((a, v, c) => a + Math.log((Math.max(v, 0) + 0.01) / (t[c] + 0.01)) ** 2, 0);
+    const spec = (K, x) => spectrumToLinear(K.map(k => kmReflect(k, S, x, PAPER_WHITE)));
+    const TX = [0.08, 0.12, 0.18, 0.25, 0.35, 0.5, 0.7, 1.0];
+    const cost = (a, b, la, c = 0) => {
+      const K = unit.map((v, k) => { const u = (k - (NB - 1) / 2) / ((NB - 1) / 2); return v * Math.exp(la + a * u + b * (u * u - 1 / 3) + c * (u * u * u - 0.6 * u)); });
+      // (The masstone counts for less: its channels are near 0, where the
+      // log error is touchiest, and it outweighed the washes painters see.)
+      let e = 0.3 * err(spec(K, MASS_X), Mt);
+      if (Tt) e += Math.min(...TX.map(x => err(spec(K, x), Tt)));
+      // (A mid-strength colour, if given, keeps the path between them on hue.)
+      if (Dt) e += Math.min(...[0.2, 0.3, 0.45, 0.65, 0.9, 1.2].map(x => err(spec(K, x), Dt)));
+      return { e, K };
+    };
+    const bestStrength = (a, b, cc = 0) => {   // golden-section on log strength
+      let lo = Math.log(1e-3), hi = Math.log(200);
+      const g = (Math.sqrt(5) - 1) / 2;
+      let c = hi - g * (hi - lo), d = lo + g * (hi - lo), fc = cost(a, b, c, cc).e, fd = cost(a, b, d, cc).e;
+      for (let it = 0; it < 40; it++) {
+        if (fc < fd) { hi = d; d = c; fd = fc; c = hi - g * (hi - lo); fc = cost(a, b, c, cc).e; }
+        else { lo = c; c = d; fc = fd; d = lo + g * (hi - lo); fd = cost(a, b, d, cc).e; }
+      }
+      return cost(a, b, (lo + hi) / 2, cc);
+    };
+    let best = { e: Infinity }, ba = 0, bb = 0, bc = 0;
+    const tries = Tt ? [-2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2] : [0];
+    for (const a of tries) for (const b of tries) for (const c of (Tt ? [-2, -1, 0, 1, 2] : [0])) { const r = bestStrength(a, b, c); if (r.e < best.e) { best = r; ba = a; bb = b; bc = c; } }
+    if (Tt) for (const da of [-0.25, 0, 0.25]) for (const db of [-0.25, 0, 0.25]) for (const dc of [-0.5, 0, 0.5]) { const r = bestStrength(ba + da, bb + db, bc + dc); if (r.e < best.e) best = r; }
+    return { Kspec: best.K.map(v => +v.toFixed(5)), Sspec: new Array(NB).fill(S) };
   }
   const Rm = upsampleSigmoid(lin(p.masstone)), Rt = p.tint ? upsampleSigmoid(lin(p.tint)) : null;
   const { K } = fitChannels(Rm, Rt, p.opacity, S);

@@ -296,4 +296,4 @@ All in `sim.values` by key. The page shows the studio ones always, the brush and
 | `wetDarken` | 0.5 | standing water darkens | How much standing water darkens the paint beneath it (up to 30%), so wet paint looks deeper than it dries. Display only. |
 | `dampDarken` | 0.8 | damp paper shows | How much damp paper (no standing water) looks darker, up to 15%, so you can see where it hasn't dried. Display only. |
 | `paperShade` | 0.12 | paper texture | How visible the paper's texture is as shading on its colour. Display only; not used on a toned ground. |
-| `spectral` | 0 | spectral colour (0/1) | Colour model: 1 mixes paints per wavelength (truer mixes, e.g. blue + yellow greens), 0 per red/green/blue channel (faster). Display only. |
+| `spectral` | 1 | spectral colour (0/1) | Colour model: 1 mixes paints per wavelength (truer mixes, e.g. blue + yellow greens), 0 per red/green/blue channel (faster). Display only. |

@@ -274,7 +274,7 @@ async function init() {
   // (except the colour of paint that has stained into the fibres, which is
   // fixed when it stains).
   const BOX_KEY = 'hyperreal-watercolor.pigments';
-  const RECIPE_KEYS = ['name', 'code', 'kind', 'masstone', 'tint', 'opacity', 'scatter', 'spectrum', 'density', 'staining', 'granulation', 'flocculation', 'mobility', 'wick', 'load', 'magnetic', 'custom', 'hidden'];
+  const RECIPE_KEYS = ['name', 'code', 'kind', 'masstone', 'mid', 'tint', 'opacity', 'scatter', 'spectrum', 'density', 'staining', 'granulation', 'flocculation', 'mobility', 'wick', 'load', 'magnetic', 'custom', 'hidden'];
   const recipeOf = pg => Object.fromEntries(RECIPE_KEYS.filter(k => pg[k] !== undefined).map(k => [k, pg[k]]));
   const box = {
     changed: [],
@@ -2007,6 +2007,8 @@ function buildUI({ clear, newPaper, acts }) {
       line(label, doc, ...els);
     };
     color('masstone', 'Masstone', 'The colour of a heavy, concentrated application over white paper. Together with the tint this sets the hue, the value and the tinting strength.');
+    if (r.mid) color('mid', 'Mid', 'The colour of a medium-strength wash: keeps the spectral render on hue between the masstone and the tint (quinacridones otherwise went violet in between).');
+    else { const add = Object.assign(document.createElement('button'), { textContent: 'add mid colour' }); add.addEventListener('click', e => { e.preventDefault(); edit({ mid: r.tint ?? r.masstone }); }); line('Mid', 'Optional: the colour of a medium-strength wash, to keep the spectral render on hue between masstone and tint.', add); }
     if (r.tint !== null) color('tint', 'Tint', 'The colour of a light wash over white paper. Far from the masstone (a pale tint of a dark masstone) = a strong tinter; close to it = a weak one.');
     else color('tint', 'Tint', 'No tint colour: the fit uses the masstone and the opacity alone (usual for whites and metallics).');
     const opSel = document.createElement('select');

@@ -135,7 +135,7 @@ export const PARAMS = [
   { key: 'wetDarken',       v: 0.5,  min: 0, max: 3,  group: 'Render', target: 'render', label: 'standing water darkens' },
   { key: 'dampDarken',      v: 0.8,  min: 0, max: 3,  group: 'Render', target: 'render', label: 'damp paper shows' },
   { key: 'paperShade',      v: 0.12, min: 0, max: 1,  group: 'Render', target: 'render', label: 'paper texture' },
-  { key: 'spectral',        v: 0,    min: 0, max: 1,  group: 'Render', target: 'render', label: 'spectral colour (0/1)' },
+  { key: 'spectral',        v: 1,    min: 0, max: 1,  group: 'Render', target: 'render', label: 'spectral colour (0/1)' },
   { key: 'suspendedWeight', v: 1,    min: 0, max: 2,  group: 'Render', target: 'render', label: 'show suspended' },
 ];
 
