@@ -441,9 +441,16 @@ fn sum4(v: vec4f) -> f32 { return v.x + v.y + v.z + v.w; }
 // How freely pigment can be carried into a cell: 1 normally, falling to 0
 // as its suspended pigment gets as concentrated as a paste (jamLo..jamHi
 // pigment per unit of water).
+// Also packed: pigment settled at a pinned edge packs into a ring, and once
+// a cell is full (suspended plus deposited near packHi), arriving pigment
+// stops behind it, so the ring grows inward. (Without it, a whole wash's
+// edge-bound pigment piled into the last cell: a 0.2 mm near-black
+// hairline at seven times the wash, where real edge darkening is a band a
+// few times darker.)
 fn jam(a: vec4f) -> f32 {
-  if (a.y <= 0.0) { return 1.0; }
-  return 1.0 - smoothstep(p.jamLo, p.jamHi, a.y / max(a.x, 1e-4));
+  let packed = 1.0 - smoothstep(p.packLo, p.packHi, a.y + a.z);
+  if (a.y <= 0.0) { return packed; }
+  return (1.0 - smoothstep(p.jamLo, p.jamHi, a.y / max(a.x, 1e-4))) * packed;
 }
 
 fn amtOf(c: Comp8, id: u32) -> f32 {
@@ -556,7 +563,11 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   // beyond it; sized cotton only softens its rims a little. Each face's
   // flow uses the source cell's water and pigment and the same rate on
   // both sides, so pigment is conserved.
-  if (VARIANT == 0u && p.pigmentWick > 0.0) {
+  // (Only on unsized paper: on sized cotton the little wicking there is
+  // dropped pigment into the first dry cell past the edge, a near-black
+  // hairline, as pigment settling at once there did on washi.)
+  let wickPig = p.pigmentWick * (1.0 - smoothstep(0.3, 0.6, p.sizing));
+  if (VARIANT == 0u && wickPig > 0.0) {
     let wr = p.capillarySpread * (1.0 - clamp(p.sizing, 0.0, 1.0)) * p.dt;
     let sMin = p.capillaryMin;
     let openI = D[i].mask < 0.5;
@@ -569,10 +580,10 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
       // (Pigment rides in the surface water and in the water held by the
       // fibres, so it keeps travelling through damp paper past the edge.)
       if (fw > 0.0 && an.x + an.w > p.wEps && openI) {
-        let r = min(fw / (an.x + an.w) * p.pigmentWick, 0.1);
+        let r = min(fw / (an.x + an.w) * wickPig, 0.1);
         for (var k = 0; k < NG; k++) { if (gn.amt[k] > 0.0) { addCand(gn.id[k], gn.amt[k] * r * pig[gn.id[k]].phys2.y); } }
       } else if (fw < 0.0 && a.x + a.w > p.wEps && D[ix(nx, ny)].mask < 0.5) {
-        let r = min(-fw / (a.x + a.w) * p.pigmentWick, 0.1);
+        let r = min(-fw / (a.x + a.w) * wickPig, 0.1);
         for (var k = 0; k < NG; k++) { if (gi.amt[k] > 0.0) { addCand(gi.id[k], -gi.amt[k] * r * pig[gi.id[k]].phys2.y); } }
       }
     }

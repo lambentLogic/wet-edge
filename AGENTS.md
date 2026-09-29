@@ -211,6 +211,8 @@ All in `sim.values` by key. The page shows the studio ones always, the brush and
 | `mixEdgeHi` | 0.9 | no mixing near edge (hi) | Upper bound of the edge fade: spots this far inside a wash spread pigment fully. Raise both edge values to protect a wider rim from mixing. |
 | `jamLo` | 6 | paste: jams from (pigment/water) | Pigment-to-water ratio at which paint starts behaving like paste and stops being carried along by water. Lower: thick paint stays put sooner. |
 | `jamHi` | 12 | paste: fully jammed at | Ratio at which paint is fully jammed and water flows past without moving it. Prevents dark contour lines from pigment piling at drying edges. |
+| `packLo` | 0.15 | edge ring: packs from (pigment) | Pigment piling up at a wash's pinned edge packs into a ring: from this much pigment in a spot, less more can be carried into it, so the ring widens inward instead of darkening to a hairline. |
+| `packHi` | 0.3 | edge ring: full at | Pigment in a spot at which nothing more is carried in (the edge ring's darkest). Higher: darker, thinner rims. |
 | `density` | 0.02 | all pigments: density × (settling, redissolving) | Scales every pigment's own density (settling) rating. More: pigment drops out of the water faster, especially as it thins at drying edges, and also redissolves faster. |
 | `staining` | 1 | all pigments: staining × | Scales every pigment's own staining rating; 1 = as calibrated. More: settled paint grips the fibres and resists rewetting, lifting and mask peel. |
 | `granulation` | 0.6 | all pigments: granulation × | Scales every pigment's own granulation rating. More: settling pigment gathers in the paper's valleys for a speckled, sedimentary texture. |

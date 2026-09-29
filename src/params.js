@@ -50,6 +50,8 @@ export const PARAMS = [
   { key: 'mixEdgeHi',   v: 0.9,  min: 0, max: 1,   group: 'Pigment', target: 'sim', label: 'no mixing near edge (hi)' },
   { key: 'jamLo',       v: 6,    min: 0, max: 50,  group: 'Pigment', target: 'sim', label: 'paste: jams from (pigment/water)' },
   { key: 'jamHi',       v: 12,   min: 0, max: 100, group: 'Pigment', target: 'sim', label: 'paste: fully jammed at' },
+  { key: 'packLo',      v: 0.15,  min: 0, max: 2,   group: 'Pigment', target: 'sim', label: 'edge ring: packs from (pigment)' },
+  { key: 'packHi',      v: 0.3,   min: 0, max: 4,   group: 'Pigment', target: 'sim', label: 'edge ring: full at' },
   { key: 'density',     v: 0.02, min: 0, max: 0.2, group: 'Pigment', target: 'sim', label: 'all pigments: density × (settling, redissolving)' },
   { key: 'staining',    v: 1,    min: 0, max: 10,  group: 'Pigment', target: 'sim', label: 'all pigments: staining ×' },
   { key: 'granulation', v: 0.6,  min: 0, max: 2,   group: 'Pigment', target: 'sim', label: 'all pigments: granulation ×' },

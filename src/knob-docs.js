@@ -56,6 +56,8 @@ export const KNOB_DOCS = {
   soakTime: { tier: 'lab', doc: 'Dried, gum-set paint stays put under a quick glaze: it only starts to rewet once standing water has sat on it about this long (ramping up gradually; damp paper alone doesn\'t count). 0: it rewets the moment water touches it.' },
   soakRewet: { tier: 'lab', doc: 'Dried paint whose gum has softened under standing water mostly stays where it is unless something works at it: left alone it comes back up at this fraction of the rate a scrubbing brush gets. 1: soaking alone lifts it as freely as scrubbing.' },
   scrubRewet: { tier: 'lab', doc: 'A brush working over wet, dried paint softens its gum this many times faster than soaking alone (scaled by pressure). Scrub to reactivate; a single glaze pass barely disturbs it.' },
+  packLo: { tier: 'lab', doc: 'Pigment piling up at a wash\'s pinned edge packs into a ring: from this much pigment in a spot, less more can be carried into it, so the ring widens inward instead of darkening to a hairline.' },
+  packHi: { tier: 'lab', doc: 'Pigment in a spot at which nothing more is carried in (the edge ring\'s darkest). Higher: darker, thinner rims.' },
   bindTime: { tier: 'lab', doc: 'Seconds for the gum arabic to set once paint is dry. Rewetted sooner, paint dissolves freely; after this it has set and rewets per the rewet settings.' },
 
   // --- Fixative ---
