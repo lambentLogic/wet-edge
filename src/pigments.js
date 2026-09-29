@@ -118,7 +118,10 @@ export const RECIPES = [
   // worse; the research estimate is kept for now.
   { name: 'Benzimidazolone Blue', code: 'PB80', masstone: '#2E2A7A', tint: '#6C6FC4', opacity: 'transparent',
     ...organic, staining: STAIN.high, mobility: 2, wick: 0.6 },
-  { name: 'French Ultramarine', code: 'PB29', masstone: '#20308E', tint: '#5A6FD0', opacity: 'semitransparent',
+  // Painter (2026-09-29): too dull; matched to a brand comparison of
+  // graded washes (idyllsketching.com): a vivid, slightly violet royal blue,
+  // clean pale blue tints (was #20308E / #5A6FD0).
+  { name: 'French Ultramarine', code: 'PB29', masstone: '#1B2FA6', tint: '#4E78E4', opacity: 'semitransparent',
     ...mineral, scatter: 0.06, density: 1, staining: STAIN.lowmed, granulation: GRAN.strong, flocculation: 1, mobility: 1 },
   { name: 'Dioxazine Violet', code: 'PV23', masstone: '#3A1F5E', tint: '#8A6FC0', opacity: 'semitransparent',
     ...organic, staining: STAIN.high, mobility: 1.5 },

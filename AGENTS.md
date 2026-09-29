@@ -215,7 +215,7 @@ All in `sim.values` by key. The page shows the studio ones always, the brush and
 | `packHi` | 0.3 | edge ring: full at | Pigment in a spot at which nothing more is carried in (the edge ring's darkest). Higher: darker, thinner rims. |
 | `density` | 0.02 | all pigments: density × (settling, redissolving) | Scales every pigment's own density (settling) rating. More: pigment drops out of the water faster, especially as it thins at drying edges, and also redissolves faster. |
 | `staining` | 1 | all pigments: staining × | Scales every pigment's own staining rating; 1 = as calibrated. More: settled paint grips the fibres and resists rewetting, lifting and mask peel. |
-| `granulation` | 0.6 | all pigments: granulation × | Scales every pigment's own granulation rating. More: settling pigment gathers in the paper's valleys for a speckled, sedimentary texture. |
+| `granulation` | 0.3 | all pigments: granulation × | Scales every pigment's own granulation rating. More: settling pigment gathers in the paper's valleys for a speckled, sedimentary texture. |
 | `rewetLift` | 0.002 | dried paint rewets | How readily the thin, fibre-bound layer of paint that has dried and set redissolves under a new wash, as a fraction of fresh. More: glazes disturb earlier layers. |
 | `stainCapacity` | 0.015 | fibres hold (stain capacity) | How much pigment the fibres themselves can grip. Paint up to this amount lifts per its staining; anything piled above lifts freely, so thick paint reactivates. |
 | `thickRewet` | 0.1 | thick dried paint rewets | How readily thick dried paint (piled above the fibres' grip) redissolves when rewetted, as a fraction of fresh. More: heavy passages melt under a wet brush. |
@@ -223,7 +223,7 @@ All in `sim.values` by key. The page shows the studio ones always, the brush and
 | `soakRewet` | 0.02 | softened paint left alone lifts (x scrubbed) | Dried paint whose gum has softened under standing water mostly stays where it is unless something works at it: left alone it comes back up at this fraction of the rate a scrubbing brush gets. 1: soaking alone lifts it as freely as scrubbing. |
 | `scrubRewet` | 8 | scrubbing softens dried paint (x soaking) | A brush working over wet, dried paint softens its gum this many times faster than soaking alone (scaled by pressure). Scrub to reactivate; a single glaze pass barely disturbs it. |
 | `bindTime` | 3 | gum sets (s, gradually) | Seconds for the gum arabic to set once paint is dry. Rewetted sooner, paint dissolves freely; after this it has set and rewets per the rewet settings. |
-| `flocculation` | 1 | all pigments: flocculation × | Scales every pigment's own flocculation rating. More: flocculating pigments (ultramarine above all) clump into mottles while wet. Same effect as floc clumping speed. |
+| `flocculation` | 0.3 | all pigments: flocculation × | Scales every pigment's own flocculation rating. More: flocculating pigments (ultramarine above all) clump into mottles while wet. Same effect as floc clumping speed. |
 | `flocTogether` | 0.85 | mixed pigments floc together | How much mixed flocculating pigments clump together (1: one shared mottle, e.g. grey flocs) versus separately (0: blue and orange specks). |
 | `flocDrift` | 0.5 | floc clumping speed (× flocculation) | How fast flocculating pigment gathers into clumps while wet. More: stronger mottling in the time the wash stays wet. Multiplies with flocculation. |
 | `flocScale` | 1.2 | floc size (mm) | Size of the flocculation mottles in mm. Larger: broader, cloudier clumps; smaller: fine grain. |
