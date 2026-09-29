@@ -38,7 +38,7 @@ for (let i = 0; i < args.length; i++) {
 
 const profile = await mkdtemp(join(tmpdir(), 'watercolor-paint-'));
 const browser = await puppeteer.launch({
-  executablePath: CHROME, headless: 'new', userDataDir: profile,
+  executablePath: CHROME, headless: process.env.HEADFUL ? false : 'new', userDataDir: profile,
   args: ['--enable-unsafe-webgpu'], protocolTimeout: 3_600_000,
 });
 try {

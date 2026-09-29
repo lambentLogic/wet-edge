@@ -1346,12 +1346,12 @@ async function init() {
   // clean pass with a big brush and a wait for the shine to go. Time stops
   // while the sheet is read and written back, so nothing flowing elsewhere
   // is lost.
-  window.__sim.dampen = async (mask, level = 0.8) => {
+  window.__sim.dampen = async (mask, level = 1, film = 0.03) => {
     const paused = state.paused;
     state.paused = true;
     try {
       await device.queue.onSubmittedWorkDone();
-      const e = { op: 'dampen', mask: packMask(mask), level, sizing: values.sizing, capMin: values.capacityMin, capMax: values.capacityMax };
+      const e = { op: 'dampen', mask: packMask(mask), level, film, sizing: values.sizing, capMin: values.capacityMin, capMax: values.capacityMax };
       logOp(e);
       await dampenNow(e);
     } finally { state.paused = paused; }
@@ -1377,6 +1377,10 @@ async function init() {
       const texture = (1 - aux[c * 4]) * (1 - sizing) + 0.5 * sizing;
       const cap = e.capMin + (e.capMax - e.capMin) * texture;
       a[c * 4 + 3] = Math.max(a[c * 4 + 3], e.level * cap);
+      // Damp, not just moist: a trace of water on the surface too, so
+      // strokes laid into it melt together (fibres alone left each stroke
+      // its own hard edge, with white gaps between the rows of a wash).
+      if (e.film) a[c * 4] = Math.max(a[c * 4], e.film);
     }
     for (const b of A) device.queue.writeBuffer(b, 0, a);
     device.queue.writeBuffer(tilesBuf, 32, new Uint32Array(TX * TY).fill(4));   // wake every tile
@@ -1524,7 +1528,7 @@ async function init() {
         // toward it, so a big brush doesn't spill past the outline (plain
         // rows stopped only the brush's middle short of it). Only 'around'
         // goes around paint already inside; the rest glaze over it.
-        await M.washAround(outline, { mist: false, pigmentAt, brushAt, even: true, avoidPaint: kind === 'around' || !!around });
+        await M.washAround(outline, { mist: false, pigmentAt, brushAt, even: opts.even ?? true, avoidPaint: kind === 'around' || !!around });
       }
       return true;
     } catch (e) {

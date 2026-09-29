@@ -1161,23 +1161,8 @@ fn depSlot(dep: ptr<function, Dep>, occ: ptr<function, array<bool, 8>>, id: u32,
   for (var m = 0; m < ND; m++) {
     if (!(*occ)[m]) { (*occ)[m] = true; (*dep).id[m] = id; (*dep).amt[m] = 0.0; (*dep).stamp[m] = fr.time; return m; }
   }
-  // Full. Merge a pigment's set and unset parts (they're one pigment; the
-  // merged part keeps the state of the larger).
-  for (var m = 0; m < ND; m++) {
-    for (var n = m + 1; n < ND; n++) {
-      if ((*dep).id[m] == (*dep).id[n]) {
-        let am = (*dep).amt[m]; let an = (*dep).amt[n];
-        let t = (stampTime((*dep).stamp[m]) * am + stampTime((*dep).stamp[n]) * an) / max(am + an, 1e-12);
-        let bound = select((*dep).stamp[n] < 0.0, (*dep).stamp[m] < 0.0, am >= an);
-        (*dep).amt[m] = am + an; (*dep).stamp[m] = select(t, -t - 1.0, bound);
-        if ((*dep).id[m] == id && !bound) { (*dep).amt[n] = 0.0; (*occ)[n] = false; return m; }
-        (*dep).id[n] = id; (*dep).amt[n] = 0.0; (*dep).stamp[n] = fr.time;
-        return n;
-      }
-    }
-  }
-  // Reclaim a slot that holds only a trace of an old layer (not one just
-  // started this wetting, which would be stolen back and forth).
+  // Full. First reclaim a slot that holds only a trace of an old layer (not
+  // one just started this wetting, which would be stolen back and forth).
   var s = -1;
   for (var m = 0; m < ND; m++) {
     let old = (*dep).stamp[m] < 0.0 || stampTime((*dep).stamp[m]) < fr.time - 1.0;
@@ -1187,6 +1172,33 @@ fn depSlot(dep: ptr<function, Dep>, occ: ptr<function, array<bool, 8>>, id: u32,
     stainDep(dep, (*dep).id[s], (*dep).amt[s]);
     (*dep).id[s] = id; (*dep).amt[s] = 0.0; (*dep).stamp[s] = fr.time;
     return s;
+  }
+  // Then move the smallest set (gum-bound) layer into the stain layer: it
+  // barely moves any more anyway. (Merging a pigment's set and fresh parts
+  // came first, and wet paint merged into a larger set layer was set on the
+  // spot, as if dried: with five pigments in a spot, each row of a wash
+  // froze before the next could join it, in hard bands.)
+  var b = -1;
+  for (var m = 0; m < ND; m++) {
+    if ((*dep).stamp[m] < 0.0 && (b < 0 || (*dep).amt[m] < (*dep).amt[b])) { b = m; }
+  }
+  if (b >= 0) {
+    stainDep(dep, (*dep).id[b], (*dep).amt[b]);
+    (*dep).id[b] = id; (*dep).amt[b] = 0.0; (*dep).stamp[b] = fr.time;
+    return b;
+  }
+  // Last: merge a pigment's two parts (all of them fresh by now).
+  for (var m = 0; m < ND; m++) {
+    for (var n = m + 1; n < ND; n++) {
+      if ((*dep).id[m] == (*dep).id[n]) {
+        let am = (*dep).amt[m]; let an = (*dep).amt[n];
+        let t = (stampTime((*dep).stamp[m]) * am + stampTime((*dep).stamp[n]) * an) / max(am + an, 1e-12);
+        (*dep).amt[m] = am + an; (*dep).stamp[m] = t;
+        if ((*dep).id[m] == id) { (*dep).amt[n] = 0.0; (*occ)[n] = false; return m; }
+        (*dep).id[n] = id; (*dep).amt[n] = 0.0; (*dep).stamp[n] = fr.time;
+        return n;
+      }
+    }
   }
   // When dry: join its own bound layer. (While wet that's a sink: skip.)
   if (!wet) { for (var m = 0; m < ND; m++) { if ((*occ)[m] && (*dep).id[m] == id) { return m; } } }
