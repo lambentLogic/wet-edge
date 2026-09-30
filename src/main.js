@@ -1358,12 +1358,12 @@ async function init() {
   // clean pass with a big brush and a wait for the shine to go. Time stops
   // while the sheet is read and written back, so nothing flowing elsewhere
   // is lost.
-  window.__sim.dampen = async (mask, level = 1, film = 0.03) => {
+  window.__sim.dampen = async (mask, level = 1, film = 0.03, feather = 0) => {
     const paused = state.paused;
     state.paused = true;
     try {
       await device.queue.onSubmittedWorkDone();
-      const e = { op: 'dampen', mask: packMask(mask), level, film, sizing: values.sizing, capMin: values.capacityMin, capMax: values.capacityMax };
+      const e = { op: 'dampen', mask: packMask(mask), level, film, feather, sizing: values.sizing, capMin: values.capacityMin, capMax: values.capacityMax };
       logOp(e);
       await dampenNow(e);
     } finally { state.paused = paused; }
@@ -1384,15 +1384,27 @@ async function init() {
     const a = new Float32Array(await readBuffer(A[parity], N * 16));
     const aux = new Float32Array(await readBuffer(auxBuf, N * 16));
     const sizing = Math.min(1, Math.max(0, e.sizing));
+    // Feathered: dampness fades out over the last `feather` cells inside the
+    // area (no standing film there), so paint running into it slows and
+    // fades instead of stopping at the damp area's edge in a line.
+    let inward = null;
+    if (e.feather > 0) {
+      inward = new Float32Array(N).fill(1e9);
+      for (let c = 0; c < N; c++) if (!mask[c]) inward[c] = 0;
+      const D2 = Math.SQRT2;
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const c = y * W + x; let d = inward[c]; if (x > 0) d = Math.min(d, inward[c - 1] + 1); if (y > 0) { d = Math.min(d, inward[c - W] + 1); if (x > 0) d = Math.min(d, inward[c - W - 1] + D2); if (x < W - 1) d = Math.min(d, inward[c - W + 1] + D2); } inward[c] = d; }
+      for (let y = H - 1; y >= 0; y--) for (let x = W - 1; x >= 0; x--) { const c = y * W + x; let d = inward[c]; if (x < W - 1) d = Math.min(d, inward[c + 1] + 1); if (y < H - 1) { d = Math.min(d, inward[c + W] + 1); if (x < W - 1) d = Math.min(d, inward[c + W + 1] + D2); if (x > 0) d = Math.min(d, inward[c + W - 1] + D2); } inward[c] = d; }
+    }
     for (let c = 0; c < N; c++) {
       if (!mask[c]) continue;
+      const f = inward ? Math.min(1, inward[c] / e.feather) : 1;
       const texture = (1 - aux[c * 4]) * (1 - sizing) + 0.5 * sizing;
       const cap = e.capMin + (e.capMax - e.capMin) * texture;
-      a[c * 4 + 3] = Math.max(a[c * 4 + 3], e.level * cap);
+      a[c * 4 + 3] = Math.max(a[c * 4 + 3], e.level * cap * (0.3 + 0.7 * f));
       // Damp, not just moist: a trace of water on the surface too, so
       // strokes laid into it melt together (fibres alone left each stroke
       // its own hard edge, with white gaps between the rows of a wash).
-      if (e.film) a[c * 4] = Math.max(a[c * 4], e.film);
+      if (e.film && f >= 1) a[c * 4] = Math.max(a[c * 4], e.film);
     }
     for (const b of A) device.queue.writeBuffer(b, 0, a);
     device.queue.writeBuffer(tilesBuf, 32, new Uint32Array(TX * TY).fill(4));   // wake every tile
@@ -1512,7 +1524,7 @@ async function init() {
     state.washing = true; state.cancelWash = false; state.washReturn = mode0; state.onWash?.();
     try {
       h.setMode(water ? 1 : 0);
-      if (dampen || dampenOnly) await window.__sim.dampen(areaMask);
+      if (dampen || dampenOnly) await window.__sim.dampen(areaMask, 1, 0.03, opts.feather ?? 0);
       if (dampenOnly) return true;
       const brushAt = kind === 'variegated' ? variegate(areaMask, into, direction) : null;
       // A found or scrubbed shape is cut in along its edge with the tip and
