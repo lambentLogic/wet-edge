@@ -478,6 +478,9 @@ export function makeMinds(sim) {
   //   brushAt    optional (x, y) => brush load, for a variegated wash
   async function washAround(area = null, { margin = 3, threshold = 0.004, pigmentAt = null, brushAt = null, mist = true, framesPerSeg = 2, fine = 0.5, even = false, avoidPaint = true, bead = false, water = null, log = () => {} } = {}) {
     const W = 1024, a = await sim.read(), H = a.length / 4 / W, N = W * H;
+    // Called with the Wash tool still selected, the brush lifted instead of
+    // painting (the tool is a picker, not a brush): paint.
+    if (h.mode() === 7) h.setMode(0);
     const bigR = V.brushRadius, pig0 = V.brushPigment, load0 = V.dipLoad;
     // water: the standing water each row should leave (a wash into moist
     // paper wants less than the brush carries onto dry paper; a big brush
