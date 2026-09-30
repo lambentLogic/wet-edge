@@ -1157,7 +1157,12 @@ fn rewetUp(amt: f32, stamp: f32, fixT: f32, lift: f32, liftFree: f32, soak: f32)
   let high = max(amt - cap, 0.0);
   if (stamp >= 0.0) { return low * lift + high * liftFree; }
   let fx = select(1.0, p.fixRewet, isFixed(stamp, fixT));
-  return (low * lift * p.rewetLift + high * liftFree * p.thickRewet) * fx * soak;
+  // Paint piled thick (an oversaturated line) has loose pigment above what
+  // the gum holds down, and a wet brush lifts it readily; a thin glaze-like
+  // layer needs soaking or scrubbing (soak). (With soak alone, a heavy
+  // rigger line barely came back under a wet brush: 0.1% vs 4.5%.)
+  let soakHigh = mix(soak, 1.0, smoothstep(p.thickLo, p.thickHi, amt));
+  return (low * lift * p.rewetLift * soak + high * liftFree * p.thickRewet * soakHigh) * fx;
 }
 
 // How much a moving brush is working at this spot this step: its footprint

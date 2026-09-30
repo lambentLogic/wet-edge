@@ -780,5 +780,30 @@
     const studioBad = STUDIO.filter(k => !PARAMS.some(p => p.key === k.key)).map(k => k.key);
     return { missing, undocumented, studioBad, tools: TOOLS.length, actions: ACTIONS.length, calls: SCRIPT_API.filter(e => e.call).length };
   };
+  // Glazing over dried paint: a set ultramarine wash, a green glaze in rows
+  // over it. The ultramarine should stay put (the painter: glazing shouldn't
+  // push dry paint around unless it's soaked and scrubbed). And a heavy
+  // rigger line should reactivate under one wet pass (thick paint has loose
+  // pigment above what the gum holds). Deterministic (headless steps).
+  probes.glaze = async (paper = 'coldPress') => {
+    await fresh(paper);
+    h.setBrushPreset('mop'); S.values.brushRadius = 30; S.values.brushPigment = 0.25; h.setBrush('French Ultramarine');
+    for (let y = 100; y <= 600; y += 30) { h.lift(); await h.paint(100, y, 900, y, 16); }
+    h.setBrushPreset('rigger'); S.values.brushRadius = 4; S.values.brushPigment = 1.2; h.setBrush('Phthalo Turquoise');
+    h.lift(); await h.paint(150, 700, 850, 700, 60);
+    await h.wait(40, { dry: true }); await h.wait(10);
+    const ub0 = await S.readPigment('French Ultramarine'), pt0 = await S.readPigment('Phthalo Turquoise');
+    h.setBrushPreset('mop'); h.setBrush([['Perylene Green', 2], ['Raw Umber', 1]]); S.values.brushPigment = 0.35; S.values.brushRadius = 30;
+    for (let y = 200; y <= 500; y += 30) { h.lift(); await h.paint(250, y, 750, y, 16); }
+    h.setBrushPreset('round'); S.values.brushRadius = 12; h.setMode(1);
+    h.lift(); await h.paint(150, 700, 850, 700, 40);
+    await h.wait(40, { dry: true }); await h.wait(5);
+    const ub1 = await S.readPigment('French Ultramarine'), pt1 = await S.readPigment('Phthalo Turquoise');
+    let d = 0, t0 = 0, spread = 0, lt = 0;
+    for (let y = 230; y < 470; y++) for (let x = 300; x < 700; x++) { const c = y * W + x; d += Math.abs(ub1[c] - ub0[c]); t0 += ub0[c]; }
+    for (let y = 640; y < 760; y++) for (let x = 200; x < 800; x++) { const c = y * W + x; lt += pt0[c]; if (y < 695 || y > 705) spread += pt1[c]; }
+    h.setMode(0); h.end();
+    return { glazeMovesDry: +(d / t0).toFixed(3), riggerReactivates: +(spread / lt).toFixed(3) };
+  };
   window.__probes = { ...probes, withValues };
 })();
