@@ -1,8 +1,9 @@
 // Streak swatches: six ways to put the Gala apple's streaks into its red
 // (notes/journal.md, the fourth apple). Each panel is the apple body's red
 // laid into satin-dampened paper, then streaks by one method:
-//   A  at the very end of the shine (surface water under 0.03)
-//   B  at satin              C  at moist
+//   A  at the very end of the shine (surface water under 0.03), a thirsty brush (Wetness 0.1)
+//   B  at satin, a nearly dry brush of thick paint (Wetness 0.05)
+//   C  at moist (Wetness 0.5)
 //   D  pale streaks lifted at damp (Lift tool)
 //   E  dry-brushed over the dried red (light, fast, low wetness)
 //   F  glazed on the dried red, one side softened with a damp brush
@@ -64,12 +65,12 @@ window.__paintDone = (async () => {
   log('B: base, streaks at satin');
   await base(P.B);
   log(`B skipped ${await S.skipTo('satin', { points: P.B.mid })}s to satin`);
-  await darkStreaks(P.B);
+  await darkStreaks(P.B, { load: 0.05, pig: 0.35 });
 
   log('A: base, streaks at the very end of the shine');
   await base(P.A);
   log(`A waited ${await untilWater(P.A.mid, 0.03)}s for the shine to thin`);
-  await darkStreaks(P.A);
+  await darkStreaks(P.A, { load: 0.1, pig: 0.35 });
 
   log('C: base, streaks at moist');
   await base(P.C);

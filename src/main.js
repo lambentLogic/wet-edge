@@ -448,6 +448,7 @@ async function init() {
     frameF32[10] = (drying ? values.dryerStrength : 1) * values.dryingPace;
     frameF32[12] = state.simTime;
     frameF32[14] = brushLoad();
+    frameF32[27] = state.brushType === 'dip' ? DIP_EMPTY : values.emptyLevel;
     frameF32[15] = concMul();
     if (!brush) { frameF32[13] = values.brushRadius; frameF32[24] = 0; frameF32[26] = 0; }
     frameF32[25] = values.fixTooth;
@@ -513,8 +514,14 @@ async function init() {
   function concMul() {
     const w = brushLoad();
     if (state.brushType === 'water') return Math.min(state.pigStore / Math.max(w, 0.05), 4);
-    return 1 + values.thicken * (1 - w);
+    // A dip brush's water goes right down to nothing at Wetness 0 (so it can
+    // be drier than damp paper, and a thick dab stays put instead of
+    // blooming), but its paint doesn't: it's the same pigment in less
+    // water, thick paint, up to a paste.
+    const was = values.emptyLevel + (1 - values.emptyLevel) * w, now = DIP_EMPTY + (1 - DIP_EMPTY) * w;
+    return Math.min(10, (1 + values.thicken * (1 - w)) * was / now);
   }
+  const DIP_EMPTY = 0.03;   // a dry dip brush still holds a trace of water in its paste
 
   // Brush reservoir: the GPU tallies the water each frame's stamp actually
   // left on the paper (wet paper takes little, dry paper a lot); it comes
@@ -1326,7 +1333,10 @@ async function init() {
   //   damp    looks dry, paint doesn't flow into it; lifting, dry-brush
   //   dry     the gum sets; linework, glazes, finishing
   const STAGES = ['dry', 'damp', 'moist', 'satin', 'shiny', 'soaked'];
-  const stageOf = (w, s) => w >= 0.25 ? 'soaked' : w >= 0.08 ? 'shiny' : w > values.wEps ? 'satin'
+  // (Where the lines fall, from streak swatches: paint dropped into 0.08 of
+  // standing water spread and vanished, into 0.05 nearly, Handprint's shiny; into 0.03 it
+  // held with a soft edge, his satin.)
+  const stageOf = (w, s) => w >= 0.2 ? 'soaked' : w >= 0.04 ? 'shiny' : w > values.wEps ? 'satin'
     : s >= values.dampThreshold ? 'moist' : s >= 0.25 * values.dampThreshold ? 'damp' : 'dry';
   // What the brush would feel at (x, y), averaged over radius r: water,
   // paper dampness, its stage, and pigment amounts by name (wet and
@@ -1385,7 +1395,7 @@ async function init() {
       } else {
         // Wetter than the target stage: standing water above its bound, or
         // (for moist and drier) fibres above it.
-        const wMax = [values.wEps, values.wEps, values.wEps, 0.08, 0.25, Infinity][target];
+        const wMax = [values.wEps, values.wEps, values.wEps, 0.04, 0.2, Infinity][target];
         const sMax = [0.25 * values.dampThreshold, values.dampThreshold, Infinity, Infinity, Infinity, Infinity][target];
         let over = 0;
         for (let c = 0; c < N && over <= 200; c++) if (a[c * 4] > wMax || (a[c * 4] <= values.wEps && a[c * 4 + 3] >= sMax)) over++;

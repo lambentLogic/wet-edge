@@ -293,6 +293,7 @@ All in `sim.values` by key. The page shows the studio ones always, the brush and
 | `blotRate` | 0.9 | blot: how much it soaks up per press | Blot: how much water and paint each press soaks up where a crease touches. More: cleaner, whiter blotted areas. |
 | `liftWater` | 0.35 | lift: how much a thirsty brush takes (Wetness down = thirstier) | Lift: how much wet paint and water a thirsty brush soaks up. Lower Wetness is thirstier; at full Wetness it barely lifts. |
 | `liftLeaves` | 0.04 | lifting leaves wet paper damp (water) | Lift: water always left on wet paper after lifting, so the spot stays joined to the wash instead of drying to a hard-edged ring. |
+| `liftUnset` | 8 | unset (damp) paint lifts × | How much more easily Lift and blotting take paint whose gum has not set yet (paper still damp) than dried paint. Lifting while damp gives soft lights; once dry, the same lift barely moves it. |
 | `liftDry` | 0.05 | lift and blot take settled paint | How easily scrubbing and blotting lift settled/dried paint, divided by each pigment's staining. More: dried non-staining paint lifts readily. |
 | `liftStrength` | 0.24 | lift strength | Lift: how hard the lifting brush scrubs. More: removes wet paint and dried paint faster. |
 

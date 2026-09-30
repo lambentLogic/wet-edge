@@ -44,7 +44,7 @@ struct Frame {
   touch: f32,         // how lightly the brush skims (0 = full contact), from the CPU
   fixTooth: f32,      // how much a fixative spray fills the paper's tooth
   startFresh: f32,   // 1 as a stroke begins, fading over its first few brush-widths
-  _t1: f32,
+  emptyW: f32,        // water a brush lays at Wetness 0, as a share of full (the water brush's reservoir never runs bone dry; a dip brush can be dry)
   strokeStart: f32,   // sim time this stroke touched down
   substeps: f32,      // sim steps this frame (the brush's segment is split among them)
   stepSec: f32,       // simulated seconds per step
@@ -681,7 +681,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     // spot there is only ever under the front of the brush), dried first,
     // and got an edge as the wetter paint ran back into it.
     let fresh = 1.0 + p.startWet * fr.startFresh;
-    let level = p.brushWater * mix(p.emptyLevel, 1.0, clamp(fr.load, 0.0, 1.0)) * fresh;
+    let level = p.brushWater * mix(fr.emptyW, 1.0, clamp(fr.load, 0.0, 1.0)) * fresh;
     // The brush drags wet paint the way a real one does: where it passes
     // over wet paint, the paint in the paper's water and in the brush's
     // hairs trade toward the same concentration. Where the paper's is
@@ -987,7 +987,12 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
       if (!dOcc[j]) { continue; }
       let omega = max(p.staining * pig[dep.id[j]].phys.y, 1e-4);
       let fixed = select(1.0, p.fixLift, isFixed(dep.stamp[j], fixT));
-      dep.amt[j] *= 1.0 - clamp(liftK * p.liftDry * fixed / (omega * omega), 0.0, 1.0);
+      // On paper that hasn't dried yet (damp) the gum hasn't begun to set,
+      // so paint comes up far more easily: damp paint smudges if rubbed
+      // (Handprint's stages). (The deposit's stamp can't say: dried paint
+      // counts as unset until it's rewetted.)
+      let unset = select(1.0, max(p.liftUnset, 1.0), !dryNow && dep.stamp[j] >= 0.0);
+      dep.amt[j] *= 1.0 - clamp(liftK * p.liftDry * fixed * unset / (omega * omega), 0.0, 1.0);
     }
     // The stain layer lifts by its average liftability (its colour mix is
     // kept; an approximation, since what's in it has lost its identity).

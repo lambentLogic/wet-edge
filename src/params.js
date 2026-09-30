@@ -131,6 +131,7 @@ export const PARAMS = [
   { key: 'blotRate',    v: 0.9,  min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'blot: how much it soaks up per press' },
   { key: 'liftWater',   v: 0.35, min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'lift: how much a thirsty brush takes (Wetness down = thirstier)' },
   { key: 'liftLeaves',  v: 0.04, min: 0, max: 0.3, group: 'Brush', target: 'sim', label: 'lifting leaves wet paper damp (water)' },
+  { key: 'liftUnset',     v: 8,    min: 1, max: 30,  group: 'Brush', target: 'sim', label: 'unset (damp) paint lifts ×' },
   { key: 'liftDry',       v: 0.05, min: 0, max: 2,   group: 'Brush', target: 'sim', label: 'lift and blot take settled paint' },
   { key: 'liftStrength',  v: 0.24,  min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'lift strength' },
 

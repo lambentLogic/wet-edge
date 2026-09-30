@@ -132,6 +132,7 @@ export const KNOB_DOCS = {
   blotRate: { tier: 'studio', doc: 'Blot: how much water and paint each press soaks up where a crease touches. More: cleaner, whiter blotted areas.' },
   liftWater: { tier: 'lab', doc: 'Lift: how much wet paint and water a thirsty brush soaks up. Lower Wetness is thirstier; at full Wetness it barely lifts.' },
   liftLeaves: { tier: 'lab', doc: 'Lift: water always left on wet paper after lifting, so the spot stays joined to the wash instead of drying to a hard-edged ring.' },
+  liftUnset: { tier: 'lab', doc: 'How much more easily Lift and blotting take paint whose gum has not set yet (paper still damp) than dried paint. Lifting while damp gives soft lights; once dry, the same lift barely moves it.' },
   liftDry: { tier: 'lab', doc: 'How easily scrubbing and blotting lift settled/dried paint, divided by each pigment\'s staining. More: dried non-staining paint lifts readily.' },
   liftStrength: { tier: 'studio', doc: 'Lift: how hard the lifting brush scrubs. More: removes wet paint and dried paint faster.' },
 
