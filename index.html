@@ -18,7 +18,7 @@
   #overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
   aside { width: 320px; flex-shrink: 0; background: var(--panel); padding: 14px; overflow-y: auto; height: 100vh; }
   h1 { font-size: 15px; font-weight: 600; margin: 0 0 10px; display: flex; justify-content: space-between; }
-  #fps { color: var(--dim); font-weight: 400; font-variant-numeric: tabular-nums; }
+  #fps, #stageAt { color: var(--dim); font-weight: 400; font-variant-numeric: tabular-nums; }
   .row { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
   button, select { background: #34322e; color: var(--ink); border: 1px solid #45423c; border-radius: 5px;
     padding: 5px 9px; font: inherit; cursor: pointer; }
@@ -70,7 +70,7 @@
 <body>
 <main><div id="stage"><canvas id="canvas"></canvas><canvas id="overlay"></canvas></div></main>
 <aside>
-  <h1>Hyperreal Watercolor <span id="fps"></span></h1>
+  <h1>Hyperreal Watercolor <span id="fps"></span> <span id="stageAt"></span></h1>
   <div id="error"></div>
   <div class="row" id="tools"></div>
   <div id="washRow" hidden>
@@ -84,6 +84,7 @@
       <select id="washDir" style="flex:0 0 auto"><option value="down">down</option><option value="across">across</option><option value="patches">in patches</option></select></div>
     <label class="studio" id="washScrubRow" hidden title="How wide the scrub marks the area (cells, 0.2 mm each)"><span>Scrub width</span><input id="washScrub" type="range" min="8" max="150" step="1" value="40"></label>
     <label class="studio" id="washFadeRow" title="Graded wash: paint strength at the bottom, as a multiple of the strength at the top (below 1 fades out; above 1 darkens downward)"><span>Fades to</span><input id="washFade" type="range" min="0" max="2" step="0.01" value="0.2"></label>
+    <label class="hint" id="washPaperRow" style="display:flex; gap:6px; align-items:center; margin:0 0 6px" title="How wet the wash is laid. Moist: a satin sheen, for a flat wash or wet-in-wet; the rows lay only as much water as keeps it there. Wet: shiny and juicy, for a background wash (the brush as loaded, at its Wetness)">paper <select id="washPaper" style="flex:0 0 auto"><option value="moist">moist (satin)</option><option value="wet">wet (shiny)</option></select></label>
     <label class="hint" id="washMistRow" style="display:flex; gap:6px; align-items:center; margin:0 0 6px" title="Dampen the paper in the area evenly first (directly, no strokes), so the rows land on damp paper and melt together instead of each drying with its own edge"><input id="washMist" type="checkbox" checked> dampen the paper first</label>
     <label class="hint" id="washAroundRow" style="display:flex; gap:6px; align-items:center; margin:0 0 6px" title="Go around paint already in the area (a background behind shapes) with any kind of wash: flat, graded or variegated"><input id="washAround" type="checkbox"> go around what's painted</label>
     <p class="hint doc" id="washHint">Draw a loose outline on the paper; the brush fills it. Esc stops.</p>

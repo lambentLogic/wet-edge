@@ -34,7 +34,8 @@ export const KNOB_DOCS = {
   fibreSettle: { tier: 'lab', doc: 'Pigment carried into damp paper beyond the surface water settles this share per step while the fibres are wet, so it travels on a little: lower, it feathers further; 1: it settles at once (a hard rim where it arrives).' },
   capillaryMin: { tier: 'lab', doc: 'How damp fibres must be before they wick sideways. More: only well-soaked paper spreads its water; less: even slightly damp paper wicks.' },
   dampThreshold: { tier: 'lab', doc: 'How damp the paper must be for a wash to flow onto it. More: water stays put on barely damp paper. Also where dry-brush stops working and when paint counts as dry.' },
-  paperEvaporation: { tier: 'lab', doc: 'How fast the paper itself dries once the shine is gone. More: damp paper returns to bone dry quickly, so late strokes get hard edges sooner.' },
+  dryingPace: { tier: 'studio', doc: 'How fast the paper dries through its stages (soaked, shiny, satin, moist, damp, dry). 1: about 6x faster than real paper in a studio; 0.17: real time, for when you want time to work in a stage. The dryer multiplies it. Skip ahead jumps forward instead.' },
+  paperEvaporation: { tier: 'lab', doc: 'How fast the paper itself dries once the shine is gone (a share of the water left in the fibres, so it slows as it goes): sets how long the paper stays moist and then damp. More: damp paper returns to bone dry quickly, so late strokes get hard edges sooner.' },
   wEps: { tier: 'dev', doc: 'Numerical threshold: water thinner than this counts as dry surface. Mostly a stability setting; raising it makes washes lose their shine and stop flowing earlier.' },
   dryerStrength: { tier: 'studio', doc: 'How much faster everything dries while the hair dryer is on (multiplies both evaporation rates). More: a stronger, hotter dryer.' },
 

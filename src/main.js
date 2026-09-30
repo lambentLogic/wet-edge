@@ -59,7 +59,7 @@ function packOldG(old, version) {
 const values = Object.fromEntries(PARAMS.map(p => [p.key, p.v]));
 // Stop a wash in progress now: the brush lifts at once, and the wash ends
 // at its next step (sim.path rejects).
-const stopWashNow = () => { if (state.washing) { state.cancelWash = true; state.pointer.down = false; } };
+const stopWashNow = () => { if (state.washing) { state.cancelWash = true; state.pointer.down = false; } if (state.skipping) state.cancelSkip = true; };
 const state = {
   stopWash: () => stopWashNow(),
   mode: 0,          // 0 paint, 1 water, 2 lift, 3 magnet, 4 mist, 5 mask, 6 blot, 7 wash, 8 pencil, 9 eraser
@@ -445,7 +445,7 @@ async function init() {
     frameF32[30] = 1 / Math.max(values.simSpeed, 1);   // seconds per step
     frameF32[31] = PIGMENTS.findIndex(pg => pg.name === 'Graphite');
     frameF32[9] = dwell / substeps;
-    frameF32[10] = drying ? values.dryerStrength : 1;
+    frameF32[10] = (drying ? values.dryerStrength : 1) * values.dryingPace;
     frameF32[12] = state.simTime;
     frameF32[14] = brushLoad();
     frameF32[15] = concMul();
@@ -1317,9 +1317,20 @@ async function init() {
     drawMagnets();
     window.__sim.history.barrier();   // an opened painting can't be replayed into: history resumes from a snapshot of it
   }
+  // The paper's working stage, wettest first (handprint.com's stages of
+  // wetness), from surface water w and water in the fibres s:
+  //   soaked  standing water that runs if tilted (background washes)
+  //   shiny   wet, texture showing through the shine
+  //   satin   a dull sheen; flat washes and wet-in-wet
+  //   moist   no sheen but darkened; paint still flows into it (crisp backruns)
+  //   damp    looks dry, paint doesn't flow into it; lifting, dry-brush
+  //   dry     the gum sets; linework, glazes, finishing
+  const STAGES = ['dry', 'damp', 'moist', 'satin', 'shiny', 'soaked'];
+  const stageOf = (w, s) => w >= 0.25 ? 'soaked' : w >= 0.08 ? 'shiny' : w > values.wEps ? 'satin'
+    : s >= values.dampThreshold ? 'moist' : s >= 0.25 * values.dampThreshold ? 'damp' : 'dry';
   // What the brush would feel at (x, y), averaged over radius r: water,
-  // paper dampness, and pigment amounts by name (wet and settled). Reads only
-  // the rows it needs.
+  // paper dampness, its stage, and pigment amounts by name (wet and
+  // settled). Reads only the rows it needs.
   window.__sim.sense = async (x, y, r = 6) => {
     // A point off the sheet senses the nearest edge of it.
     x = Math.min(W - 1, Math.max(0, x)); y = Math.min(H - 1, Math.max(0, y)); r = Math.max(r, 0.5);
@@ -1349,8 +1360,70 @@ async function init() {
       }
     }
     const avg = o => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, +(v / n).toFixed(4)]));
-    return { water: +(water / n).toFixed(4), damp: +(damp / n).toFixed(4), wet: avg(wet), settled: avg(dry), reservoir: +state.reservoir.toFixed(3) };
+    return { water: +(water / n).toFixed(4), damp: +(damp / n).toFixed(4), stage: stageOf(water / n, damp / n), wet: avg(wet), settled: avg(dry), reservoir: +state.reservoir.toFixed(3) };
   };
+  // Skip ahead: let the paper dry until it reaches `stage` (or drier), the
+  // same physics fast-forwarded (as fast as the GPU goes, not in real time),
+  // with the dryer if it's on. Where: the whole sheet (all but specks of it,
+  // under ~8 mm²), or only at `points` [[x, y], ...]. Esc, Stop or touching
+  // the paper stops it. Resolves to the seconds of drying skipped, or -1 if
+  // stopped or it hadn't got there in maxS.
+  window.__sim.stages = STAGES;
+  window.__sim.skipTo = async (stage = 'damp', { points = null, maxS = 1800 } = {}) => {
+    const target = STAGES.indexOf(stage);
+    if (target < 0) throw new Error(`unknown stage ${stage}; stages: ${STAGES.join(', ')}`);
+    if (state.skipping || state.washing) return -1;
+    // How much of the sheet (or the points) is still wetter than the
+    // target, and whether any standing water is left anywhere.
+    const look = async () => {
+      const a = await window.__sim.read();
+      let standing = 0;
+      for (let c = 0; c < N; c++) if (a[c * 4] > values.wEps) standing++;
+      let there = true;
+      if (points) {
+        for (const [x, y] of points) if (STAGES.indexOf((await window.__sim.sense(x, y, 6)).stage) > target) there = false;
+      } else {
+        // Wetter than the target stage: standing water above its bound, or
+        // (for moist and drier) fibres above it.
+        const wMax = [values.wEps, values.wEps, values.wEps, 0.08, 0.25, Infinity][target];
+        const sMax = [0.25 * values.dampThreshold, values.dampThreshold, Infinity, Infinity, Infinity, Infinity][target];
+        let over = 0;
+        for (let c = 0; c < N && over <= 200; c++) if (a[c * 4] > wMax || (a[c * 4] <= values.wEps && a[c * 4 + 3] >= sMax)) over++;
+        there = over <= 200;
+      }
+      return { there, standing: standing > 200 };
+    };
+    let now = await look();
+    if (now.there) return 0;
+    const h = window.__sim.headless, pe = values.paperEvaporation;
+    state.skipping = true; state.cancelSkip = false; state.onWash?.();
+    let t = 0;
+    h.begin();
+    try {
+      for (;;) {
+        // With no standing water left on the sheet, nothing moves but the
+        // water in the fibres, so that is hurried (10x): the result is the
+        // same, sooner. While there is standing water it isn't (hurrying
+        // it is what the dryer does: the pigment has no time to settle).
+        const lapse = now.standing ? 1 : 10;
+        values.paperEvaporation = pe * lapse;
+        await h.wait(1, { dry: state.drying }); t += lapse;
+        now = await look();
+        if (now.there) return t;
+        if (state.cancelSkip || state.pointer.down || t >= maxS) return -1;
+      }
+    } finally { values.paperEvaporation = pe; h.end(); state.skipping = false; state.cancelSkip = false; state.onWash?.(); }
+  };
+  // The paper's stage under the cursor, beside the title, kept up to date
+  // as it dries.
+  const stageEl = document.getElementById('stageAt');
+  let stageBusy = false;
+  setInterval(async () => {
+    if (!state.hover) { stageEl.textContent = ''; return; }
+    if (stageBusy) return;
+    stageBusy = true;
+    try { stageEl.textContent = `paper: ${(await window.__sim.sense(state.hover[0], state.hover[1], 4)).stage}`; } catch { } finally { stageBusy = false; }
+  }, 500);
   // Debug hook: everything stored for one cell.
   // Dampen the paper by fiat: every cell of the mask (Uint8Array over the
   // sheet) is brought up to `level` of what its fibres hold (more in the
@@ -1440,7 +1513,11 @@ async function init() {
   // The Wash tool: a little mind a person can use too. Fills an outline
   // with the loaded brush, in real time, as one undo step. The painter's
   // lasso and scripts both call this.
-  window.__sim.washOptions = { kind: 'flat', fadeTo: 0.2, dampen: true, water: false, dampenOnly: false, around: false, into: null, direction: 'down', area: 'lasso', scrubWidth: 40 };
+  // paper: how wet the wash is laid. 'moist' (satin: a flat wash, or
+  // wet-in-wet) or 'wet' (shiny: a juicy background wash). Dampening
+  // brings the area to that, and a moist wash's rows keep it there.
+  window.__sim.washOptions = { kind: 'flat', fadeTo: 0.2, paper: 'moist', dampen: true, water: false, dampenOnly: false, around: false, into: null, direction: 'down', area: 'lasso', scrubWidth: 40 };
+  const WASH_PAPER = { moist: { film: 0.05, rows: 0.12 }, wet: { film: 0.15, rows: null } };
   // Show an area on the overlay (faint blue) while it's being washed.
   const drawArea = mask => {
     drawMagnets();
@@ -1498,7 +1575,9 @@ async function init() {
   };
   window.__sim.wash = async (outline, opts = {}) => {
     if (state.washing) throw new Error('a wash is already running');
-    const { kind, fadeTo, water, dampenOnly, into, direction, around } = { ...window.__sim.washOptions, ...opts };
+    const { kind, fadeTo, water, dampenOnly, into, direction, around, paper } = { ...window.__sim.washOptions, ...opts };
+    const wet = WASH_PAPER[paper];
+    if (!wet) throw new Error(`unknown wash paper ${paper}; ${Object.keys(WASH_PAPER).join(' or ')}`);
     const dampen = opts.dampen ?? opts.mist ?? window.__sim.washOptions.dampen;
     const M = window.__minds, h = window.__sim.headless;
     // The area: a polygon; null for the whole sheet (a little past its
@@ -1516,7 +1595,7 @@ async function init() {
     }
     if (outline.mask) drawArea(outline.mask);
     const areaMask = M.maskOf(outline);
-    const keep = ['brushRadius', 'brushPigment', 'mistRadius'].map(k => [k, values[k]]);
+    const keep = ['brushRadius', 'brushPigment', 'mistRadius', 'dipLoad'].map(k => [k, values[k]]);
     const mode0 = state.mode;   // (the pigment isn't restored: switching pans mid-wash variegates it)
     const load0 = state.brush.map(b => ({ ...b }));
     window.__sim.checkpoint();
@@ -1524,7 +1603,7 @@ async function init() {
     state.washing = true; state.cancelWash = false; state.washReturn = mode0; state.onWash?.();
     try {
       h.setMode(water ? 1 : 0);
-      if (dampen || dampenOnly) await window.__sim.dampen(areaMask, 1, 0.03, opts.feather ?? 0);
+      if (dampen || dampenOnly) await window.__sim.dampen(areaMask, 1, wet.film, opts.feather ?? 0);
       if (dampenOnly) return true;
       const brushAt = kind === 'variegated' ? variegate(areaMask, into, direction) : null;
       // A found or scrubbed shape is cut in along its edge with the tip and
@@ -1538,8 +1617,10 @@ async function init() {
         for (let k = 1; k < path.length; k++) at.push(total += Math.hypot(path[k][0] - path[k - 1][0], path[k][1] - path[k - 1][1]));
         const along = (x, y) => { let best = 0, bd = Infinity; path.forEach(([px, py], k) => { const d = (px - x) ** 2 + (py - y) ** 2; if (d < bd) { bd = d; best = at[k]; } }); return best / Math.max(1, total); };
         const pigmentAt = kind === 'graded' ? (x, y) => pig0 * (1 + (fadeTo - 1) * along(x, y)) : null;
+        const dip0 = values.dipLoad;
+        if (wet.rows && !water) values.dipLoad = Math.min(dip0, 0.5);
         await M.alongBand(path, R, outline.mask, { brushAt, pigmentAt });
-        values.brushPigment = pig0;
+        values.brushPigment = pig0; values.dipLoad = dip0;
       } else {
         let pigmentAt = null;
         if (kind === 'graded') {
@@ -1552,7 +1633,7 @@ async function init() {
         // toward it, so a big brush doesn't spill past the outline (plain
         // rows stopped only the brush's middle short of it). Only 'around'
         // goes around paint already inside; the rest glaze over it.
-        await M.washAround(outline, { mist: false, pigmentAt, brushAt, even: opts.even ?? true, avoidPaint: kind === 'around' || !!around });
+        await M.washAround(outline, { mist: false, pigmentAt, brushAt, even: opts.even ?? true, avoidPaint: kind === 'around' || !!around, water: water ? null : wet.rows });
       }
       return true;
     } catch (e) {
@@ -1768,6 +1849,8 @@ function bindPointer(canvas) {
     ptr.down = true;
     state.strokeStart = state.simTime;   // a new stroke
   });
+  canvas.addEventListener('pointermove', e => { state.hover = toGrid(e); });
+  canvas.addEventListener('pointerleave', () => { state.hover = null; });
   canvas.addEventListener('pointermove', e => {
     if (lasso) {
       const p = toGrid(e), q = lasso[lasso.length - 1];
@@ -2260,6 +2343,7 @@ function buildUI({ clear, newPaper, acts }) {
     document.getElementById('washVarRow').hidden = soften || wo.kind !== 'variegated';
     if (!document.getElementById('washVarRow').hidden) fillInto();
     document.getElementById('washMistRow').hidden = soften;
+    document.getElementById('washPaperRow').hidden = soften;
     document.getElementById('washFadeRow').hidden = soften || wo.kind !== 'graded';
   };
   washKind.addEventListener('change', () => { wo.kind = washKind.value; showWash(); });
@@ -2273,6 +2357,8 @@ function buildUI({ clear, newPaper, acts }) {
   const WASH_HINTS = { soften: 'Trace roughly along the edge of wet paint; a damp brush finds the edge and runs half over it so it fades out. Wetness sets how damp. Esc stops.', shape: 'Click inside a shape bounded by paint or masking fluid (small gaps are bridged); the brush fills it. Esc stops.', scrub: 'Scrub roughly over the area; the brush lays an even wash where you scrubbed. Esc stops.', lasso: 'Draw a loose outline on the paper; the brush fills it. Esc stops.', rect: 'Drag a rectangle on the paper; the brush fills it. Esc stops.', sheet: 'Click the paper to wash the whole sheet. Esc stops.' };
   washFade.addEventListener('input', () => { wo.fadeTo = +washFade.value; });
   washMist.addEventListener('change', () => { wo.dampen = washMist.checked; });
+  const washPaper = document.getElementById('washPaper');
+  washPaper.addEventListener('change', () => { wo.paper = washPaper.value; });
   const washAroundEl = document.getElementById('washAround');
   washAroundEl.addEventListener('change', () => { wo.around = washAroundEl.checked; });
   washFade.addEventListener('dblclick', () => { washFade.value = wo.fadeTo = 0.2; });
@@ -2311,6 +2397,7 @@ function buildUI({ clear, newPaper, acts }) {
       state.recording = []; recBtn().classList.add('on'); recBtn().textContent = 'Stop and save strokes';
     }
   };
+  const skipSel = document.createElement('select');
   const act = {
     ...acts,
     dry: (on = true) => setDry(on),
@@ -2321,6 +2408,7 @@ function buildUI({ clear, newPaper, acts }) {
     removeMagnets: () => { state.magnets = []; drawMagnets(); },
     record: () => toggleRecord(),
     stop: () => state.stopWash(),
+    skip: (stage = skipSel.value, opts) => window.__sim.skipTo(stage, opts),
     squeeze: (on = true) => { if (state.brushType === 'water') state.squeezing = on; },
     wipe: () => { if (state.brushType === 'water') { state.pigStore = 0; updateBrushLabel(); } },
   };
@@ -2339,9 +2427,14 @@ function buildUI({ clear, newPaper, acts }) {
     btns[a.name] = b;
     if (rows[a.group]) document.getElementById(rows[a.group]).appendChild(b);   // 'keys': key only
   }
+  // Which stage Skip ahead goes to, beside its button.
+  skipSel.title = 'The stage Skip ahead lets the paper dry to.';
+  for (const st of ['satin', 'moist', 'damp', 'dry']) skipSel.add(new Option(`to ${st}`, st));
+  skipSel.value = 'damp';
+  btns.skip.after(skipSel);
   btns.restore.hidden = true;
   btns.stop.hidden = true;
-  state.onWash = () => { btns.stop.hidden = !state.washing; };
+  state.onWash = () => { btns.stop.hidden = !state.washing && !state.skipping; btns.skip.classList.toggle('on', !!state.skipping); };
   window.__sim.tool = setTool;
   window.__sim.act = (name, ...args) => {
     if (!act[name]) throw new Error(`unknown action ${name}; actions: ${ACTIONS.map(a => a.name).join(', ')}`);

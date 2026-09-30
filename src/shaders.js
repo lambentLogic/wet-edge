@@ -1085,8 +1085,12 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   if (aU.w > sMin || a.w > sMin) { ds += aU.w - a.w; }
   if (aD.w > sMin || a.w > sMin) { ds += aD.w - a.w; }
   s += wickRate * p.dt * ds;
-  // Paper only dries once no standing water covers it.
-  if (w <= p.wEps) { s = max(s - p.paperEvaporation * fr.dryMul * p.dt, 0.0); }
+  // Paper only dries once no standing water covers it, and slows as it
+  // goes (in proportion to what's left, plus a trickle to finish): moist
+  // lasts about as long again as the shine did, damp several times that
+  // (handprint.com's stages of wetness). A fixed rate took it from the end
+  // of the shine to bone dry in seconds, with no damp stage to work in.
+  if (w <= p.wEps) { s = max(s - p.paperEvaporation * fr.dryMul * p.dt * (s + 0.005), 0.0); }
 
   // Once the surface water is gone, whatever pigment it carried settles:
   // at once on dry paper, but in paper still damp enough to wick, a share

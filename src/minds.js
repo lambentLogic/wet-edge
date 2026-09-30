@@ -476,9 +476,14 @@ export function makeMinds(sim) {
   //   area       polygon to wash (default: the whole sheet)
   //   pigmentAt  optional (x, y) => brushPigment, for a graded wash
   //   brushAt    optional (x, y) => brush load, for a variegated wash
-  async function washAround(area = null, { margin = 3, threshold = 0.004, pigmentAt = null, brushAt = null, mist = true, framesPerSeg = 2, fine = 0.5, even = false, avoidPaint = true, bead = false, log = () => {} } = {}) {
+  async function washAround(area = null, { margin = 3, threshold = 0.004, pigmentAt = null, brushAt = null, mist = true, framesPerSeg = 2, fine = 0.5, even = false, avoidPaint = true, bead = false, water = null, log = () => {} } = {}) {
     const W = 1024, a = await sim.read(), H = a.length / 4 / W, N = W * H;
-    const bigR = V.brushRadius, pig0 = V.brushPigment;
+    const bigR = V.brushRadius, pig0 = V.brushPigment, load0 = V.dipLoad;
+    // water: the standing water each row should leave (a wash into moist
+    // paper wants less than the brush carries onto dry paper; a big brush
+    // flooded it). The brush starts half full and is wetted or blotted a
+    // little after each row by what it sensed it left.
+    if (water) V.dipLoad = Math.min(load0, 0.5 * Math.min(1, 40 / bigR));   // a big brush floods more (it covers each spot longer)
     // The margin keeps a wash off paint it goes around; a glaze (not
     // avoiding paint) reaches right to its own edge (a sea washed up to a
     // dry sky left a white line along the horizon).
@@ -655,6 +660,14 @@ export function makeMinds(sim) {
       await flush();
       dirx = -dirx;
       if (doser && !near && rows > before0) await doser.row(y, bigR);
+      if (water && !near && rows > before0) {
+        const a = await sim.read();
+        let sum = 0, n = 0;
+        for (let yy = Math.max(0, Math.round(y - bigR * 0.4)); yy <= Math.min(H - 1, Math.round(y + bigR * 0.4)); yy++) {
+          for (let x = 0; x < W; x++) { const c = yy * W + x; if (inside[c]) { sum += a[c * 4]; n++; } }
+        }
+        if (n > 50 && sum > 0) V.dipLoad = Math.min(1, Math.max(0.1, V.dipLoad * Math.min(1.5, Math.max(0.5, water * n / sum))));
+      }
     };
     for (let y = fineStep / 2; y < H + rowStep; y += fineStep) {
       while (todo.length && todo[0].top < y + rowStep) {
@@ -680,7 +693,7 @@ export function makeMinds(sim) {
       for (const { run } of lastRuns.filter(r => r.y === yEnd)) { h.lift(); await sim.path(run.map(([x, yy]) => [x, yy, 0.6]), framesPerSeg); }
       h.setMode(mode0); V.dipLoad = load0;
     }
-    V.brushRadius = bigR; V.brushPigment = pig0;
+    V.brushRadius = bigR; V.brushPigment = pig0; V.dipLoad = load0;
     unturn();
     log(`washAround: ${cut} cut-in ${cut === 1 ? 'contour' : 'contours'}, ${rows} fill strokes`);
     return { cut, rows };

@@ -37,8 +37,9 @@ export const PARAMS = [
   { key: 'fibreSettle',      v: 0.001,   min: 0, max: 1,     group: 'Paper & drying', target: 'sim', label: 'wicked pigment settles (per step)' },
   { key: 'capillaryMin',     v: 0.02,   min: 0, max: 0.2,   group: 'Paper & drying', target: 'sim', label: 'capillary threshold' },
   { key: 'dampThreshold',    v: 0.05,   min: 0, max: 0.3,   group: 'Paper & drying', target: 'sim', label: 'damp enough to flow (and dry-brush contact)' },
-  { key: 'paperEvaporation', v: 0.00003, min: 0, max: 0.001, group: 'Paper & drying', target: 'sim', label: 'paper evaporation' },
+  { key: 'paperEvaporation', v: 0.000057, min: 0, max: 0.001, group: 'Paper & drying', target: 'sim', label: 'paper evaporation' },
   { key: 'wEps',             v: 0.004,  min: 0, max: 0.05,  group: 'Paper & drying', target: 'sim', label: 'wet threshold' },
+  { key: 'dryingPace',       v: 1,      min: 0.15, max: 3,   group: 'Paper & drying', target: 'js',  label: 'drying pace' },
   { key: 'dryerStrength',    v: 15,     min: 1, max: 100,   group: 'Paper & drying', target: 'js',  label: 'blow-dryer ×' },
 
   // --- Pigment (Curtis's ρ, ω, γ) ---

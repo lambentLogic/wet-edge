@@ -51,6 +51,7 @@ window.__paintDone = (async () => {
 | name | key | what it does |
 |---|---|---|
 | `dry` (held: on/off) | D | A hair dryer over the whole sheet while held: water evaporates much faster (see the dryer knob). |
+| `skip` |  | Let the paper dry, fast-forwarded, until it reaches the stage chosen beside the button (satin, moist, damp or dry): the same drying, only faster than real time, with the dryer if Blow-dry is on. Esc or touching the paper stops it. sim.act('skip', stage, { points }) waits only for those points. |
 | `fix` |  | Spray workable fixative (like SpectraFix) over the sheet: commits the dry paint so it barely rewets or lifts, deepens it a little, fills some tooth and seals the paper. |
 | `unmask` |  | Peel off all masking fluid. Some dried paint under it comes away too, more for non-staining pigments. |
 | `stop` | Esc | Stop a wash in progress (what it painted stays; Cmd+Z takes it back). |
@@ -97,7 +98,7 @@ Other keys: [ ] previous / next pigment · Shift-drag side of the brush · Z / X
 
 ## The Wash tool
 
-- `sim.wash(area, { kind, fadeTo, into, direction, around, dampen, water, dampenOnly })`: What the Wash tool does with the painter's lasso: fill an area with the loaded brush: a polygon [[x, y], ...]; null for the whole sheet; { at: [x, y] } for the unpainted shape around a point (bounded by paint and masking fluid; M.areaAt); { scrub: points, radius } for a scrubbed area (M.scrubArea); or { mask }. kind: 'flat' (fill), 'graded' (strength fades top to bottom to fadeTo × paint strength), 'variegated' (the brush's colour blends into `into`, a pigment name, { well: 0-5 } or a mix, `direction` 'down', 'across' or 'patches') or 'around' (washAround: goes around paint already there). around: true to go around paint already in the area with any kind. dampen: bring the paper in the area evenly up to damp first (sim.dampen, no strokes). The wash senses as it goes and keeps its strength to about one stroke of the same brush. water: true for clean water brushed on (wetting an area for wet-in-wet); dampenOnly: true to only dampen the area, with no strokes. One undo step; resolves false if stopped. The panel's settings are sim.washOptions.
+- `sim.wash(area, { kind, fadeTo, into, direction, around, paper, dampen, water, dampenOnly })`: What the Wash tool does with the painter's lasso: fill an area with the loaded brush: a polygon [[x, y], ...]; null for the whole sheet; { at: [x, y] } for the unpainted shape around a point (bounded by paint and masking fluid; M.areaAt); { scrub: points, radius } for a scrubbed area (M.scrubArea); or { mask }. kind: 'flat' (fill), 'graded' (strength fades top to bottom to fadeTo × paint strength), 'variegated' (the brush's colour blends into `into`, a pigment name, { well: 0-5 } or a mix, `direction` 'down', 'across' or 'patches') or 'around' (washAround: goes around paint already there). around: true to go around paint already in the area with any kind. paper: 'moist' (default: satin, for a flat wash or wet-in-wet; the rows sense the water they leave and lay only as much as keeps it there) or 'wet' (shiny: a juicy background wash, the brush as loaded). dampen: bring the paper in the area evenly up to that first (sim.dampen, no strokes). The wash senses as it goes and keeps its strength to about one stroke of the same brush. water: true for clean water brushed on (wetting an area for wet-in-wet); dampenOnly: true to only dampen the area, with no strokes. One undo step; resolves false if stopped. The panel's settings are sim.washOptions.
 - `sim.softenEdge(line)`: The Wash tool's "Soften an edge": trace [[x, y], ...] roughly along a wet edge; the soften mind finds which side the paint is on and where the edge is, and runs a damp brush half over it. One undo step.
 - `sim.dampen(mask, level = 1, film = 0.03, feather = 0)`: Dampen the paper evenly by fiat: every cell of the mask (Uint8Array over the sheet; M.maskOf(area) makes one) up to that fraction of what its fibres hold, plus a trace of surface water (film) so strokes laid into it melt together. feather: cells over which dampness fades out at the edge (off by default; sim.wash takes it as opts.feather). No strokes.
 
@@ -117,7 +118,9 @@ Other keys: [ ] previous / next pigment · Shift-drag side of the brush · Z / X
 - `sim.look(name)`: Save a screenshot under that name (tools/paint.mjs --looks dir collects them), to look at mid-painting.
 - `await sim.undo() / await sim.redo(); sim.checkpoint()`: Undo points: strokes by hand mark themselves; scripts call checkpoint() before something they may want to take back. Undo and redo are exact (a log of everything that went into the simulation is replayed from the nearest snapshot) and can take a few seconds far back, so await them.
 - `sim.history.info() / await sim.history.replayAll()`: The history log (entries, bytes, marks, snapshots). replayAll() goes back to the first snapshot and replays everything since: compare sim.stateHashes() before and after to check replay is exact.
-- `sim.sense(x, y, r)`: What is on the paper around a point: water, suspended and deposited pigment.
+- `sim.sense(x, y, r)`: What is on the paper around a point: water, dampness, the paper's stage, suspended and deposited pigment.
+- `sim.stages`: The paper's working stages, driest first: dry (the gum sets; linework, glazes, finishing), damp (looks dry, paint doesn't flow into it; lifting, dry-brush), moist (no sheen but darkened; paint still flows in: crisp backruns), satin (a dull sheen; flat washes and wet-in-wet), shiny, soaked (background washes). After handprint.com's stages of wetness; this sim dries about 6x faster than its clock.
+- `await sim.skipTo(stage, { points, maxS })`: Skip ahead: fast-forward the drying (the same physics, with the dryer if it's on) until the whole sheet, or only `points`, is at `stage` or drier. The Skip ahead button. Resolves to seconds skipped, or -1 if stopped.
 - `sim.cell(x, y)`: Everything stored in one cell (debugging).
 - `sim.replay(rec)`: Replay a recorded hand stroke file exactly (hand and scripted strokes take different code paths; use this to reproduce the painter's bugs).
 
@@ -144,6 +147,7 @@ All in `sim.values` by key. The page shows the studio ones always, the brush and
 | `dipLoad` | Wetness | How much water the brush holds: turn it down for a blotted, dry-ish brush (dry-brush skips; a thirstier lift). |
 | `brushFirmness` | Firmness | How stiff the brush is, so how hard it scrubs dried paint as it works: soft (a squirrel mop) glazes over the layer below without disturbing it; firm (a bristle flat) scrubs it up. Each brush starts at its own. |
 | `mouseTouch` | Touch | Mouse and trackpad pressure: hold Z (or Option) to lighten, X to press harder; it stays where you leave it. |
+| `dryingPace` | Drying pace | How fast the paper dries: 1 is about 6x real paper, 0.17 about real time (more time in each stage). Skip ahead jumps forward. |
 | `tiltY` | Tilt (down) | Tilt the board so wet paint runs down the sheet (negative: up). Real painters tilt constantly to move a wash. |
 | `tiltX` | Tilt (right) | Tilt the board sideways. |
 | `flatAngle` | Angle | Which way the flat brush faces (R / Shift+R, or scroll over the paper). |
@@ -197,7 +201,7 @@ All in `sim.values` by key. The page shows the studio ones always, the brush and
 | `fibreSettle` | 0.001 | wicked pigment settles (per step) | Pigment carried into damp paper beyond the surface water settles this share per step while the fibres are wet, so it travels on a little: lower, it feathers further; 1: it settles at once (a hard rim where it arrives). |
 | `capillaryMin` | 0.02 | capillary threshold | How damp fibres must be before they wick sideways. More: only well-soaked paper spreads its water; less: even slightly damp paper wicks. |
 | `dampThreshold` | 0.05 | damp enough to flow (and dry-brush contact) | How damp the paper must be for a wash to flow onto it. More: water stays put on barely damp paper. Also where dry-brush stops working and when paint counts as dry. |
-| `paperEvaporation` | 0.00003 | paper evaporation | How fast the paper itself dries once the shine is gone. More: damp paper returns to bone dry quickly, so late strokes get hard edges sooner. |
+| `paperEvaporation` | 0.000057 | paper evaporation | How fast the paper itself dries once the shine is gone (a share of the water left in the fibres, so it slows as it goes): sets how long the paper stays moist and then damp. More: damp paper returns to bone dry quickly, so late strokes get hard edges sooner. |
 | `dryerStrength` | 15 | blow-dryer × | How much faster everything dries while the hair dryer is on (multiplies both evaporation rates). More: a stronger, hotter dryer. |
 
 ### Pigment
