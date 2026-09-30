@@ -76,6 +76,7 @@ export const STUDIO = [
   { key: 'brushRadius',  label: 'Size', min: 1, max: 80, doc: 'Brush size (full pressure). Pressure narrows it toward the brush\'s taper.' },
   { key: 'brushPigment', label: 'Paint strength', min: 0.02, max: 1.5, doc: 'How much pigment the brush picks up: a pale wash to thick paint.' },
   { key: 'dipLoad',      label: 'Wetness', doc: 'How much water the brush holds: turn it down for a blotted, dry-ish brush (dry-brush skips; a thirstier lift).' },
+  { key: 'brushFirmness', label: 'Firmness', doc: 'How stiff the brush is, so how hard it scrubs dried paint as it works: soft (a squirrel mop) glazes over the layer below without disturbing it; firm (a bristle flat) scrubs it up. Each brush starts at its own.' },
   { key: 'mouseTouch',   label: 'Touch', doc: 'Mouse and trackpad pressure: hold Z (or Option) to lighten, X to press harder; it stays where you leave it.' },
   { key: 'tiltY',        label: 'Tilt (down)', doc: 'Tilt the board so wet paint runs down the sheet (negative: up). Real painters tilt constantly to move a wash.' },
   { key: 'tiltX',        label: 'Tilt (right)', doc: 'Tilt the board sideways.' },

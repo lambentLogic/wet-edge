@@ -724,12 +724,12 @@ async function init() {
     // Consecutive paint() calls continue one stroke (the brush isn't
     // reloaded) unless lift() is called in between.
     lift() { strokeFrame = 0; state.strokeStart = state.simTime; },
-    async paint(x0, y0, x1, y1, frames = 24) {
+    async paint(x0, y0, x1, y1, frames = 24, pressure = 1) {
       if (strokeFrame === 0 && state.brushType === 'dip') state.reservoir = values.dipLoad;   // a fresh dip stroke: reloaded
       const at = f => {
         const t0 = f / frames, t1 = (f + 1) / frames;
         return { x0: x0 + (x1 - x0) * t0, y0: y0 + (y1 - y0) * t0, x1: x0 + (x1 - x0) * t1, y1: y0 + (y1 - y0) * t1,
-                 age: (strokeFrame + f) / HZ };
+                 age: (strokeFrame + f) / HZ, pressure };
       };
       await simFrames(frames, at);
       strokeFrame += frames;

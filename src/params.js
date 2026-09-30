@@ -57,13 +57,14 @@ export const PARAMS = [
   { key: 'granulation', v: 0.3,  min: 0, max: 2,   group: 'Pigment', target: 'sim', label: 'all pigments: granulation ×' },
   { key: 'rewetLift',   v: 0.002, min: 0, max: 1,   group: 'Pigment', target: 'sim', label: 'dried paint rewets' },
   { key: 'stainCapacity', v: 0.015, min: 0, max: 0.2, group: 'Pigment', target: 'sim', label: 'fibres hold (stain capacity)' },
-  { key: 'thickRewet',  v: 0.1,   min: 0, max: 1,   group: 'Pigment', target: 'sim', label: 'thick dried paint rewets' },
+  { key: 'thickRewet',  v: 0.5,   min: 0, max: 1,   group: 'Pigment', target: 'sim', label: 'thick dried paint rewets' },
   { key: 'soakTime',    v: 30,    min: 0, max: 120, group: 'Pigment', target: 'sim', label: 'dried paint softens after (s under water)' },
   { key: 'thickLo',     v: 0.1,   min: 0, max: 1,   group: 'Pigment', target: 'sim', label: 'thick paint rewets freely from (pigment)' },
   { key: 'thickHi',     v: 0.2,   min: 0, max: 2,   group: 'Pigment', target: 'sim', label: '... fully at' },
   { key: 'soakRewet',   v: 0.02,   min: 0, max: 1,   group: 'Pigment', target: 'sim', label: 'softened paint left alone lifts (x scrubbed)' },
+  { key: 'agitation',   v: 0.5,   min: 0, max: 1,   group: 'Pigment', target: 'sim', label: 'a working brush loosens dried paint (x firmness)' },
   { key: 'scrubRewet',  v: 8,     min: 0, max: 40,  group: 'Pigment', target: 'sim', label: 'scrubbing softens dried paint (x soaking)' },
-  { key: 'bindTime',    v: 3,     min: 0, max: 30,  group: 'Pigment', target: 'sim', label: 'gum sets (s, gradually)' },
+  { key: 'bindTime',    v: 60,     min: 0, max: 30,  group: 'Pigment', target: 'sim', label: 'gum sets (s, gradually)' },
   // Workable fixative (like SpectraFix: casein in alcohol). Sprayed over
   // dry paint, it commits it (it won't rewet or lift much), partly reverses
   // the lightening paint shows as it dries, fills some of the paper's tooth
@@ -96,6 +97,7 @@ export const PARAMS = [
   { key: 'lingerRate',    v: 0.3,  min: 0, max: 2,   group: 'Brush', target: 'js',  label: 'resting brush adds (frames per frame)' },
   { key: 'dabDelay',      v: 0.25, min: 0, max: 1,   group: 'Brush', target: 'js',  label: 'hold still this long to dab (s)' },
   { key: 'startWet',      v: 0.5,  min: 0, max: 2,   group: 'Brush', target: 'sim', label: 'stroke starts wetter (fresh brush)' },
+  { key: 'brushFirmness', v: 0.4,  min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'firmness (how hard it scrubs)' },
   { key: 'brushDrag',     v: 0.1,  min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'brush pushes wet paint' },
   { key: 'brushPickup',   v: 0.1,  min: 0, max: 2,   group: 'Brush', target: 'sim', label: 'brush picks up wet paint' },
   { key: 'carryVolume',   v: 0.5,  min: 0.1, max: 20, group: 'Brush', target: 'js', label: 'carried paint dilutes in (x tip water)' },

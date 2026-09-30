@@ -787,23 +787,28 @@
   // pigment above what the gum holds). Deterministic (headless steps).
   probes.glaze = async (paper = 'coldPress') => {
     await fresh(paper);
+    // Two dried ultramarine washes (left and right) and a heavy rigger line,
+    // dried thoroughly (well past the gum's setting time).
     h.setBrushPreset('mop'); S.values.brushRadius = 30; S.values.brushPigment = 0.25; h.setBrush('French Ultramarine');
-    for (let y = 100; y <= 600; y += 30) { h.lift(); await h.paint(100, y, 900, y, 16); }
+    for (let y = 100; y <= 600; y += 30) { h.lift(); await h.paint(60, y, 960, y, 16); }
     h.setBrushPreset('rigger'); S.values.brushRadius = 4; S.values.brushPigment = 1.2; h.setBrush('Phthalo Turquoise');
     h.lift(); await h.paint(150, 700, 850, 700, 60);
-    await h.wait(40, { dry: true }); await h.wait(10);
+    await h.wait(40, { dry: true }); await h.wait(S.values.bindTime * 1.5);
     const ub0 = await S.readPigment('French Ultramarine'), pt0 = await S.readPigment('Phthalo Turquoise');
+    // A glaze with a soft mop on the left, with a firm flat on the right.
     h.setBrushPreset('mop'); h.setBrush([['Perylene Green', 2], ['Raw Umber', 1]]); S.values.brushPigment = 0.35; S.values.brushRadius = 30;
-    for (let y = 200; y <= 500; y += 30) { h.lift(); await h.paint(250, y, 750, y, 16); }
+    for (let y = 200; y <= 500; y += 30) { h.lift(); await h.paint(120, y, 460, y, 16); }
+    h.setBrushPreset('flat'); S.values.flatAngle = 90; h.setBrush([['Perylene Green', 2], ['Raw Umber', 1]]); S.values.brushPigment = 0.35;
+    for (let y = 200; y <= 500; y += 30) { h.lift(); await h.paint(560, y, 900, y, 16); }
     h.setBrushPreset('round'); S.values.brushRadius = 12; h.setMode(1);
     h.lift(); await h.paint(150, 700, 850, 700, 40);
     await h.wait(40, { dry: true }); await h.wait(5);
     const ub1 = await S.readPigment('French Ultramarine'), pt1 = await S.readPigment('Phthalo Turquoise');
-    let d = 0, t0 = 0, spread = 0, lt = 0;
-    for (let y = 230; y < 470; y++) for (let x = 300; x < 700; x++) { const c = y * W + x; d += Math.abs(ub1[c] - ub0[c]); t0 += ub0[c]; }
+    const moved = (xa, xb) => { let d = 0, t0 = 0; for (let y = 230; y < 470; y++) for (let x = xa; x < xb; x++) { const c = y * W + x; d += Math.abs(ub1[c] - ub0[c]); t0 += ub0[c]; } return +(d / t0).toFixed(3); };
+    let spread = 0, lt = 0;
     for (let y = 640; y < 760; y++) for (let x = 200; x < 800; x++) { const c = y * W + x; lt += pt0[c]; if (y < 695 || y > 705) spread += pt1[c]; }
     h.setMode(0); h.end();
-    return { glazeMovesDry: +(d / t0).toFixed(3), riggerReactivates: +(spread / lt).toFixed(3) };
+    return { softGlaze: moved(160, 420), firmGlaze: moved(600, 860), riggerReactivates: +(spread / lt).toFixed(3) };
   };
   window.__probes = { ...probes, withValues };
 })();

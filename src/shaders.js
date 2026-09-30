@@ -877,7 +877,9 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   if (a.x > p.wEps) { soakT += fr.stepSec * (1.0 + p.scrubRewet * work); }
   else if (dryNow) { soakT = 0.0; }
   if (soakT != D[i].soak) { D[i].soak = soakT; }
-  let soak = smoothstep(0.0, max(p.soakTime, 1e-3), soakT) * mix(clamp(p.soakRewet, 0.0, 1.0), 1.0, work);
+  // A brush working the spot also loosens it directly, while it passes (a
+  // moving brush crosses a spot too quickly for the soak timer alone).
+  let soak = max(smoothstep(0.0, max(p.soakTime, 1e-3), soakT) * mix(clamp(p.soakRewet, 0.0, 1.0), 1.0, work), p.agitation * work);
 
   var dep = unpackD(D[i]);
   let depIn = dep;
@@ -1031,7 +1033,14 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
       // a thick staining line reactivates under a wet brush.
       let liftFree = max(1.0 + (h - 1.0) * gam, 0.0) * rho * p.dt;
       let lift = liftFree / omega;
-      let up = min(rewetUp(dep.amt[j], dep.stamp[j], fixT, lift, liftFree, soak), dep.amt[j]);
+      // A brush working the spot scrubs dried pigment loose (by its
+      // firmness, see brushWorkAt), fixed paint barely: a firm brush lifts
+      // the layer below, a soft one hardly.
+      // (Staining resists removal, not spreading: a staining pigment's grip
+      // divides it.)
+      let scrub = dep.amt[j] * p.agitation * 0.2 * work / max(omega, 1.0)
+        * select(1.0, p.fixLift, isFixed(dep.stamp[j], fixT));
+      let up = min(rewetUp(dep.amt[j], dep.stamp[j], fixT, lift, liftFree, soak) + scrub, dep.amt[j]);
       gAmt[k] += up - down;
       dep.stamp[j] = stampMix(dep.stamp[j], dep.amt[j], down);
       dep.amt[j] += down - up;
@@ -1175,7 +1184,10 @@ fn brushWorkAt(q: vec2f) -> f32 {
   let t = clamp(dot(q - F0, FB) / max(dot(FB, FB), 1e-6), 0.0, 1.0);
   let dist = length(q - (F0 + FB * t));
   let r = max(fr.radius, 0.5);
-  return smoothstep(r, r * 0.5, dist) * clamp(fr.pressure, 0.0, 1.0) * min(length(FB) / max(0.05 * r, 0.5), 1.0);
+  // How hard it scrubs is the brush's firmness (a stiff bristle flat
+  // scrubs, a soft squirrel mop barely disturbs the layer below), not how
+  // hard it's pressed: pressure sets width only (the painter).
+  return smoothstep(r, r * 0.5, dist) * clamp(p.brushFirmness, 0.0, 1.0) * min(length(FB) / max(0.05 * r, 0.5), 1.0);
 }
 
 // Is a deposited component under fixative (bound, and dried before the
