@@ -408,6 +408,7 @@ async function init() {
       // The mist is a spray bottle: its own reach, whatever brush is loaded.
       if (state.mode === 4) frameF32[13] = values.mistRadius;
       if (state.mode === 6) frameF32[13] = values.blotRadius;   // the towel, not the brush
+      if (state.mode === 10) frameF32[13] = values.spatterReach;   // where the drops land
       // The pencil's point and the eraser: their own sizes (pressure widens
       // a pencil line only a little).
       if (state.mode === 8) frameF32[13] = values.pencilRadius * (0.7 + 0.3 * pr);

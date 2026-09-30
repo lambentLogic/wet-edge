@@ -36,6 +36,7 @@ window.__paintDone = (async () => {
 | `paint` | 1 | Lay paint from the loaded brush (a pan, a mixing well, or the water brush's dab). |
 | `water` | 2 | The same brush, rinsed, and Wetness says what it does. Full: lays clean water (wet the paper for wet-in-wet, rewet and move dried paint). Turned down: a damp brush that softens edges and drinks a little. Right down: a thirsty brush that soaks up paint and water and lifts settled paint (lighter while the paper is still damp). sim.tool('lift') picks it with Wetness at 0. |
 | `mist` | 5 | Spray bottle: fine droplets over a wide cone that dampen the paper, so strokes laid into it melt together. |
+| `spatter` | 3 | Flick the loaded brush: drops of its paint spray around the stroke, fine specks and a few big drops stretched along the flick. Only a moving brush throws paint; a faster flick throws more. |
 | `blot` | 7 | Press a crumpled paper towel on wet paint to soak it up, leaving a mottled crease texture. |
 | `mask` | 6 | Masking fluid: a rubber film on dry paper or dried paint that washes flow around. Peel it with Remove mask. |
 | `wash` | 8 | Choose an area (lasso, rectangle, click inside a shape bounded by paint or mask, scrub over it, or the whole sheet) and the loaded brush lays a wash in it, in real time: flat, graded, or around whatever is already painted there. Esc stops it; Cmd+Z takes the whole wash back. |
@@ -154,6 +155,9 @@ All in `sim.values` by key. The page shows the studio ones always, the brush and
 | `pencilDark` | Lead | Hard (light) to soft (dark) lead. |
 | `eraserRadius` | Eraser size | Size of the eraser. |
 | `mistRadius` | Spray reach | How wide the spray bottle's cone is. |
+| `spatterReach` | Reach | How far around the flick the drops land. |
+| `spatterDensity` | Drops | How many drops a flick throws. |
+| `spatterSize` | Big drops | Fine specks only, or some big splats. |
 | `blotRadius` | Towel size | Size of the paper-towel wad. |
 | `blotScale` | Crease size | How coarse the towel's crumpled creases are (mm). |
 
@@ -286,6 +290,7 @@ All in `sim.values` by key. The page shows the studio ones always, the brush and
 | `skipAmount` | 0.9 | dry-brush skip | How much of the tooth a dry, light brush skips on dry paper. More: only the peaks catch paint, broken sparkly dry-brush; less: solid marks. |
 | `mistWater` | 0.14 | mist: droplet water | Mist: how much water each droplet leaves. More: bigger beads that can merge into a wet film. |
 | `mistDensity` | 0.5 | mist: droplets per pass | Mist: how many droplets land per pass. More: fuller coverage. |
+| `spatterWater` | 0.2 | spatter: water in a drop | Spatter: how much water each drop carries. More: drops that stay wet longer and can bloom. |
 | `mistDamp` | 0.04 | mist: dampens the paper | Mist: how much the spray dampens the paper itself, so later strokes soften and melt together instead of drying with hard edges. |
 | `eraseRate` | 1 | eraser: how much a pass takes | How much of the graphite under it one eraser pass takes. Graphite that paint has been laid over since is sealed in and can't be erased. |
 | `maskTear` | 0.15 | mask peel lifts paint under it | How much dried paint peeling off masking fluid tears away with it. More: more lost; lifts non-staining pigments most, phthalos barely. |

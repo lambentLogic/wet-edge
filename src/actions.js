@@ -11,6 +11,7 @@ export const TOOLS = [
   { name: 'paint',  mode: 0, key: '1', label: 'Paint',  doc: 'Lay paint from the loaded brush (a pan, a mixing well, or the water brush\'s dab).' },
   { name: 'water',  mode: 1, key: '2', label: 'Clean brush', doc: 'The same brush, rinsed, and Wetness says what it does. Full: lays clean water (wet the paper for wet-in-wet, rewet and move dried paint). Turned down: a damp brush that softens edges and drinks a little. Right down: a thirsty brush that soaks up paint and water and lifts settled paint (lighter while the paper is still damp). sim.tool(\'lift\') picks it with Wetness at 0.' },
   { name: 'mist',   mode: 4, key: '5', label: 'Mist',   doc: 'Spray bottle: fine droplets over a wide cone that dampen the paper, so strokes laid into it melt together.' },
+  { name: 'spatter', mode: 10, key: '3', label: 'Spatter', doc: 'Flick the loaded brush: drops of its paint spray around the stroke, fine specks and a few big drops stretched along the flick. Only a moving brush throws paint; a faster flick throws more.' },
   { name: 'blot',   mode: 6, key: '7', label: 'Blot',   doc: 'Press a crumpled paper towel on wet paint to soak it up, leaving a mottled crease texture.' },
   { name: 'mask',   mode: 5, key: '6', label: 'Mask',   doc: 'Masking fluid: a rubber film on dry paper or dried paint that washes flow around. Peel it with Remove mask.' },
   { name: 'wash',   mode: 7, key: '8', label: 'Wash',   doc: 'Choose an area (lasso, rectangle, click inside a shape bounded by paint or mask, scrub over it, or the whole sheet) and the loaded brush lays a wash in it, in real time: flat, graded, or around whatever is already painted there. Esc stops it; Cmd+Z takes the whole wash back.' },
@@ -87,6 +88,9 @@ export const STUDIO = [
   { key: 'pencilDark',   label: 'Lead', tool: 'pencil', doc: 'Hard (light) to soft (dark) lead.' },
   { key: 'eraserRadius', label: 'Eraser size', tool: 'eraser', doc: 'Size of the eraser.' },
   { key: 'mistRadius',   label: 'Spray reach', tool: 'mist', doc: 'How wide the spray bottle\'s cone is.' },
+  { key: 'spatterReach', label: 'Reach', tool: 'spatter', doc: 'How far around the flick the drops land.' },
+  { key: 'spatterDensity', label: 'Drops', tool: 'spatter', doc: 'How many drops a flick throws.' },
+  { key: 'spatterSize', label: 'Big drops', tool: 'spatter', doc: 'Fine specks only, or some big splats.' },
   { key: 'blotRadius',   label: 'Towel size', tool: 'blot', doc: 'Size of the paper-towel wad.' },
   { key: 'blotScale',    label: 'Crease size', tool: 'blot', doc: 'How coarse the towel\'s crumpled creases are (mm).' },
 ];

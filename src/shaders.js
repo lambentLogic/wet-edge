@@ -822,6 +822,50 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
         }
       }
       s = min(s + p.mistDamp * kM, max(s, p.capacityMax));
+    } else if (fr.mode == 10u) {
+      // Spatter: the loaded brush flicked, throwing drops of its paint.
+      // Only a moving brush throws (the faster the flick, the more drops);
+      // drops land around its path within the spatter's reach, fine specks
+      // and a few big drops, each stretched along the flick. Like the mist's
+      // beads, a cell checks its own 8 x 8 block and the neighbouring ones.
+      let segLen = length(AB);
+      if (segLen > 1e-3) {
+        let dir = AB / segLen;
+        let cone = exp(-2.0 * (dist / max(r, 1.0)) * (dist / max(r, 1.0)));
+        // Drops by the distance the brush travels (a slow flick isn't a
+        // heavier one); speed stretches them.
+        let flick = clamp(length(FB) / max(0.15 * r, 1.0), 0.0, 1.0);
+        let kS = cone * clamp(segLen / max(0.25 * r, 1.0), 0.0, 1.0);
+        let seedS = u32(fr.time * 600.0) + 91u + u32(kSub) * 17u;
+        var bead = 0.0;
+        for (var oy = -1; oy <= 1; oy++) {
+          for (var ox = -1; ox <= 1; ox++) {
+            let bx = x / 8 + ox; let by = y / 8 + oy;
+            if (hash2(bx, by, seedS) >= p.spatterDensity * kS) { continue; }
+            let c = vec2f(f32(bx * 8) + 8.0 * hash2(bx, by, seedS + 1u), f32(by * 8) + 8.0 * hash2(bx, by, seedS + 2u));
+            let rad = 0.7 + 6.0 * clamp(p.spatterSize, 0.0, 1.0) * pow(hash2(bx, by, seedS + 3u), 3.0);
+            let d = vec2f(f32(x) + 0.5, f32(y) + 0.5) - c;
+            let stretch = 1.0 + 1.5 * hash2(bx, by, seedS + 4u) * flick;
+            let dd = length(vec2f(dot(d, dir) / stretch, dot(d, vec2f(-dir.y, dir.x))));
+            bead = max(bead, smoothstep(rad + 0.6, rad - 0.9, dd));
+          }
+        }
+        if (bead > 0.0) {
+          let wDrop = p.spatterWater * bead;
+          for (var b = 0; b < 4; b++) {
+            let frac = fr.brushFrac[b];
+            if (frac <= 0.0) { continue; }
+            let id = fr.brushId[b];
+            let ci = candIndex(id);
+            let cur = select(0.0, camt[max(ci, 0)], ci >= 0);
+            let conc = p.brushPigment * frac * max(pig[id].phys2.z, 0.0) * max(fr.concMul, 0.0);
+            let next = max(cur, cur + wDrop * conc);
+            addCand(id, next - cur);
+            gAdded += next - cur;
+          }
+          w += wDrop;
+        }
+      }
     } else if (fr.mode == 6u) {
       // Blotting with a crumpled paper towel: pressed down, it soaks up the
       // water and the paint in it wherever a crease touches, in one quick
