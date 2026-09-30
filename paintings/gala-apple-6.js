@@ -112,20 +112,21 @@ window.__paintDone = (async () => {
   await skip('dry');
   await S.look('3-yellow');
 
-  log('the red last: rubine + a touch of perylene violet, broad overlapping strokes radiating from the cavity like lines of longitude; a few left out, and their gaps are the pale streaks');
+  // The painter's red: thinned paint on an almost-dry brush (their washes
+  // were very thin), into the shadow while it was moist, on dry paper
+  // elsewhere. (Wet strokes on dry paper each dried as a rimmed capsule.)
+  log('the red last: the shadow side dampened and let go to moist, then thin rubine + a touch of perylene violet on a nearly dry brush, strokes radiating from the cavity like lines of longitude; a few left out, their gaps the pale streaks');
+  await S.dampen(shade, 1, 0.03);
+  await skip('moist', [P([520, 560]), P([600, 450])]);
   h.setBrush([['Pyrrole Rubine', 5], ['Perylene Violet', 1]]);
-  S.tool('paint'); h.setBrushPreset('round'); V.dipLoad = 0.5;
-  log('cut in along the outline with the tip first, so the edge is clean');
-  V.brushRadius = 9; V.brushPigment = 0.3;
-  { const out = [...APPLE, APPLE[0]].map(([x, y]) => { const d = Math.hypot(x - acx, y - acy); return [x - (x - acx) / d * 8, y - (y - acy) / d * 8, 0.9]; });
-    for (let k = 0; k + 1 < out.length; k += 8) { const seg = out.slice(k, k + 9).filter(([x, y]) => !inside(CAVITY, x, y)); if (seg.length > 1) { h.lift(); await S.path(seg, 3); } } }
-  const ring = APPLE.filter((_, i) => i % 6 === 0);
+  S.tool('paint'); h.setBrushPreset('round'); V.dipLoad = 0.3;
+  const ring = APPLE.filter((_, i) => i % 5 === 0);
   for (let k = 0; k < ring.length; k++) {
-    if (rnd() < 0.18) continue;   // a gap: a pale streak
+    if (rnd() < 0.15) continue;   // a gap: a pale streak
     const [ex, ey] = ring[k];
     const sx = ccx + (ex - ccx) * 0.3, sy = ccy + (ey - ccy) * 0.3;
     const mx = (sx + ex) / 2, my = (sy + ey) / 2, bx = mx + (mx - acx) * 0.2, by = my + (my - acy) * 0.2;
-    V.brushRadius = 16 + rnd() * 6; V.brushPigment = 0.2 + 0.08 * rnd() + 0.1 * Math.min(1, Math.hypot(ex - P([200, 190])[0], ey - P([200, 190])[1]) / 400);
+    V.brushRadius = 15 + rnd() * 5; V.brushPigment = 0.16 + 0.06 * rnd() + 0.08 * Math.min(1, Math.hypot(ex - L[0], ey - L[1]) / 400);
     await stroke(pts(t => [(1 - t) ** 2 * sx + 2 * t * (1 - t) * bx + t * t * ex, (1 - t) ** 2 * sy + 2 * t * (1 - t) * by + t * t * ey, 0.9], 10), 3);
   }
   V.dipLoad = 1;
@@ -135,7 +136,7 @@ window.__paintDone = (async () => {
   log('a second, lighter red over the shadow side only, where it goes dusky over the violet');
   h.setBrushPreset('round'); V.dipLoad = 0.55;
   for (let k = 0; k < 10; k++) {
-    const u = 0.45 + 0.5 * k / 9; V.brushRadius = 12 + rnd() * 4; V.brushPigment = 0.3;
+    const u = 0.45 + 0.5 * k / 9; V.brushRadius = 12 + rnd() * 4; V.brushPigment = 0.15; V.dipLoad = 0.3;
     const m = meridian(u, 0.3); await stroke(m.slice(6), 3);
   }
   V.dipLoad = 1;
