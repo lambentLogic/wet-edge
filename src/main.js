@@ -2392,6 +2392,8 @@ function buildUI({ clear, newPaper, acts }) {
     showStudio();
   };
   const setTool = name => {
+    // Lift became the clean brush turned right down (thirsty).
+    if (name === 'lift') { setMode(1); inputs.dipLoad(0); return; }
     const t = TOOLS.find(t => t.name === name);
     if (!t) throw new Error(`unknown tool ${name}; tools: ${TOOLS.map(t => t.name).join(', ')}`);
     setMode(t.mode);

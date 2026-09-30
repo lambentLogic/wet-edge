@@ -103,7 +103,7 @@ window.__paintDone = (async () => {
   log(`lake dry after ${(await M.waitDry(lake)).toFixed(1)}s`);
 
   log('shimmer: a few lifted horizontal lines across the reflections');
-  h.setBrushPreset('round'); h.setMode(2); V.brushRadius = 3;
+  h.setBrushPreset('round'); S.tool('lift'); V.brushRadius = 3;   // the clean brush, thirsty
   for (let k = 0; k < 9; k++) {
     const y = HORIZON + 20 + rnd() * 130, x0 = 80 + rnd() * 600;
     h.lift(); await S.path(line(x0, y, x0 + 90 + rnd() * 200, y + (rnd() - 0.5) * 3, 0, 4, 0.9, 0.9), 3);

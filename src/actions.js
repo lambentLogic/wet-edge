@@ -9,8 +9,7 @@
 // Tools: what the pointer does on the paper. One is active at a time.
 export const TOOLS = [
   { name: 'paint',  mode: 0, key: '1', label: 'Paint',  doc: 'Lay paint from the loaded brush (a pan, a mixing well, or the water brush\'s dab).' },
-  { name: 'water',  mode: 1, key: '2', label: 'Water',  doc: 'The same brush with clean water: wet the paper for wet-in-wet, soften edges, rewet and move dried paint.' },
-  { name: 'lift',   mode: 2, key: '3', label: 'Lift',   doc: 'A thirsty brush that soaks up paint and water. Turn Wetness down for a thirstier brush; full Wetness barely lifts.' },
+  { name: 'water',  mode: 1, key: '2', label: 'Clean brush', doc: 'The same brush, rinsed, and Wetness says what it does. Full: lays clean water (wet the paper for wet-in-wet, rewet and move dried paint). Turned down: a damp brush that softens edges and drinks a little. Right down: a thirsty brush that soaks up paint and water and lifts settled paint (lighter while the paper is still damp). sim.tool(\'lift\') picks it with Wetness at 0.' },
   { name: 'mist',   mode: 4, key: '5', label: 'Mist',   doc: 'Spray bottle: fine droplets over a wide cone that dampen the paper, so strokes laid into it melt together.' },
   { name: 'blot',   mode: 6, key: '7', label: 'Blot',   doc: 'Press a crumpled paper towel on wet paint to soak it up, leaving a mottled crease texture.' },
   { name: 'mask',   mode: 5, key: '6', label: 'Mask',   doc: 'Masking fluid: a rubber film on dry paper or dried paint that washes flow around. Peel it with Remove mask.' },
@@ -77,7 +76,7 @@ export const ACTIONS = [
 export const STUDIO = [
   { key: 'brushRadius',  label: 'Size', min: 1, max: 80, doc: 'Brush size (full pressure). Pressure narrows it toward the brush\'s taper.' },
   { key: 'brushPigment', label: 'Paint strength', min: 0.02, max: 1.5, doc: 'How much pigment the brush picks up: a pale wash to thick paint.' },
-  { key: 'dipLoad',      label: 'Wetness', doc: 'How much water the brush holds: turn it down for a blotted, dry-ish brush (dry-brush skips; a thirstier lift). With the Water tool, 0 is a clean dry brush.' },
+  { key: 'dipLoad',      label: 'Wetness', doc: 'How much water the brush holds: turn it down for a blotted, dry-ish brush (dry-brush skips; a thirstier lift). With the clean brush: full lays water, down softens, right down lifts.' },
   { key: 'brushFirmness', label: 'Firmness', doc: 'How stiff the brush is, so how hard it scrubs dried paint as it works: soft (a squirrel mop) glazes over the layer below without disturbing it; firm (a bristle flat) scrubs it up. Each brush starts at its own.' },
   { key: 'mouseTouch',   label: 'Touch', doc: 'Mouse and trackpad pressure: hold Z (or Option) to lighten, X to press harder; it stays where you leave it.' },
   { key: 'dryingPace',   label: 'Drying pace', doc: 'How fast the paper dries: 1 is about 6x real paper, 0.17 about real time (more time in each stage). Skip ahead jumps forward.' },

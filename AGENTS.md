@@ -34,8 +34,7 @@ window.__paintDone = (async () => {
 | name | key | what it does |
 |---|---|---|
 | `paint` | 1 | Lay paint from the loaded brush (a pan, a mixing well, or the water brush's dab). |
-| `water` | 2 | The same brush with clean water: wet the paper for wet-in-wet, soften edges, rewet and move dried paint. |
-| `lift` | 3 | A thirsty brush that soaks up paint and water. Turn Wetness down for a thirstier brush; full Wetness barely lifts. |
+| `water` | 2 | The same brush, rinsed, and Wetness says what it does. Full: lays clean water (wet the paper for wet-in-wet, rewet and move dried paint). Turned down: a damp brush that softens edges and drinks a little. Right down: a thirsty brush that soaks up paint and water and lifts settled paint (lighter while the paper is still damp). sim.tool('lift') picks it with Wetness at 0. |
 | `mist` | 5 | Spray bottle: fine droplets over a wide cone that dampen the paper, so strokes laid into it melt together. |
 | `blot` | 7 | Press a crumpled paper towel on wet paint to soak it up, leaving a mottled crease texture. |
 | `mask` | 6 | Masking fluid: a rubber film on dry paper or dried paint that washes flow around. Peel it with Remove mask. |
@@ -144,7 +143,7 @@ All in `sim.values` by key. The page shows the studio ones always, the brush and
 |---|---|---|
 | `brushRadius` | Size | Brush size (full pressure). Pressure narrows it toward the brush's taper. |
 | `brushPigment` | Paint strength | How much pigment the brush picks up: a pale wash to thick paint. |
-| `dipLoad` | Wetness | How much water the brush holds: turn it down for a blotted, dry-ish brush (dry-brush skips; a thirstier lift). With the Water tool, 0 is a clean dry brush. |
+| `dipLoad` | Wetness | How much water the brush holds: turn it down for a blotted, dry-ish brush (dry-brush skips; a thirstier lift). With the clean brush: full lays water, down softens, right down lifts. |
 | `brushFirmness` | Firmness | How stiff the brush is, so how hard it scrubs dried paint as it works: soft (a squirrel mop) glazes over the layer below without disturbing it; firm (a bristle flat) scrubs it up. Each brush starts at its own. |
 | `mouseTouch` | Touch | Mouse and trackpad pressure: hold Z (or Option) to lighten, X to press harder; it stays where you leave it. |
 | `dryingPace` | Drying pace | How fast the paper dries: 1 is about 6x real paper, 0.17 about real time (more time in each stage). Skip ahead jumps forward. |

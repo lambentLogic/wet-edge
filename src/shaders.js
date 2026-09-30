@@ -378,8 +378,16 @@ fn vAt(x: i32, y: i32) -> f32 { if (!inb(x, y)) { return 0.0; } return Bin[ix(x,
 // and v use) and how strongly it holds the water there (0 outside the
 // footprint). Pulling the face velocity toward it moves water and pigment
 // through the ordinary conservative transport.
+// The clean brush (mode 1; 2 is its old name, Lift): one brush whose
+// Wetness says what it does. Full, it lays water; turned down, a damp brush
+// that softens and drinks a little; right down, a thirsty brush that soaks
+// up paint and water (what Lift was). thirstyW is how far toward thirsty it
+// is: 0 from Wetness 0.5 up, 1 at 0, where it is exactly the old Lift.
+fn cleanBrush() -> bool { return fr.mode == 1u || fr.mode == 2u; }
+fn thirstyW() -> f32 { return select(0.0, smoothstep(0.5, 0.0, clamp(fr.load, 0.0, 1.0)), cleanBrush()); }
+
 fn brushDragAt(q: vec2f) -> vec4f {
-  if (fr.brushOn != 1u || (fr.mode != 0u && fr.mode != 1u) || p.brushDrag <= 0.0) { return vec4f(0.0); }
+  if (fr.brushOn != 1u || (fr.mode != 0u && !cleanBrush()) || p.brushDrag <= 0.0) { return vec4f(0.0); }
   let nSub = max(fr.substeps, 1.0);
   let kSub = min(f32(atomicLoad(&tiles.brushAcc[2])) - 1.0, nSub - 1.0);
   let F0 = vec2f(fr.bx0, fr.by0);
@@ -393,7 +401,7 @@ fn brushDragAt(q: vec2f) -> vec4f {
   // (Pushing with only its front sent a bead out past the brush that was
   // left beyond a stroke's end, drying as a ghost rim; the start of a
   // stroke thinning as water is carried off it is made up by startWet.)
-  let hold = smoothstep(r, r * 0.5, dist) * clamp(p.brushDrag, 0.0, 1.0);
+  let hold = smoothstep(r, r * 0.5, dist) * clamp(p.brushDrag, 0.0, 1.0) * (1.0 - thirstyW());
   return vec4f(AB / max(p.dt, 1e-6), hold, 0.0);
 }
 
@@ -645,7 +653,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     // and, on the side of the brush, a drying belly.
     let touch = fr.touch;
     let dryPaper = a.x <= p.wEps && a.w < p.dampThreshold;
-    if (fr.mode != 2u && fr.mode != 4u && fr.mode != 6u && dryPaper && touch > 0.0) {
+    if (fr.mode != 4u && fr.mode != 6u && thirstyW() == 0.0 && dryPaper && touch > 0.0) {
       let cut = p.skipAmount * touch;
       fall *= smoothstep(cut - 0.15, cut + 0.15, aux[i].x);
     }
@@ -692,10 +700,10 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     // even out. Tallied by pigment, so the brush holds exactly what it
     // took. A loaded paint brush trades only pigments it isn't loaded with
     // (its own load is laid as usual).
-    if ((fr.mode == 0u || fr.mode == 1u) && a.x > p.wEps) {
+    if ((fr.mode == 0u || cleanBrush()) && a.x > p.wEps && thirstyW() < 1.0) {
       // By time under the brush (like lifting), not the paint dose: a quick
       // pass picks up a little, lingering more.
-      let kx = clamp(p.brushPickup * fall / nSub, 0.0, 0.5);
+      let kx = clamp(p.brushPickup * fall / nSub, 0.0, 0.5) * (1.0 - thirstyW());
       let wx = min(w, p.brushWater);
       // Every cell trades from the brush's contents as the step began. Done
       // one cell after another, each would find the brush a little changed
@@ -753,15 +761,17 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
         gAdded += max(next - cur, 0.0);
       }
       w = max(w, mix(w, level, k)) + charge;
-    } else if (fr.mode == 1u) {
-      // Clean water, as wet as the brush is (Wetness; the water brush's
-      // store): full, it floods; turned right down, a dry brush that lays
-      // nothing and drinks some of what's wetter than it, paint and water
-      // together (more gently than Lift), while it drags the paint along.
+    } else if (cleanBrush()) {
+      // The clean brush, as wet as it is (Wetness; the water brush's
+      // store). Full, it floods; turned down, a damp brush that lays little
+      // and drinks some of what's wetter than it, paint and water together,
+      // while it drags the paint along; right down, thirsty (thirstyW), it
+      // soaks up paint and water and scrubs settled paint up: what Lift was.
       let wetB = clamp(fr.load, 0.0, 1.0);
+      let tw = thirstyW();
       let levelW = p.brushWater * wetB * fresh;
       if (w > levelW) {
-        let kd = k * 0.5 * (1.0 - wetB);
+        let kd = k * 0.5 * (1.0 - wetB) * (1.0 - tw);
         let wNew = w - (w - levelW) * kd;
         let keepFrac = select(1.0, wNew / w, w > 1e-6);
         w = wNew;
@@ -770,6 +780,24 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
         w = max(w, mix(w, levelW, k));
       }
       w += charge * wetB;
+      if (tw > 0.0) {
+        // Lifting works by time: scrubbing longer lifts more.
+        let kl = clamp(p.liftStrength * fall * fr.pressure * 8.0 / nSub, 0.0, 1.0) * tw;
+        // A thirsty brush soaks up the water but leaves wet paper damp, a
+        // thin film still joined to the wash around it (taking it all left
+        // a dry hole, and the wash's edge pinned and darkened around it).
+        // It takes paint and water together (the paint's strength in the
+        // water stays the same), as much as it is thirsty; only part of the
+        // water each pass, so the spot stays wet and joined to the wash.
+        let thirst = 1.0 - wetB;
+        let kw = kl * clamp(p.liftWater * 2.0 * thirst, 0.0, 1.0);
+        let wNew = max(w * (1.0 - kw), min(w, p.liftLeaves));
+        let keepFrac = select(1.0, wNew / w, w > 1e-6);
+        w = wNew;
+        for (var j = 0u; j < cn; j++) { camt[j] *= keepFrac; }
+        s *= 1.0 - kw;   // the fibres stay damp too (drying them pinned a ring)
+        liftK = kl * (0.3 + 0.7 * thirst);   // scrubbing lifts some settled paint
+      }
     } else if (fr.mode == 4u) {
       // Mist: a spray bottle, not the brush. fr.radius is the spray's reach
       // (mistRadius); droplets are densest in the middle and thin out, and
@@ -832,24 +860,6 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
       // Eraser: takes graphite that no paint has been laid over since.
       // (A spot is under the eraser for a few substeps of each pass.)
       eraseK = clamp(p.eraseRate * 0.5 * fall * fr.pressure, 0.0, 1.0);
-    } else {
-      // Lifting works by time: scrubbing longer lifts more.
-      let kl = clamp(p.liftStrength * fall * fr.pressure * 8.0 / nSub, 0.0, 1.0);
-      // A thirsty brush soaks up the water but leaves wet paper damp, a thin
-      // film still joined to the wash around it (taking it all left a dry
-      // hole, and the wash's edge pinned and darkened around it).
-      // It takes paint and water together (the paint's strength in the
-      // water stays the same), as much as the brush is thirsty: Wetness
-      // (fr.load) down, it soaks up a lot; full, it barely lifts. Only part
-      // of the water each pass, so the spot stays wet and joined to the wash.
-      let thirst = 1.0 - clamp(fr.load, 0.0, 1.0);
-      let kw = kl * clamp(p.liftWater * 2.0 * thirst, 0.0, 1.0);
-      let wNew = max(w * (1.0 - kw), min(w, p.liftLeaves));
-      let keepFrac = select(1.0, wNew / w, w > 1e-6);
-      w = wNew;
-      for (var j = 0u; j < cn; j++) { camt[j] *= keepFrac; }
-      s *= 1.0 - kw;   // the fibres stay damp too (drying them pinned a ring)
-      liftK = kl * (0.3 + 0.7 * thirst);   // scrubbing lifts some settled paint even with a wet brush
     }
     // Tally what the brush laid down, for its reservoir (read back on the CPU).
     let dw = max(w - wBefore, 0.0);
@@ -1202,7 +1212,7 @@ fn rewetUp(amt: f32, stamp: f32, fixT: f32, lift: f32, liftFree: f32, soak: f32)
 // (full in the middle, fading to its rim) times how hard it presses, if
 // it's moving at all. Paint and water modes only.
 fn brushWorkAt(q: vec2f) -> f32 {
-  if (fr.brushOn != 1u || (fr.mode != 0u && fr.mode != 1u)) { return 0.0; }
+  if (fr.brushOn != 1u || (fr.mode != 0u && !cleanBrush())) { return 0.0; }
   let F0 = vec2f(fr.bx0, fr.by0);
   let FB = vec2f(fr.bx1, fr.by1) - F0;
   let t = clamp(dot(q - F0, FB) / max(dot(FB, FB), 1e-6), 0.0, 1.0);
@@ -1211,7 +1221,7 @@ fn brushWorkAt(q: vec2f) -> f32 {
   // How hard it scrubs is the brush's firmness (a stiff bristle flat
   // scrubs, a soft squirrel mop barely disturbs the layer below), not how
   // hard it's pressed: pressure sets width only (the painter).
-  return smoothstep(r, r * 0.5, dist) * clamp(p.brushFirmness, 0.0, 1.0) * min(length(FB) / max(0.05 * r, 0.5), 1.0);
+  return smoothstep(r, r * 0.5, dist) * clamp(p.brushFirmness, 0.0, 1.0) * min(length(FB) / max(0.05 * r, 0.5), 1.0) * (1.0 - thirstyW());
 }
 
 // Is a deposited component under fixative (bound, and dried before the
