@@ -109,7 +109,7 @@ export const KNOB_DOCS = {
   brushCapacity: { tier: 'lab', doc: 'Water brush only: how much it paints before its reservoir runs dry (squeeze to refill). 0 = endless. The dip brush uses Wetness instead.' },
   mouseTouch: { tier: 'studio', doc: 'Mouse/trackpad pressure (Z or Option lighter, X heavier). Lighter: thinner strokes, and dry-brush skipping if the brush is drying.' },
   touchRate: { tier: 'studio', doc: 'How fast holding Z/Option/X changes the mouse touch, per second. More: quicker response.' },
-  dipLoad: { tier: 'studio', doc: 'Wetness: how full the dip brush is each stroke. Lower: less water laid, thicker paint, dry-brush skipping, and a thirstier brush for lifting.' },
+  dipLoad: { tier: 'studio', doc: 'Wetness: how full the dip brush is each stroke. Lower: less water laid, thicker paint, dry-brush skipping, and a thirstier brush for lifting. With the Water tool, 0 is a clean dry brush: it lays no water and drinks a little from wet paint as it drags it.' },
   dryBelow: { tier: 'lab', doc: 'How empty the brush must be before it starts skipping over the tooth (dry-brush). Higher: dry-brush kicks in with a fuller brush.' },
   speedSkim: { tier: 'lab', doc: 'How much a fast stroke skims over the tooth when the brush is drying. More: quick flicks with a dry brush give broken, sparkly marks.' },
   touchdownEase: { tier: 'lab', doc: 'Mouse only: seconds for a stroke to go from a light touch to full pressure after touchdown. More: softer, tapered starts.' },

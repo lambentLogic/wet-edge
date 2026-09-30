@@ -754,7 +754,22 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
       }
       w = max(w, mix(w, level, k)) + charge;
     } else if (fr.mode == 1u) {
-      w = max(w, mix(w, p.brushWater * fresh, k)) + charge;
+      // Clean water, as wet as the brush is (Wetness; the water brush's
+      // store): full, it floods; turned right down, a dry brush that lays
+      // nothing and drinks some of what's wetter than it, paint and water
+      // together (more gently than Lift), while it drags the paint along.
+      let wetB = clamp(fr.load, 0.0, 1.0);
+      let levelW = p.brushWater * wetB * fresh;
+      if (w > levelW) {
+        let kd = k * 0.5 * (1.0 - wetB);
+        let wNew = w - (w - levelW) * kd;
+        let keepFrac = select(1.0, wNew / w, w > 1e-6);
+        w = wNew;
+        for (var j = 0u; j < cn; j++) { camt[j] *= keepFrac; }
+      } else {
+        w = max(w, mix(w, levelW, k));
+      }
+      w += charge * wetB;
     } else if (fr.mode == 4u) {
       // Mist: a spray bottle, not the brush. fr.radius is the spray's reach
       // (mistRadius); droplets are densest in the middle and thin out, and

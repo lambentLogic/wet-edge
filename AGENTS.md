@@ -144,7 +144,7 @@ All in `sim.values` by key. The page shows the studio ones always, the brush and
 |---|---|---|
 | `brushRadius` | Size | Brush size (full pressure). Pressure narrows it toward the brush's taper. |
 | `brushPigment` | Paint strength | How much pigment the brush picks up: a pale wash to thick paint. |
-| `dipLoad` | Wetness | How much water the brush holds: turn it down for a blotted, dry-ish brush (dry-brush skips; a thirstier lift). |
+| `dipLoad` | Wetness | How much water the brush holds: turn it down for a blotted, dry-ish brush (dry-brush skips; a thirstier lift). With the Water tool, 0 is a clean dry brush. |
 | `brushFirmness` | Firmness | How stiff the brush is, so how hard it scrubs dried paint as it works: soft (a squirrel mop) glazes over the layer below without disturbing it; firm (a bristle flat) scrubs it up. Each brush starts at its own. |
 | `mouseTouch` | Touch | Mouse and trackpad pressure: hold Z (or Option) to lighten, X to press harder; it stays where you leave it. |
 | `dryingPace` | Drying pace | How fast the paper dries: 1 is about 6x real paper, 0.17 about real time (more time in each stage). Skip ahead jumps forward. |
