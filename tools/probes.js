@@ -18,8 +18,14 @@
     try { return await fn(); } finally { Object.assign(S.values, saved); active = outer; }
   }
 
+  // Every knob as the page loaded (the defaults), so no probe inherits
+  // another's settings: brushPigment wasn't reset, and the edge probe read
+  // 1.5 after the full set and 3.0 alone.
+  const DEFAULTS = { ...S.values };
   async function fresh(paper) {
     h.begin();
+    Object.assign(S.values, DEFAULTS);
+    h.setMagnets([]);             // the magnet probe left two under the paper
     h.setPaper(paper);
     h.setTone('natural');
     h.setBrushPreset('round');    // don't inherit another probe's brush
