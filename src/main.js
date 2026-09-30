@@ -1404,7 +1404,7 @@ async function init() {
       return { there, standing: standing > 200 };
     };
     let now = await look();
-    if (now.there) return 0;
+    if (now.there && stage !== 'dry') return 0;
     const h = window.__sim.headless, pe = values.paperEvaporation;
     state.skipping = true; state.cancelSkip = false; state.onWash?.();
     let t = 0;
@@ -1419,7 +1419,13 @@ async function init() {
         values.paperEvaporation = pe * lapse;
         await h.wait(1, { dry: state.drying }); t += lapse;
         now = await look();
-        if (now.there) return t;
+        if (now.there) {
+          // Dry is for glazing and linework: let the gum set too (it sets
+          // over bindTime once the paper is dry), or a wash laid straight
+          // over a just-dried line lifted it. Nothing else moves by then.
+          if (stage === 'dry') { values.paperEvaporation = pe; await h.wait(values.bindTime * 1.2); t += values.bindTime * 1.2; }
+          return t;
+        }
         if (state.cancelSkip || state.pointer.down || t >= maxS) return -1;
       }
     } finally { values.paperEvaporation = pe; h.end(); state.skipping = false; state.cancelSkip = false; state.onWash?.(); }
