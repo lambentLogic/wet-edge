@@ -131,7 +131,7 @@ export const SCRIPT_API = [
   { call: 'M.alongBand(path, halfWidth, mask, { brushAt, pigmentAt })', probe: '__minds.alongBand', doc: 'Wash a band along a path in parallel lanes that follow it (what a scrub along a shape gets; M.isBand(points, r, mask) tells a band from a scribble).' },
   { call: 'M.soften(line, out)', probe: '__minds.soften', doc: 'Find the wet edge along a line and run a damp brush along it to soften it.' },
   { call: 'M.mark(points, { target })', probe: '__minds.mark', doc: 'A stroke that checks it actually left paint, and repeats if it skipped.' },
-  { call: 'M.waitDry(points)', probe: '__minds.waitDry', doc: 'Wait until those points are dry and the gum has set: air-drying until the shine has gone, then the dryer (blow-drying a wet wash stops it settling). Returns seconds.' },
+  { call: 'M.waitDry(points)', probe: '__minds.waitDry', doc: 'Wait until those points are dry and the gum has set: air-drying until the shine has gone, then the dryer (blow-drying a wet wash stops it settling), then the gum\'s setting time fast-forwarded (cure: false to skip, for working into barely-dry paint). Returns seconds.' },
   { call: 'M.waitDamp(points, { below })', probe: '__minds.waitDamp', doc: 'Wait until those points are only damp (for soft-but-held marks).' },
   { section: 'Looking and history' },
   { call: 'await sim.note(text)', probe: 'sim.note', doc: 'Add an entry to the painting journal, notes/journal.md (filed under the script\'s name when run by tools/paint.mjs; node tools/note.mjs does the same from the command line). Read the journal before painting; note what worked, what didn\'t and what the painter said.' },

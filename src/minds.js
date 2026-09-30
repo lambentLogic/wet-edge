@@ -409,7 +409,9 @@ export function makeMinds(sim) {
   // Wait until the paper at these points is bone dry (not just matt), then
   // a moment longer so the gum sets and the paint won't lift under the next
   // wash. A polygon (3+ points) is checked on a grid across it.
-  async function waitDry(points, { maxS = 90, dryer = true, set = 1.5 } = {}) {
+  // cure: then let the gum set (bindTime of simulated time, stepped quickly
+  // while the sheet is dry), so the next layer doesn't lift this one.
+  async function waitDry(points, { maxS = 90, dryer = true, set = 1.5, cure = true } = {}) {
     const t0 = performance.now();
     const pts = points.length >= 3 ? gridIn(points, 6) : points;
     // The dryer only once the shine has gone, as a painter uses one: blowing
@@ -430,7 +432,11 @@ export function makeMinds(sim) {
         let wet = 0;
         for (const [x, y] of pts) { const s = await sim.sense(x, y, 10); wet = Math.max(wet, s.water, s.damp * 0.3); }
         const t = (performance.now() - t0) / 1000;
-        if (wet < 0.003) { await sleep(set * 1000); return t; }
+        if (wet < 0.003) {
+          await sleep(set * 1000);
+          if (cure) { sim.setDrying(false); const h = sim.headless; h.begin(); try { await h.wait(V.bindTime * 1.2); } finally { h.end(); } }
+          return t;
+        }
         if (t > maxS) return -1;
         await sleep(600);
       }
