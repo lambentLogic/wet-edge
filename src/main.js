@@ -646,8 +646,16 @@ async function init() {
     const elapsed = Math.min((t - lastFrame) / 1000, 0.1);
     lastFrame = t;
     stepDebt = Math.min(stepDebt + values.simSpeed * elapsed, MAX_STEPS_PER_FRAME);
-    const substeps = Math.floor(stepDebt);
+    let substeps = Math.floor(stepDebt);
     stepDebt -= substeps;
+    // Skipping ahead from the button: as many steps a frame as keep the
+    // page near 15 fps, so the paper is seen drying, fast.
+    if (state.skipLive) {
+      const ms = (t - (state.skipLastT ?? t)) || 33;
+      state.skipLastT = t;
+      state.skipSteps = Math.min(400, Math.max(10, Math.round((state.skipSteps ?? 20) * (ms > 75 ? 0.85 : ms < 55 ? 1.15 : 1))));
+      substeps = state.skipSteps;
+    }
     // (Not while a script drives the sim headless: writing the frame here
     // changed its brush state between its steps, at the display's timing,
     // and made headless runs differ.)
@@ -1380,7 +1388,7 @@ async function init() {
   // the paper stops it. Resolves to the seconds of drying skipped, or -1 if
   // stopped or it hadn't got there in maxS.
   window.__sim.stages = STAGES;
-  window.__sim.skipTo = async (stage = 'damp', { points = null, maxS = 1800 } = {}) => {
+  window.__sim.skipTo = async (stage = 'damp', { points = null, maxS = 1800, live = false } = {}) => {
     const target = STAGES.indexOf(stage);
     if (target < 0) throw new Error(`unknown stage ${stage}; stages: ${STAGES.join(', ')}`);
     if (state.skipping || state.washing) return -1;
@@ -1409,6 +1417,32 @@ async function init() {
     const h = window.__sim.headless, pe = values.paperEvaporation;
     state.skipping = true; state.cancelSkip = false; state.onWash?.();
     let t = 0;
+    if (live) {
+      // From the button: the live loop runs fast (see frame) and the page
+      // keeps drawing, so the drying is seen; the button says how far.
+      const paused0 = state.paused;
+      state.paused = false; state.skipLive = true; state.skipSteps = 20; state.skipLastT = null;
+      let sim0 = state.simTime;
+      try {
+        for (;;) {
+          await new Promise(r => setTimeout(r, 250));
+          const lapse = now.standing ? 1 : 10;
+          t += (state.simTime - sim0) * (values.paperEvaporation / pe); sim0 = state.simTime;
+          values.paperEvaporation = pe * lapse;
+          state.onSkip?.(`Skipping to ${stage}… ${Math.round(t)} s`);
+          now = await look();
+          if (now.there) break;
+          if (state.cancelSkip || state.pointer.down || t >= maxS) return -1;
+        }
+      } finally { values.paperEvaporation = pe; state.skipLive = false; state.paused = paused0; if (!(now?.there && stage === 'dry')) { state.skipping = false; state.cancelSkip = false; state.onSkip?.(null); state.onWash?.(); } }
+      if (stage === 'dry') {
+        state.onSkip?.('Letting the gum set…');
+        h.begin();
+        try { await h.wait(values.bindTime * 1.2); t += values.bindTime * 1.2; }
+        finally { h.end(); state.skipping = false; state.cancelSkip = false; state.onSkip?.(null); state.onWash?.(); }
+      }
+      return t;
+    }
     h.begin();
     try {
       for (;;) {
@@ -2427,7 +2461,8 @@ function buildUI({ clear, newPaper, acts }) {
     removeMagnets: () => { state.magnets = []; drawMagnets(); },
     record: () => toggleRecord(),
     stop: () => state.stopWash(),
-    skip: (stage = skipSel.value, opts) => window.__sim.skipTo(stage, opts),
+    // The button skips live (seen drying, its label counting); pressed again it stops. Scripts skip headless (repeatable).
+    skip: (stage, opts) => { if (stage === undefined) { if (state.skipping) { state.cancelSkip = true; return; } return window.__sim.skipTo(skipSel.value, { live: true }); } return window.__sim.skipTo(stage, opts); },
     squeeze: (on = true) => { if (state.brushType === 'water') state.squeezing = on; },
     wipe: () => { if (state.brushType === 'water') { state.pigStore = 0; updateBrushLabel(); } },
   };
@@ -2454,6 +2489,7 @@ function buildUI({ clear, newPaper, acts }) {
   btns.restore.hidden = true;
   btns.stop.hidden = true;
   state.onWash = () => { btns.stop.hidden = !state.washing && !state.skipping; btns.skip.classList.toggle('on', !!state.skipping); };
+  state.onSkip = text => { btns.skip.textContent = text ?? 'Skip ahead'; };
   window.__sim.tool = setTool;
   window.__sim.act = (name, ...args) => {
     if (!act[name]) throw new Error(`unknown action ${name}; actions: ${ACTIONS.map(a => a.name).join(', ')}`);

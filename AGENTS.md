@@ -51,7 +51,7 @@ window.__paintDone = (async () => {
 | name | key | what it does |
 |---|---|---|
 | `dry` (held: on/off) | D | A hair dryer over the whole sheet while held: water evaporates much faster (see the dryer knob). |
-| `skip` |  | Let the paper dry, fast-forwarded, until it reaches the stage chosen beside the button (satin, moist, damp or dry): the same drying, only faster than real time, with the dryer if Blow-dry is on. Esc or touching the paper stops it. sim.act('skip', stage, { points }) waits only for those points. |
+| `skip` |  | Let the paper dry, fast-forwarded, until it reaches the stage chosen beside the button (satin, moist, damp or dry): the same drying, only faster than real time (about real time while there is standing water; several times faster after), with the dryer if Blow-dry is on. You see it dry; the button counts the seconds skipped. Press it again, Esc, or touch the paper to stop. sim.act('skip', stage, { points }) waits only for those points. |
 | `fix` |  | Spray workable fixative (like SpectraFix) over the sheet: commits the dry paint so it barely rewets or lifts, deepens it a little, fills some tooth and seals the paper. |
 | `unmask` |  | Peel off all masking fluid. Some dried paint under it comes away too, more for non-staining pigments. |
 | `stop` | Esc | Stop a wash in progress (what it painted stays; Cmd+Z takes it back). |
@@ -120,7 +120,7 @@ Other keys: [ ] previous / next pigment · Shift-drag side of the brush · Z / X
 - `sim.history.info() / await sim.history.replayAll()`: The history log (entries, bytes, marks, snapshots). replayAll() goes back to the first snapshot and replays everything since: compare sim.stateHashes() before and after to check replay is exact.
 - `sim.sense(x, y, r)`: What is on the paper around a point: water, dampness, the paper's stage, suspended and deposited pigment.
 - `sim.stages`: The paper's working stages, driest first: dry (the gum sets; linework, glazes, finishing), damp (looks dry, paint doesn't flow into it; lifting, dry-brush), moist (no sheen but darkened; paint still flows in: crisp backruns), satin (a dull sheen; flat washes and wet-in-wet), shiny, soaked (background washes). After handprint.com's stages of wetness; this sim dries about 6x faster than its clock.
-- `await sim.skipTo(stage, { points, maxS })`: Skip ahead: fast-forward the drying (the same physics, with the dryer if it's on) until the whole sheet, or only `points`, is at `stage` or drier (to dry: and the gum has set, ready to glaze over). The Skip ahead button. Resolves to seconds skipped, or -1 if stopped.
+- `await sim.skipTo(stage, { points, maxS, live })`: Skip ahead: fast-forward the drying (the same physics, with the dryer if it's on; live: true runs it in the page's own loop, drawn as it dries, as the button does; otherwise headless and repeatable) until the whole sheet, or only `points`, is at `stage` or drier (to dry: and the gum has set, ready to glaze over). The Skip ahead button. Resolves to seconds skipped, or -1 if stopped.
 - `sim.cell(x, y)`: Everything stored in one cell (debugging).
 - `sim.replay(rec)`: Replay a recorded hand stroke file exactly (hand and scripted strokes take different code paths; use this to reproduce the painter's bugs).
 
