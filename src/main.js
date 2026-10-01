@@ -398,7 +398,10 @@ async function init() {
       if (!state.strokeMoved && !dabbing) frameU32[3] = 0;
       state.smoothSeg = newStroke || !state.strokeMovedBefore ? segNow : state.smoothSeg * 0.6 + segNow * 0.4;
       state.strokeMovedBefore = state.strokeMoved;
-      const speed = Math.min(1, state.smoothSeg / Math.max(4 * values.brushRadius, 1e-3));
+      // Full skim at a quick stroke, about 2.5 brush radii a frame (some
+      // 400 mm/s with a round); 4 radii took a flick no mouse or trackpad
+      // stroke reaches (the painter), 1.5 left a brisk stroke mere specks.
+      const speed = Math.min(1, state.smoothSeg / Math.max(2.5 * values.brushRadius, 1e-3));
       // Dry only once it's well down (below dryBelow full): a brush that's
       // used a little water still lays a solid line at a light touch.
       const dryness = Math.min(1, Math.max(0, (values.dryBelow - load) / Math.max(values.dryBelow, 1e-3)));
@@ -443,7 +446,11 @@ async function init() {
       // (Resting, in proportion to how wet the brush is: a loaded brush
       // keeps flowing into a pool, a dry one has little to give; a nearly
       // dry mop paused or turned left a solid disc in a broken scumble.)
-      dwell = moving ? Math.max(1, values.brushDose * seg1 / w2) : values.lingerRate * (0.15 + 0.85 * Math.min(1, brushLoad()));
+      // A slow stroke gets at least a frame's worth a frame from a full
+      // brush (it flows); a dry one only its share (corners of a dry zigzag,
+      // where the brush slows to turn, had built up into dots).
+      const flows = 0.15 + 0.85 * Math.min(1, brushLoad());
+      dwell = moving ? Math.max(flows, values.brushDose * seg1 / w2) : values.lingerRate * flows;
     }
     frameF32[29] = substeps;
     frameF32[30] = 1 / Math.max(values.simSpeed, 1);   // seconds per step

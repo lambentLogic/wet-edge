@@ -623,7 +623,9 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     let dist = length(P - (A + AB * t));
     let r = fr.radius;
     var cover = r - dist;
-    var soft = r * p.brushSoftness;
+    // A drying paint brush's edge is ragged, not feathered: its soft rim
+    // narrows as it empties, and the skipping breaks it up instead.
+    var soft = r * p.brushSoftness * select(1.0, mix(0.35, 1.0, clamp(fr.load, 0.0, 1.0)), fr.mode == 0u);
     // A flat brush: a thin rectangle (its chisel edge flatThickness of its
     // width) held at flatAngle, swept along the path. Pulled broadside it
     // lays a wide band with square, straight ends; drawn along its edge, a
