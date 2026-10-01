@@ -269,7 +269,7 @@ All in `sim.values` by key. The page shows the studio ones always, the brush and
 | `chargeDuration` | 0.1 | charge lasts (s) | How long (s) after touchdown the wet-in-wet charge lasts before the brush has spent it. Longer: dragging through a wash keeps flooding it. |
 | `brushShape` | 0 | shape (0 round, 1 flat) | Brush shape: 0 round, 1 flat (a chisel-edged rectangle swept along the stroke). |
 | `flatThickness` | 0.18 | flat: edge thickness (x width) | Thickness of the flat brush's chisel edge as a fraction of its width. Less: a sharper, thinner edge line. |
-| `lingerRate` | 0.3 | resting brush adds (frames per frame) | How fast paint builds up while the brush rests in one place. More: a held brush blots out a darker, wetter spot. |
+| `lingerRate` | 0.3 | resting brush adds (frames per frame) | How fast paint builds up while the brush rests in one place (a full brush; a dry one adds about a seventh of it). More: a held brush blots out a darker, wetter spot. |
 | `dabDelay` | 0.25 | hold still this long to dab (s) | Seconds the brush must be held still before it lays a dab. Stops an accidental dot at the start of every stroke. |
 | `startWet` | 0.5 | stroke starts wetter (fresh brush) | A freshly loaded brush lets out more water (and paint) at the start of a stroke, fading over its first few brush-widths. Without it a stroke's start came out thinner, dried first and took an edge as the wetter paint ran back in. 0: an even level all along. |
 | `brushDrag` | 0.1 | brush pushes wet paint | How much the hairs push wet paint along with them. More: dragging through wet paint smears and shoves it in the stroke direction. |

@@ -440,7 +440,10 @@ async function init() {
       const seg1 = brush.hand ? state.smoothSeg : Math.hypot(brush.x1 - brush.x0, brush.y1 - brush.y0);
       const w2 = Math.max(2 * frameF32[13], 1e-3);
       const moving = Math.hypot(brush.x1 - brush.x0, brush.y1 - brush.y0) >= 0.5;
-      dwell = moving ? Math.max(1, values.brushDose * seg1 / w2) : values.lingerRate;
+      // (Resting, in proportion to how wet the brush is: a loaded brush
+      // keeps flowing into a pool, a dry one has little to give; a nearly
+      // dry mop paused or turned left a solid disc in a broken scumble.)
+      dwell = moving ? Math.max(1, values.brushDose * seg1 / w2) : values.lingerRate * (0.15 + 0.85 * Math.min(1, brushLoad()));
     }
     frameF32[29] = substeps;
     frameF32[30] = 1 / Math.max(values.simSpeed, 1);   // seconds per step

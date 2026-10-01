@@ -96,7 +96,7 @@ export const KNOB_DOCS = {
   brushShape: { tier: 'studio', doc: 'Brush shape: 0 round, 1 flat (a chisel-edged rectangle swept along the stroke).' },
   flatAngle: { tier: 'studio', doc: 'Angle of the flat brush in degrees (R or scroll to turn). Pulled broadside it lays a wide band; along its edge, a thin line.' },
   flatThickness: { tier: 'studio', doc: 'Thickness of the flat brush\'s chisel edge as a fraction of its width. Less: a sharper, thinner edge line.' },
-  lingerRate: { tier: 'lab', doc: 'How fast paint builds up while the brush rests in one place. More: a held brush blots out a darker, wetter spot.' },
+  lingerRate: { tier: 'lab', doc: 'How fast paint builds up while the brush rests in one place (a full brush; a dry one adds about a seventh of it). More: a held brush blots out a darker, wetter spot.' },
   dabDelay: { tier: 'lab', doc: 'Seconds the brush must be held still before it lays a dab. Stops an accidental dot at the start of every stroke.' },
   startWet: { tier: 'lab', doc: 'A freshly loaded brush lets out more water (and paint) at the start of a stroke, fading over its first few brush-widths. Without it a stroke\'s start came out thinner, dried first and took an edge as the wetter paint ran back in. 0: an even level all along.' },
   brushFirmness: { tier: 'lab', doc: 'How stiff the brush is, so how hard it scrubs dried paint as it passes: a soft squirrel mop glazes without disturbing the layer below, a firm bristle flat scrubs it up. Working a spot longer scrubs more.' },
