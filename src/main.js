@@ -1766,6 +1766,7 @@ function bindPointer(canvas) {
       tiltX: e.tiltX, tiltY: e.tiltY, touch: values.mouseTouch };
     if (e.type === 'pointerdown') Object.assign(ev, { mode: state.mode, brush: JSON.parse(JSON.stringify(state.brush)), brushType: state.brushType, values: { ...values }, wash: { ...window.__sim.washOptions } });
     state.recording.push(ev);
+    if (e.type === 'pointerup') { const n = state.recording.filter(q => q.type === 'pointerdown').length; const b = document.querySelector('#fileActions .on'); if (b) b.textContent = `Recording: ${n} stroke${n === 1 ? '' : 's'} (click to stop and save)`; }
   };
   for (const type of ['pointerdown', 'pointermove', 'pointerup']) canvas.addEventListener(type, record);
   canvas.closest('main').addEventListener('pointerdown', e => { if (e.target !== canvas && state.mode === 7) record(e); });   // a wash area started on the margin
@@ -2454,10 +2455,15 @@ function buildUI({ clear, newPaper, acts }) {
   const toggleRecord = () => {
     if (state.recording) {
       const rec = { version: 1, W, H, paper: state.paper, tone: state.tone, events: state.recording };
-      state.recording = null; recBtn().classList.remove('on'); recBtn().textContent = 'Record strokes';
-      if (rec.events.length) download(new Blob([JSON.stringify(rec)], { type: 'application/json' }), `strokes-${stamp()}.json`);
+      state.recording = null; recBtn().classList.remove('on');
+      // Say what happened, on the button for a few seconds (it was unclear
+      // whether anything had been saved, or where).
+      const strokes = rec.events.filter(e => e.type === 'pointerdown').length, name = `strokes-${stamp()}.json`;
+      if (strokes) download(new Blob([JSON.stringify(rec)], { type: 'application/json' }), name);
+      recBtn().textContent = strokes ? `Saved ${name} (${strokes} strokes) to your downloads` : 'Nothing recorded (no strokes on the paper)';
+      setTimeout(() => { if (!state.recording) recBtn().textContent = 'Record strokes'; }, 8000);
     } else {
-      state.recording = []; recBtn().classList.add('on'); recBtn().textContent = 'Stop and save strokes';
+      state.recording = []; recBtn().classList.add('on'); recBtn().textContent = 'Recording: 0 strokes (click to stop and save)';
     }
   };
   const skipSel = document.createElement('select');
