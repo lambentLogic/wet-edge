@@ -1,3 +1,9 @@
 .DS_Store
 dist/
 node_modules/
+# Paintings: the script and finished PNG are kept; editable state and
+# intermediates stay local (agreed with the painters).
+*.wcpaint
+paintings/*-looks/
+paintings/*-progress.png
+paintings/*-final/
