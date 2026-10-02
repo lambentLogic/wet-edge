@@ -59,6 +59,15 @@ function packOldG(old, version) {
 const values = Object.fromEntries(PARAMS.map(p => [p.key, p.v]));
 // Stop a wash in progress now: the brush lifts at once, and the wash ends
 // at its next step (sim.path rejects).
+// Save a file to the browser's downloads; a timestamp for its name. (Top
+// level so every part of the page reaches them: inside the sim's setup,
+// Record strokes couldn't, and failed on save.)
+const download = (blob, name) => {
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+};
+const stamp = () => new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
 const stopWashNow = () => { if (state.washing) { state.cancelWash = true; state.pointer.down = false; } if (state.skipping) state.cancelSkip = true; };
 const state = {
   stopWash: () => stopWashNow(),
@@ -1187,12 +1196,6 @@ async function init() {
     rb.destroy();
     return out;
   }
-  const download = (blob, name) => {
-    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name });
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-  };
-  const stamp = () => new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
 
   // PNG of the painting as it looks now (without the magnet overlay).
   async function savePNG() {
