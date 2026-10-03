@@ -4,7 +4,7 @@ export const MEASURED = {
   "Phthalo Green": {
     masstone: [0.0495,0.0498,0.0516,0.0589,0.0761,0.0816,0.0603,0.0437,0.0384,0.0371,0.0373,0.0393,0.0419,0.0452,0.0473,0.0474],
     tint: [0.2676,0.3766,0.4334,0.5313,0.6612,0.7175,0.6779,0.591,0.4785,0.3611,0.2579,0.2064,0.1917,0.1945,0.2179,0.239],
-    source: "PG7_masstone_Berns2016 + PG7_tint010_RIT-Okumura: Golden acrylic",
+    source: "PG7_masstone_Berns2016 + PG7_tint010_RIT-Okumura: artist acrylic",
   },
   "Phthalo Blue (GS)": {
     film: [0.479,0.5454,0.662,0.7816,0.7914,0.7218,0.5703,0.3636,0.1752,0.0782,0.0494,0.0416,0.0461,0.0608,0.0647,0.0514],
@@ -15,66 +15,66 @@ export const MEASURED = {
   "French Ultramarine": {
     masstone: [0.0704,0.1067,0.1541,0.1386,0.0684,0.0392,0.036,0.0354,0.0349,0.0347,0.0348,0.035,0.0353,0.0358,0.0369,0.0396],
     tint: [0.4308,0.7507,0.8194,0.8025,0.728,0.6167,0.5091,0.428,0.3746,0.3438,0.3302,0.3315,0.3484,0.3823,0.4394,0.5172],
-    source: "PB29_masstone_Berns2016 + PB29_tint020_RIT-Okumura: Golden acrylic",
+    source: "PB29_masstone_Berns2016 + PB29_tint020_RIT-Okumura: artist acrylic",
   },
   "Dioxazine Violet": {
     masstone: [0.0483,0.0465,0.0446,0.0428,0.0414,0.0407,0.0419,0.0444,0.0467,0.0501,0.0497,0.0483,0.0529,0.0635,0.0849,0.1326],
     tint: [0.3393,0.5092,0.5328,0.4913,0.4014,0.2927,0.2138,0.1819,0.177,0.198,0.2412,0.236,0.2657,0.3927,0.5516,0.6794],
-    source: "PV23_masstone_Berns2016 + PV23_tint020_RIT-Okumura: Golden acrylic",
+    source: "PV23_masstone_Berns2016 + PV23_tint020_RIT-Okumura: artist acrylic",
   },
   "Quinacridone Magenta": {
     masstone: [0.0929,0.0834,0.0685,0.0564,0.0493,0.0456,0.0441,0.0447,0.0468,0.0547,0.0866,0.2115,0.4055,0.5407,0.6095,0.6543],
     tint: [0.4074,0.6575,0.6591,0.6013,0.5299,0.4568,0.378,0.3342,0.3466,0.4488,0.6524,0.7987,0.8628,0.8814,0.886,0.8865],
-    source: "PR122_masstone_Berns2016 + PR122_tint010_RIT-Okumura: Golden acrylic",
+    source: "PR122_masstone_Berns2016 + PR122_tint010_RIT-Okumura: artist acrylic",
   },
   "Quinacridone Rose": {
     masstone: [0.1011,0.0862,0.0647,0.0524,0.0475,0.0462,0.0468,0.0478,0.0531,0.0841,0.1973,0.3946,0.529,0.5965,0.6381,0.6744],
     tint: [0.369,0.4904,0.4319,0.3512,0.2818,0.2374,0.2019,0.1948,0.1933,0.326,0.5847,0.7733,0.8342,0.8557,0.8676,0.8774],
-    source: "PV19_masstone_Berns2016 + PV19_tint035_Berns2016: Golden Quinacridone Red (PV19), acrylic",
+    source: "PV19_masstone_Berns2016 + PV19_tint035_Berns2016: PV19 acrylic",
   },
   "Pyrrole Rubine": {
     masstone: [0.1196,0.0811,0.0604,0.0493,0.0442,0.041,0.0393,0.0386,0.0388,0.0415,0.0513,0.1525,0.4358,0.6155,0.6531,0.6667],
     tint: null,
-    source: "PR264_masstone_CHSOS-modern: Kremer pigment in acrylic on card, thin",
+    source: "PR264_masstone_CHSOS-modern: dry pigment in acrylic on card, thin",
   },
   "Pyrrole Scarlet": {
     masstone: [0.1105,0.081,0.0638,0.0545,0.0488,0.0453,0.0423,0.0432,0.0508,0.1141,0.286,0.4964,0.595,0.6094,0.6039,0.5996],
     tint: null,
-    source: "PR255_masstone_CHSOS-modern: Kremer pigment in acrylic on card, thin",
+    source: "PR255_masstone_CHSOS-modern: dry pigment in acrylic on card, thin",
   },
   "Perylene Maroon": {
     masstone: [0.112,0.0789,0.0582,0.0485,0.0441,0.0422,0.0402,0.0393,0.0378,0.0404,0.0498,0.0813,0.1416,0.1915,0.2183,0.2351],
     tint: null,
-    source: "PR179_masstone_CHSOS-modern: Kremer pigment in acrylic on card, thin",
+    source: "PR179_masstone_CHSOS-modern: dry pigment in acrylic on card, thin",
   },
   "Isoindolinone Yellow": {
     masstone: [0.1237,0.0903,0.0704,0.0624,0.0602,0.0633,0.0878,0.2026,0.4424,0.6645,0.7885,0.8527,0.8856,0.8997,0.9042,0.9079],
     tint: null,
-    source: "PY110_masstone_CHSOS-modern: Kremer pigment in acrylic on card, thin",
+    source: "PY110_masstone_CHSOS-modern: dry pigment in acrylic on card, thin",
   },
   "Bismuth Vanadate Yellow": {
     masstone: [0.0554,0.0551,0.058,0.0821,0.2094,0.4783,0.7358,0.8743,0.9238,0.9388,0.9441,0.9467,0.9489,0.9512,0.9529,0.9538],
     tint: [0.1538,0.1645,0.163,0.1949,0.3503,0.6166,0.8222,0.9097,0.9304,0.9351,0.9363,0.9366,0.9381,0.9401,0.9414,0.9421],
-    source: "PY184_masstone_Berns2016 + PY184_tint054_Berns2016: Golden acrylic",
+    source: "PY184_masstone_Berns2016 + PY184_tint054_Berns2016: artist acrylic",
   },
   "Indian Red": {
     masstone: [0.0444,0.0446,0.0445,0.0444,0.0449,0.0457,0.0473,0.0522,0.0721,0.1308,0.2094,0.2572,0.2792,0.2988,0.326,0.3613],
     tint: [0.2447,0.3062,0.3013,0.2935,0.2874,0.2831,0.2808,0.2857,0.3231,0.4195,0.523,0.575,0.5984,0.616,0.6373,0.6639],
-    source: "PR101_masstone_RIT-Okumura + PR101_tint020_RIT-Okumura: Golden Red Oxide (opaque PR101), acrylic",
+    source: "PR101_masstone_RIT-Okumura + PR101_tint020_RIT-Okumura: opaque PR101 acrylic",
   },
   "Raw Umber": {
     masstone: [0.0417,0.0418,0.0419,0.0419,0.0418,0.0421,0.0423,0.0426,0.0428,0.0429,0.0431,0.0428,0.0426,0.0426,0.0427,0.0428],
     tint: [0.2372,0.3037,0.314,0.3178,0.3188,0.3212,0.3263,0.3326,0.3392,0.3434,0.3451,0.3446,0.3426,0.3396,0.3365,0.3344],
-    source: "PBr7_masstone_RIT-Okumura + PBr7_tint020_RIT-Okumura: Golden acrylic",
+    source: "PBr7_masstone_RIT-Okumura + PBr7_tint020_RIT-Okumura: artist acrylic",
   },
   "Titanium Buff": {
     masstone: [0.2363,0.3578,0.4324,0.4879,0.524,0.5521,0.5834,0.6152,0.6451,0.6729,0.6957,0.7123,0.7265,0.7356,0.7403,0.7442],
     tint: [0.3878,0.646,0.7211,0.7532,0.772,0.7862,0.8011,0.8154,0.8279,0.8381,0.846,0.85,0.8537,0.8527,0.8497,0.8471],
-    source: "PW6-1_TitanBuff_masstone_RIT-Okumura + PW6-1_TitanBuff_tint020_RIT-Okumura: Golden Titan Buff, acrylic",
+    source: "PW6-1_TitanBuff_masstone_RIT-Okumura + PW6-1_TitanBuff_tint020_RIT-Okumura: titanium buff acrylic",
   },
   "White Gouache": {
     masstone: [0.4894,0.8615,0.9584,0.9621,0.9601,0.9585,0.9572,0.9563,0.9542,0.9524,0.9502,0.9491,0.9496,0.9507,0.9503,0.9498],
     tint: null,
-    source: "PW6_masstone_Berns2016: Golden Titanium White, acrylic",
+    source: "PW6_masstone_Berns2016: titanium white acrylic",
   },
 };
