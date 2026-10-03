@@ -55,4 +55,4 @@ node tools/measure.mjs edge --set granulation=0  # one probe, with a knob overri
 
 ## Licence
 
-MIT; see [LICENSE](LICENSE).
+The code is MIT; see [LICENSE](LICENSE). The paintings in `paintings/` (the images) are dedicated to the public domain under CC0; see [paintings/LICENSE.md](paintings/LICENSE.md).
