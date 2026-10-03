@@ -103,9 +103,9 @@ const state = {
 
 async function init() {
   const canvas = document.getElementById('canvas');
-  if (!navigator.gpu) return fail('WebGPU is not available in this browser.');
+  if (!navigator.gpu) return fail('This needs WebGPU, which this browser doesn\'t have. Try a recent desktop Chrome or Edge, or Safari 26 or later.');
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
-  if (!adapter) return fail('No WebGPU adapter found.');
+  if (!adapter) return fail('WebGPU is here but found no graphics adapter (it may be turned off, or the GPU unsupported). Try a recent desktop Chrome or Edge.');
   // 10 storage buffers per stage are needed; WebGPU's default limit is 8.
   const device = await adapter.requestDevice({
     requiredLimits: { maxStorageBuffersPerShaderStage: Math.min(adapter.limits.maxStorageBuffersPerShaderStage, 10) },
@@ -423,7 +423,7 @@ async function init() {
       if (state.mode === 10) frameF32[13] = values.spatterReach;   // where the drops land
       // The pencil's point and the eraser: their own sizes (pressure widens
       // a pencil line only a little).
-      if (state.mode === 8) frameF32[13] = values.pencilRadius * (0.7 + 0.3 * pr);
+      if (state.mode === 8) frameF32[13] = values.pencilRadius * (0.45 + 0.55 * pr);
       if (state.mode === 9) frameF32[13] = values.eraserRadius;
       // Wet-in-wet charge: strongest at touchdown, then the reservoir is spent.
       const dur = Math.max(values.chargeDuration, 1e-3);
@@ -652,11 +652,10 @@ async function init() {
 
   function frame() {
     if (state.replaying) {
-      // Replaying history: the sim is driven by the replay; just draw.
-      const enc = device.createCommandEncoder();
-      const rp = enc.beginRenderPass({ colorAttachments: [{ view: ctx.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: [1, 1, 1, 1] }] });
-      rp.setPipeline(renderPipe); rp.setBindGroup(0, renderBG[parity]); rp.draw(3); rp.end();
-      device.queue.submit([enc.finish()]);
+      // Replaying history: the sim is driven by the replay. The picture
+      // holds still until it's done (drawing as it went looked like the
+      // painting repainting itself from an earlier state); the note says
+      // how far it has got.
       lastFrame = performance.now();
       requestAnimationFrame(frame);
       return;
@@ -703,7 +702,7 @@ async function init() {
 
     frames++;
     const now = performance.now();
-    if (now - last > 500) { fpsEl.textContent = `${Math.round(frames * 1000 / (now - last))} fps`; frames = 0; last = now; }
+    if (now - last > 500) { fpsEl.textContent = `${Math.round(frames * 1000 / (now - last))} fps`; fpsEl.classList.remove('busy'); frames = 0; last = now; }
     requestAnimationFrame(frame);
   }
 
@@ -919,7 +918,9 @@ async function init() {
   // snapshots stay spread out, and the gaps are replayed. Replay is exact
   // (see sim.history.check). values.undoDepth snapshots at most.
   const freeSnap = snap => { if (snap) undoPool.push(snap); };
-  const fpsNote = t => { document.getElementById('fps').textContent = t; };
+  // A note in place of the frame rate (undo, saving); highlighted while it
+  // says something other than the frame rate.
+  const fpsNote = t => { const el = document.getElementById('fps'); el.textContent = t; el.classList.toggle('busy', !!t && !/fps$/.test(t)); };
   async function replayLog(from, to, log = hist.log) {
     state.replaying = true; hist.recording = false;
     const total = log.slice(from, to).reduce((t, e) => t + (e.n ?? 0), 0);
@@ -935,7 +936,7 @@ async function init() {
           state.simTime = e.tAfter;
           if (e.params) hist.lastParams = e.params;
           done += e.n;
-          if (++k % 30 === 0) { await device.queue.onSubmittedWorkDone(); if (total > 3000) fpsNote(`replaying ${Math.round(100 * done / total)}%`); }
+          if (++k % 30 === 0) { await device.queue.onSubmittedWorkDone(); fpsNote(`${state.replayWhat ?? 'replaying'} ${Math.round(100 * done / Math.max(total, 1))}%`); }
         } else if (e.op === 'clear') { clearNow(); state.simTime = 0; }
         else if (e.op === 'paper') paperNow(e.key, e.seed);
         else if (e.op === 'rinse') rinseNow();
@@ -1012,8 +1013,9 @@ async function init() {
     if (!target) return false;
     if (hist.cursor === null) { freeSnap(hist.endSnap); hist.endSnap = takeSnap(); hist.endMagnets = copyMagnets(); }
     const note = document.getElementById('fps').textContent;
-    fpsNote('undoing…');
+    fpsNote('Undoing…'); state.replayWhat = 'Undoing…';
     await restoreTo(target.at);
+    state.replayWhat = null;
     hist.cursor = target.at; hist.tail = [];
     fpsNote(note);
     uploadPigments(); window.__sim.rinse();   // today's paint box; a clean brush
@@ -1026,8 +1028,9 @@ async function init() {
     const next = hist.marks.find(m => m.at > hist.cursor && !m.barrier);
     const pos = next ? next.at : hist.log.length;
     const note = document.getElementById('fps').textContent;
-    fpsNote('redoing…');
+    fpsNote('Redoing…'); state.replayWhat = 'Redoing…';
     await restoreTo(pos);
+    state.replayWhat = null;
     hist.tail = [];
     hist.cursor = pos === hist.log.length ? null : pos;
     if (hist.cursor === null) { freeSnap(hist.endSnap); hist.endSnap = null; }
@@ -2054,7 +2057,9 @@ function buildUI({ clear, newPaper, acts }) {
   studioEl.appendChild(levelRow);
   const showStudio = () => {
     for (const { k, row } of studioRows) {
-      row.hidden = (k.tool && TOOLS.find(t => t.name === k.tool).mode !== state.mode) || (k.flat && values.brushShape < 0.5);
+      const mode = name => TOOLS.find(t => t.name === name).mode;
+      // Only what applies to the tool in hand (Wetness meant nothing to the pencil).
+      row.hidden = (k.tool && mode(k.tool) !== state.mode) || (k.tools && !k.tools.some(n => mode(n) === state.mode)) || (k.flat && values.brushShape < 0.5);
     }
   };
   const lab = document.getElementById('knobs');

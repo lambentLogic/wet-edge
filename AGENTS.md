@@ -52,7 +52,7 @@ window.__paintDone = (async () => {
 |---|---|---|
 | `dry` (held: on/off) | D | A hair dryer over the whole sheet while held: water evaporates much faster (see the dryer knob). |
 | `skip` |  | Let the paper dry, fast-forwarded, until it reaches the stage chosen beside the button (satin, moist, damp or dry): the same drying, only faster than real time (about real time while there is standing water; several times faster after), with the dryer if Blow-dry is on. You see it dry; the button counts the seconds skipped. Press it again, Esc, or touch the paper to stop. sim.act('skip', stage, { points }) waits only for those points. |
-| `fix` |  | Spray workable fixative (like SpectraFix) over the sheet: commits the dry paint so it barely rewets or lifts, deepens it a little, fills some tooth and seals the paper. |
+| `fix` |  | Spray workable fixative (a casein fixative) over the sheet: commits the dry paint so it barely rewets or lifts, deepens it a little, fills some tooth and seals the paper. |
 | `unmask` |  | Peel off all masking fluid. Some dried paint under it comes away too, more for non-staining pigments. |
 | `stop` | Esc | Stop a wash in progress (what it painted stays; Cmd+Z takes it back). |
 | `pause` | Space | Stop time: nothing flows or dries until unpaused. |

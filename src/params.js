@@ -66,7 +66,7 @@ export const PARAMS = [
   { key: 'agitation',   v: 0.5,   min: 0, max: 1,   group: 'Pigment', target: 'sim', label: 'a working brush loosens dried paint (x firmness)' },
   { key: 'scrubRewet',  v: 8,     min: 0, max: 40,  group: 'Pigment', target: 'sim', label: 'scrubbing softens dried paint (x soaking)' },
   { key: 'bindTime',    v: 60,     min: 0, max: 30,  group: 'Pigment', target: 'sim', label: 'gum sets (s, gradually)' },
-  // Workable fixative (like SpectraFix: casein in alcohol). Sprayed over
+  // Workable fixative (casein in alcohol). Sprayed over
   // dry paint, it commits it (it won't rewet or lift much), partly reverses
   // the lightening paint shows as it dries, fills some of the paper's tooth
   // and seals it so later washes soak in more slowly.

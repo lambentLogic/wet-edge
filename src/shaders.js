@@ -655,7 +655,10 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     // and, on the side of the brush, a drying belly.
     let touch = fr.touch;
     let dryPaper = a.x <= p.wEps && a.w < p.dampThreshold;
-    if (fr.mode != 4u && fr.mode != 6u && thirstyW() == 0.0 && dryPaper && touch > 0.0) {
+    // (Brushes only: the pencil and eraser have their own touch (lighter,
+    // thinner), and masking fluid doesn't skip; a light pencil skipped like
+    // dry paint.)
+    if ((fr.mode == 0u || cleanBrush()) && thirstyW() == 0.0 && dryPaper && touch > 0.0) {
       let cut = p.skipAmount * touch;
       fall *= smoothstep(cut - 0.15, cut + 0.15, aux[i].x);
     }
@@ -898,7 +901,9 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
       // hard-edged point, each spot it crosses darkened once per pass.
       let fallP = clamp(cover / max(r * 0.35, 0.3), 0.0, 1.0);
       let pr = clamp(fr.pressure, 0.0, 1.0);
-      let tooth = clamp(smoothstep(0.35, 0.75, aux[i].x) + 0.7 * pr * pr, 0.0, 1.0);
+      // The tooth textures a light line but doesn't break it up (the
+      // painter: a light pencil should be lighter and thinner, not skip).
+      let tooth = clamp(0.6 + 0.4 * smoothstep(0.35, 0.75, aux[i].x) + 0.3 * pr, 0.0, 1.0);
       // (Each substep draws only its slice of the stroke, so a spot gets
       // about one substep's worth a pass.)
       pencilAdd = p.pencilDark * 0.02 * fallP * tooth * (0.3 + 0.7 * pr);
