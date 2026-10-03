@@ -282,6 +282,9 @@ async function init() {
   // pigment changes it everywhere, paint already on the sheet included
   // (except the colour of paint that has stained into the fibres, which is
   // fixed when it stains).
+  // (Browser storage keeps the project's first name, hyperreal-watercolor:
+  // renaming the keys would lose painters' saved recipes, wells, sizes and
+  // autosave, and old bug reports would no longer open.)
   const BOX_KEY = 'hyperreal-watercolor.pigments';
   const RECIPE_KEYS = ['name', 'code', 'kind', 'masstone', 'mid', 'tint', 'opacity', 'scatter', 'spectrum', 'density', 'staining', 'granulation', 'flocculation', 'mobility', 'wick', 'load', 'magnetic', 'custom', 'hidden'];
   const recipeOf = pg => Object.fromEntries(RECIPE_KEYS.filter(k => pg[k] !== undefined).map(k => [k, pg[k]]));

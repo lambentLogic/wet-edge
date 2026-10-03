@@ -1,4 +1,4 @@
-# Hyperreal Watercolor
+# Wet Edge
 
 A physically based watercolour simulator that runs in the browser on the GPU, after Curtis et al., "Computer-Generated Watercolor" (SIGGRAPH 1997). Water flows over a textured sheet; it soaks into the fibres and dries through the paper's working stages: soaked, shiny, satin, moist, damp, dry. Pigment rides the water, settles into the grain, granulates or flocculates, stains or lifts, and is rendered spectrally (Kubelka–Munk over 16 bands), so mixtures and glazes behave like paint rather than like screen colours. Every law of the medium is a knob, including values no real paint would allow.
 
