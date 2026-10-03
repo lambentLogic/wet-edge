@@ -7,3 +7,7 @@ node_modules/
 paintings/*-looks/
 paintings/*-progress.png
 paintings/*-final/
+
+# Private notes (journal, spec, source spectra): their own private repo,
+# lambentLogic/hyperreal-watercolor-notes, cloned here.
+notes/

@@ -220,7 +220,7 @@ export const RECIPES = [
     ...mineral, scatter: 0.3, density: 2, staining: 10, granulation: 0, flocculation: 0, mobility: 0, wick: 0, hidden: true },
 ];
 
-// Measured spectra (src/spectra-data.js; data/spectra/sources.md) are
+// Measured spectra (src/spectra-data.js; notes/spectra/sources.md) are
 // acrylic paints and one printing ink. They include the surface's own gloss
 // (specular included, about 3-4% of light bounced straight back), which puts
 // a floor under every dark band and flattens the absorption contrast;
