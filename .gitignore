@@ -11,3 +11,6 @@ paintings/*-final/
 # Private notes (journal, spec, source spectra): their own private repo,
 # lambentLogic/wet-edge-notes, cloned here.
 notes/
+
+# Claude Code conversation exports (/export)
+/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-[0-9]*-*.txt
