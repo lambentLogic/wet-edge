@@ -94,7 +94,9 @@ function blur3(h, W, H) {
 export const CELL_MM = 0.2;
 
 // gen:    how the surface is built (sizes in mm). `contrast` squeezes the normalized height
-//         toward 0.5, so smooth papers stay smooth after normalization.
+//         toward 0.5, so smooth papers stay smooth after normalization. Only the paper's own
+//         relief, a few mm and finer: no cm-scale swell (cockling isn't a property of the
+//         surface, and a broad swell made dry brush and granulation vary across the sheet).
 // knobs:  physics overrides applied when the preset is chosen.
 // color:  paper white (linear-ish RGB).
 export const PAPERS = {
@@ -102,10 +104,10 @@ export const PAPERS = {
     name: 'Cold-press cotton',
     color: [0.975, 0.97, 0.955],
     gen: {
-      noise: [[24, 0.25], [6, 0.15], [1, 0.1], [0.4, 0.08]],
+      noise: [[6, 0.15], [1, 0.1], [0.4, 0.08]],
       tooth: [[0.8, 0.45], [0.4, 0.2]],
       fibers: { density: 1 / 1500, minLen: 2, maxLen: 6, strength: 0.05, wander: 0.4 },
-      contrast: 1, blurPasses: 1,
+      contrast: 0.95, blurPasses: 1, offset: -0.03,
     },
     knobs: {
       sizing: 0.8,
@@ -117,10 +119,10 @@ export const PAPERS = {
     name: 'Hot-press cotton',
     color: [0.975, 0.965, 0.935],
     gen: {
-      noise: [[32, 0.3], [8, 0.2], [0.6, 0.1]],
+      noise: [[8, 0.2], [0.6, 0.1]],
       tooth: [[0.5, 0.2]],
       fibers: { density: 1 / 2500, minLen: 2, maxLen: 6, strength: 0.03, wander: 0.4 },
-      contrast: 0.3, blurPasses: 2,
+      contrast: 0.24, blurPasses: 2,
     },
     knobs: {
       sizing: 0.9,
@@ -132,10 +134,10 @@ export const PAPERS = {
     name: 'Rough cotton',
     color: [0.965, 0.95, 0.91],
     gen: {
-      noise: [[18, 0.35], [5, 0.2], [0.4, 0.08]],
+      noise: [[5, 0.2], [0.4, 0.08]],
       tooth: [[2.5, 0.7], [1.2, 0.3], [0.5, 0.1]],
       fibers: { density: 1 / 1500, minLen: 2, maxLen: 6, strength: 0.05, wander: 0.4 },
-      contrast: 1, blurPasses: 1,
+      contrast: 1, blurPasses: 1, offset: 0.026,
     },
     knobs: {
       sizing: 0.75,
@@ -151,10 +153,10 @@ export const PAPERS = {
     name: 'Mixed-media vellum',
     color: [0.975, 0.972, 0.96],
     gen: {
-      noise: [[20, 0.2], [5, 0.12], [0.6, 0.12]],
+      noise: [[5, 0.12], [0.6, 0.12]],
       tooth: [[0.25, 0.3], [0.2, 0.15]],
       fibers: { density: 1 / 3000, minLen: 1, maxLen: 3, strength: 0.02, wander: 0.5 },
-      contrast: 0.45, blurPasses: 1,
+      contrast: 0.44, blurPasses: 1,
     },
     knobs: {
       sizing: 0.65,
@@ -166,10 +168,10 @@ export const PAPERS = {
     name: 'Washi (kozo)',
     color: [0.955, 0.935, 0.88],
     gen: {
-      noise: [[19, 0.35], [5, 0.25], [1.2, 0.2], [0.4, 0.15]],
+      noise: [[5, 0.25], [1.2, 0.2], [0.4, 0.15]],
       tooth: [],
       fibers: { density: 1 / 180, minLen: 6, maxLen: 28, strength: 0.12, wander: 0.2 },
-      contrast: 1, blurPasses: 1,
+      contrast: 0.91, blurPasses: 1, offset: 0.066,
     },
     knobs: {
       sizing: 0.15,
@@ -181,10 +183,10 @@ export const PAPERS = {
     name: 'Yupo (synthetic)',
     color: [0.985, 0.985, 0.98],
     gen: {
-      noise: [[40, 0.5], [10, 0.3], [0.8, 0.2]],
+      noise: [[10, 0.3], [0.8, 0.2]],
       tooth: [],
       fibers: null,
-      contrast: 0.08, blurPasses: 2,
+      contrast: 0.052, blurPasses: 2,
     },
     knobs: {
       sizing: 0,
@@ -224,5 +226,9 @@ export function makePaper(W, H, preset = PAPERS[DEFAULT_PAPER], seed = (Math.ran
   let lo = Infinity, hi = -Infinity;
   for (const v of h) { if (v < lo) lo = v; if (v > hi) hi = v; }
   for (let i = 0; i < h.length; i++) h[i] = 0.5 + ((h[i] - lo) / (hi - lo) - 0.5) * g.contrast;
+  // `offset` keeps a sheet's mean height where it was before the broad swell
+  // was dropped, so the dry brush and granulation (which compare absolute
+  // heights) kept their calibration.
+  if (g.offset) for (let i = 0; i < h.length; i++) h[i] = Math.min(1, Math.max(0, h[i] + g.offset));
   return h;
 }
