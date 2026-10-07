@@ -21,12 +21,12 @@ const leaf=(base,ang,L,W)=>{
 // the stem: a quadratic curve from the cutting up to the tip
 const stemAt=t=>{const B=[430,640],Q=[480,470],T=[560,250];
   return [0,1].map(k=>(1-t)*(1-t)*B[k]+2*(1-t)*t*Q[k]+t*t*T[k]);};
-const stem=pts(t=>{const [x,y]=stemAt(t);return [x,y,0.45+0.25*Math.sin(Math.PI*t)];},40);
+const stem=pts(t=>{const [x,y]=stemAt(t);return [x,y,0.2+0.45*Math.sin(Math.PI*t)];},40);
 
 const leaves=[
   {base:stemAt(0.42),ang:-0.35,L:220,W:62,into:[['Perylene Green',1],['Raw Umber',0.4]]},
   {base:stemAt(0.68),ang:-2.5,L:200,W:56,into:[['Perylene Green',1],['French Ultramarine',0.4]]},
-  {base:stemAt(0.95),ang:-1.25,L:165,W:46,into:[['Perylene Green',1],['Raw Umber',0.3]]},
+  {base:stemAt(0.95),ang:-1.25,L:165,W:46,shade:0.24,into:[['Perylene Green',1],['Raw Umber',0.3]]},
 ].map(d=>({...d,...leaf(d.base,d.ang,d.L,d.W)}));
 
 window.__paintDone=(async()=>{
@@ -59,7 +59,7 @@ window.__paintDone=(async()=>{
   await dry([stemAt(0.5)]);
   for(const L of leaves){
     await S.skipTo('satin',{points:[L.at(0.5,0.3,1)]});
-    load([['Perylene Green',2],['French Ultramarine',1]],0.16,12,0.25,'mop');
+    load([['Perylene Green',2],['French Ultramarine',1]],L.shade||0.16,12,0.25,'mop');
     await S.path(pts(t=>{const [x,y]=L.at(0.12+0.76*t,0.55,1);return [x,y,0.1+0.6*Math.sin(Math.PI*t)];},18),2);
   }
   await dry(leaves.map(L=>L.at(0.5,0)));
