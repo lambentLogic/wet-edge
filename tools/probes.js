@@ -149,8 +149,11 @@
       h.setMode(2); S.values.dipLoad = 0;   // lifting with a thirsty brush
       h.lift(); await h.paint(300, 200, 700, 560, 20); h.setMode(0);
       await h.wait(10); await h.wait(10, { dry: true }); await h.wait(1);
+      // Read while still headless: after end() the real-time loop steps the
+      // sheet on (by the display's clock), and the hashes differed by run.
+      const hashes = await S.stateHashes();
       h.end();
-      return await S.stateHashes();
+      return hashes;
     },
 
     // Water brush: one dab of pigment, five strokes without reloading, a

@@ -1575,6 +1575,11 @@ async function init() {
       D: await hex(await readBuffer(Dbuf, N * DB)), aux: await hex(await readBuffer(auxBuf, N * 16)),
     };
   };
+  // The raw state buffers, for tracking down a difference between two runs.
+  window.__sim.readRaw = async name => {
+    const [buf, size] = { A: [A[parity], N * 16], G: [G[parity], N * GB], D: [Dbuf, N * DB], aux: [auxBuf, N * 16] }[name];
+    return readBuffer(buf, size);
+  };
   window.__sim.paintingBlob = paintingBlob;
   window.__sim.savePNG = savePNG;
   window.__sim.layerBlobs = layerBlobs;
