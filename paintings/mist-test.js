@@ -14,5 +14,5 @@ window.__paintDone = (async () => {
   h.setMode(0); h.setBrush('Quinacridone Rose'); V.brushPigment = 0.6; h.setBrushPreset('round');
   for (let y = 150; y <= 280; y += 45) await S.path(line(720, y, 960, y, 8), 2);
   window.__snapWet = true;
-  await new Promise(r => setTimeout(r, 400));
+  await S.wait(0.4);
 })();

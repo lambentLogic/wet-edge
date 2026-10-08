@@ -87,7 +87,7 @@ window.__paintDone = (async () => {
   log(`dry after ${(await M.waitDry([[850, 520], [880, 570]])).toFixed(1)}s`);
 
   log('peel the mask');
-  S.unmask(); await new Promise(r => setTimeout(r, 400));
+  S.unmask(); await S.wait(0.4);
 
   log("the tower's shadow side, softened toward the light");
   h.setBrushPreset('round'); S.tool('paint'); V.brushRadius = 9; V.brushPigment = 0.25;

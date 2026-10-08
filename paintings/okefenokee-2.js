@@ -146,7 +146,7 @@ window.__paintDone = (async () => {
   await S.look('4-bank');
 
   log('peel the mask; yellow flowers in the holes; finer ones spattered');
-  S.unmask(); await new Promise(r => setTimeout(r, 400));
+  S.unmask(); await S.wait(0.4);
   S.tool('paint'); h.setBrushPreset('round'); V.brushRadius = 2.6; V.brushPigment = 0.6; V.dipLoad = 0.4; h.setBrush('Bismuth Vanadate Yellow');
   for (const [x, y] of flowers) await dab(x, y);
   S.tool('spatter'); V.brushPigment = 0.9; V.spatterReach = 70; V.spatterDensity = 0.08; V.spatterSize = 0.15;

@@ -10,6 +10,7 @@ Wet Edge is a physically based watercolour simulator (WebGPU, plain JS). A paint
 - `node tools/paint.mjs paintings/x.js [--shot out.png] [--save out.wcpaint] [--open in.wcpaint] [--looks dir] [--replay strokes.json]` runs a painting script in a private headless Chrome. See `paintings/` for examples.
 - `node tools/measure.mjs [probe ...] [--set knob=value] [--shot out.png]` runs the calibration probes (`tools/probes.js`). The `api` probe checks that everything in this guide exists.
 - `node tools/ui-shot.mjs out.png ['js']` screenshots the whole page, panel included.
+- **Scripts run in lockstep** (paint.mjs, unless `--live`, and measure.mjs): the sheet only moves on while the script paints (`sim.path`, the Wash tool, the minds) or waits (`await sim.wait(seconds)`, `skipTo`, `M.waitDry`), so the same script comes out the same every run. Time passes nowhere else: a `setTimeout` or a slow `await` dries nothing, and there is no pause between strokes unless you `sim.wait` for one (a painter's few seconds between rows of a wash are `await sim.wait(2)`). Time things with `sim.time()`, not the wall clock. A frame is 1/60 s, so `framesPerSeg` sets a stroke's speed in simulated time. Scripts written before lockstep (before 2026-10-08) ran in real time, and their gaps between strokes lasted however long the machine took; rerun under lockstep they come out somewhat differently (`--live` runs them the old way, not repeatably).
 - Paint in your own headless page (paint.mjs, measure.mjs), not the painter's tab. Never reload their tab without asking: the paint state lives on the GPU. Don't trigger downloads (the save actions) on their machine.
 
 ## A painting script
@@ -81,7 +82,10 @@ Other keys: [ ] previous / next pigment · Shift-drag side of the brush · Z / X
 
 ## Painting
 
-- `sim.path(points, framesPerSeg = 4)`: One stroke through [x, y, pressure?, side?] points in grid cells (1024×768, 0.2 mm each), in real time. Pressure sets width (down to the brush's taper); side > 0 lays the brush on its side. A path whose first two points are equal is a dab.
+- `sim.path(points, framesPerSeg = 4)`: One stroke through [x, y, pressure?, side?] points in grid cells (1024×768, 0.2 mm each); the brush takes framesPerSeg frames (1/60 s each in lockstep) from each point to the next. Pressure sets width (down to the brush's taper); side > 0 lays the brush on its side. A path whose first two points are equal is a dab.
+- `await sim.wait(seconds)`: Let the sheet go on for that much simulated time (drying, settling; with the dryer if it's on). In lockstep it steps at once; otherwise a real pause. Use it for every pause: in lockstep a setTimeout passes no time on the paper at all.
+- `sim.time()`: Simulated seconds since the page opened: time things by this, not the wall clock.
+- `sim.lockstep(on)`: Lockstep on: the sheet steps only while a script paints (sim.path, the Wash tool, the minds) or waits (sim.wait, skipTo), each frame 1/60 s, so a script comes out the same every run. tools/paint.mjs (unless --live) and the probes turn it on; by hand the page runs in real time.
 - `sim.headless.setBrushPreset(key)`: Pick a brush (round, mop, water, rigger, flat), exactly as the brush menu does: the preset's build, and the size that brush was last given in this browser.
 - `sim.headless.setBrush(nameOrMix)`: Load pigment as the paint box does: a name is a click on its pan (a dip brush takes it; the water brush picks up a dab that joins what it holds), a mix [[name, parts], ...] loads like a mixing well. sim.headless.pigmentNames() lists the box.
 - `sim.wells.get() / add(well, name) / load(well) / empty(well)`: The six mixing wells (kept in the browser): read them, add a dab of a pigment to one (at most 4 pigments a well), load the brush from one, or empty it. Wells are numbered 0-5.

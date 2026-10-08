@@ -96,7 +96,7 @@ window.__paintDone = (async () => {
   await S.look('2-ground');
 
   log('peel the mask');
-  S.unmask(); await new Promise(r => setTimeout(r, 400));
+  S.unmask(); await S.wait(0.4);
 
   log('the jug: a highlight reserved with masking fluid, then ultramarine, pale on the lit left into violet-blue on the right');
   S.tool('mask'); h.setBrushPreset('round'); V.brushRadius = 5;
@@ -156,7 +156,7 @@ window.__paintDone = (async () => {
   await S.path(pts(s => [JX - 60 + s * 130, 516 + 3 * Math.sin(s * Math.PI), 0.8], 8), 2);   // under the jug
   log(`all dry after ${(await M.waitDry([[JX, 380], [632, 478], [774, 494]])).toFixed(1)}s`);
   log('peel the highlight');
-  S.unmask(); await new Promise(r => setTimeout(r, 400));
+  S.unmask(); await S.wait(0.4);
   await S.look('4-finish');
   log('done');
 })();

@@ -8,5 +8,5 @@ window.__paintDone = (async () => {
   await S.path(line(100, 300, 900, 300, 12), 2);
   h.setMode(1); V.brushRadius = 12;
   for (const [x, n] of [[250, 8], [450, 16], [650, 32]]) await S.path(line(x, 240, x, 560, n), 2);   // fast, medium, slow
-  S.setDrying(true); await new Promise(r => setTimeout(r, 9000)); S.setDrying(false);
+  S.setDrying(true); await S.wait(9); S.setDrying(false);
 })();

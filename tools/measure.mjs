@@ -50,6 +50,8 @@ try {
   if (process.env.PRE_JS) await page.evaluateOnNewDocument(process.env.PRE_JS);   // page JS before the app loads
   await page.goto(APP_URL);
   await page.waitForFunction(() => window.__sim?.headless, { timeout: 20_000 });
+  // Lockstep: the sheet steps only while a probe paints or waits, the same every run.
+  await page.evaluate(() => window.__sim.lockstep(true));
   await page.evaluate(await readFile(new URL('./probes.js', import.meta.url), 'utf8'));
   for (const js of evals) await page.evaluate(js);
 

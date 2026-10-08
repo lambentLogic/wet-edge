@@ -38,7 +38,7 @@ window.__paintDone = (async () => {
     await S.path(pts(s => [x0 + s * len, y + 4 * Math.sin(s * 3 + y), 0.2 + 0.6 * Math.sin(s * Math.PI)], 10), 2);
   }
   log(`sky dry after ${(await M.waitDry([[300, 100], [800, 300], [500, 520], [500, 720]], { maxS: 300 })).toFixed(0)}s`);
-  S.unmask(); await new Promise(r => setTimeout(r, 400));
+  S.unmask(); await S.wait(0.4);
   await S.look('sky');
 
   log('the far ridge: a pale violet lasso wash over the dry glow');

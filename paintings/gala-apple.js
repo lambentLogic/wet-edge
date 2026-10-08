@@ -138,7 +138,7 @@ window.__paintDone = (async () => {
   log(`all dry after ${(await M.waitDry([P([900, 400])])).toFixed(1)}s`);
 
   log('peel the glints, then soften their edges with a damp brush');
-  S.unmask(); await new Promise(r => setTimeout(r, 400));
+  S.unmask(); await S.wait(0.4);
   S.tool('water'); h.setBrushPreset('round'); V.brushRadius = 4; V.dipLoad = 0.4;
   for (const g of GLINTS) await S.path(oval({ ...g, rx: g.rx + 2, ry: g.ry + 2 }, 20).map(([x, y]) => [x, y, 0.5]), 2);
   V.dipLoad = 1;

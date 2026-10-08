@@ -8,5 +8,5 @@ window.__paintDone = (async () => {
     for (const p of [1, 0.35, 0.15]) { await S.path(line(60, y, 960, y + 10, 16, p), 2); y += 40; }
     y += 40;
   }
-  S.setDrying(true); await new Promise(r => setTimeout(r, 6000)); S.setDrying(false);
+  S.setDrying(true); await S.wait(6); S.setDrying(false);
 })();

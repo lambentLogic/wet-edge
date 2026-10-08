@@ -80,6 +80,7 @@ const state = {
   drying: false,
   paused: false,
   headless: false,
+  lockstep: false,  // scripts: the sheet steps only while a script paints or waits (see sim.lockstep)
   simTime: 0,       // simulated seconds (deposit timestamps)
   lastEdit: -Infinity, // when the painting was last touched (for autosave)
   ground: null,     // render over this colour instead of the paper (layer export)
@@ -680,11 +681,11 @@ async function init() {
     // (Not while a script drives the sim headless: writing the frame here
     // changed its brush state between its steps, at the display's timing,
     // and made headless runs differ.)
-    if (!state.headless) writeUniforms(Math.max(substeps, 1));
+    if (!state.headless && !state.lockstep) writeUniforms(Math.max(substeps, 1));
     const enc = device.createCommandEncoder();
     let rbk = -1;
     if (state.pointer.down || state.drying) state.lastEdit = t;
-    if (!state.paused && !state.headless && substeps > 0) {
+    if (!state.paused && !state.headless && !state.lockstep && substeps > 0) {
       rbk = encodeSim(enc, substeps);
       // Only consume the brush segment once the sim has actually stamped it.
       if (state.pointer.down) { state.pointer.px = state.pointer.nx; state.pointer.py = state.pointer.ny; }
@@ -741,8 +742,8 @@ async function init() {
   const HZ = 120;
   let pending = 0;
   let strokeFrame = 0;
-  async function simFrames(nFrames, brushAt = () => null, drying = false) {
-    const per = Math.max(1, Math.round(values.simSpeed / HZ));
+  async function simFrames(nFrames, brushAt = () => null, drying = false, hz = HZ) {
+    const per = Math.max(1, Math.round(values.simSpeed / hz));
     for (let f = 0; f < nFrames; f++) {
       writeUniforms(per, brushAt(f), drying);
       const enc = device.createCommandEncoder();
@@ -838,7 +839,49 @@ async function init() {
   // Real-time painting helpers (for scripted painting you can watch): a
   // continuous stroke through points [x, y, pressure?, side?], and the
   // blow-dryer.
-  window.__sim.path = (points, framesPerSeg = 4) => new Promise((done, stop) => {
+  // Lockstep (scripts run by tools/paint.mjs and the probes): the sheet steps
+  // only while a script paints or waits, LOCK_HZ frames to the simulated
+  // second, each frame waiting for the brush's readback, so a script comes
+  // out the same every run. In real time a frame stepped however long the
+  // display took, and the brush's readback landed whenever the GPU finished:
+  // the same script differed from run to run, and more on a busy machine.
+  const LOCK_HZ = 60;
+  window.__sim.lockstep = (on = true) => { state.lockstep = !!on; return state.lockstep; };
+  // Simulated seconds since the page opened (the clock scripts should time by).
+  window.__sim.time = () => state.simTime;
+  // Let the sheet go on for `seconds` of simulated time (drying, settling,
+  // with the dryer if it's on). Lockstep: stepped at once; otherwise a real
+  // pause while the page runs.
+  window.__sim.wait = async (seconds, { dry = state.drying } = {}) => {
+    if (!state.lockstep) return new Promise(r => setTimeout(r, seconds * 1000));
+    await simFrames(Math.round(seconds * LOCK_HZ), () => null, dry, LOCK_HZ);
+  };
+  // A stroke in lockstep: the frames the real-time path would draw (the
+  // brush moves framesPerSeg frames from each point to the next), stepped
+  // directly.
+  async function lockstepPath(points, framesPerSeg) {
+    if (state.washing && state.cancelWash) throw new Error('cancelled');
+    const ptr = state.pointer;
+    const [x0, y0, p0 = 1, s0 = 0] = points[0];
+    ptr.x = ptr.px = ptr.nx = x0; ptr.y = ptr.py = ptr.ny = y0; ptr.pressure = p0; ptr.side = s0;
+    ptr.downAt = performance.now(); ptr.down = true; ptr.pen = true; ptr.scripted = true;
+    ptr.dabIntended = points.length < 2 || (points[1][0] === x0 && points[1][1] === y0);
+    state.strokeStart = state.simTime;
+    if (state.brushType === 'dip') state.reservoir = values.dipLoad;
+    const frames = [];
+    let px = x0, py = y0;
+    for (let seg = 1; seg < points.length; seg++) {
+      const [ax, ay, ap = 1, as = 0] = points[seg - 1], [bx, by, bp = 1, bs = 0] = points[seg];
+      for (let f = 1; f <= framesPerSeg; f++) {
+        const t = f / framesPerSeg, x = ax + (bx - ax) * t, y = ay + (by - ay) * t;
+        frames.push({ x0: px, y0: py, x1: x, y1: y, pressure: ap + (bp - ap) * t, side: as + (bs - as) * t, age: frames.length / LOCK_HZ, hand: false });
+        px = x; py = y;
+      }
+    }
+    try { await simFrames(frames.length, f => frames[f], state.drying, LOCK_HZ); }
+    finally { ptr.x = ptr.px = ptr.nx = px; ptr.y = ptr.py = ptr.ny = py; ptr.down = false; }
+  }
+  window.__sim.path = (points, framesPerSeg = 4) => state.lockstep ? lockstepPath(points, framesPerSeg) : new Promise((done, stop) => {
     const ptr = state.pointer;
     const [x0, y0, p0 = 1, s0 = 0] = points[0];
     ptr.x = ptr.px = x0; ptr.y = ptr.py = y0; ptr.pressure = p0; ptr.downAt = performance.now(); ptr.down = true;
@@ -1187,9 +1230,11 @@ async function init() {
 
   // The sheet as the page opened: the first snapshot history replays from.
   hist.log = []; mark(true);
-  window.__sim.fix = () => { window.__sim.checkpoint(); state.fixPending = true; state.lastEdit = performance.now(); };
+  // (Lockstep: one frame steps at once, so it applies before the script goes on.)
+  const applyNow = () => state.lockstep ? simFrames(1, () => null, state.drying, LOCK_HZ) : Promise.resolve();
+  window.__sim.fix = () => { window.__sim.checkpoint(); state.fixPending = true; state.lastEdit = performance.now(); return applyNow(); };
   // Peel off all masking fluid (applied on the next step).
-  window.__sim.unmask = () => { window.__sim.checkpoint(); state.unmaskPending = true; state.lastEdit = performance.now(); };
+  window.__sim.unmask = () => { window.__sim.checkpoint(); state.unmaskPending = true; state.lastEdit = performance.now(); return applyNow(); };
 
   // ---- save / open
   async function readBuffer(src, size, offset = 0) {
@@ -1410,6 +1455,7 @@ async function init() {
   window.__sim.skipTo = async (stage = 'damp', { points = null, maxS = 1800, live = false } = {}) => {
     const target = STAGES.indexOf(stage);
     if (target < 0) throw new Error(`unknown stage ${stage}; stages: ${STAGES.join(', ')}`);
+    if (state.lockstep) live = false;   // (the live loop doesn't step in lockstep)
     if (state.skipping || state.washing) return -1;
     // How much of the sheet (or the points) is still wetter than the
     // target, and whether any standing water is left anywhere.

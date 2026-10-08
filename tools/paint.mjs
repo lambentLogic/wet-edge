@@ -2,10 +2,13 @@
 // so a scripted painting doesn't need (or disturb) a visible browser tab.
 //
 //   node tools/paint.mjs script.js [--open in.wcpaint] [--save out.wcpaint] [--shot out.png] [--layer prefix]
-//                              [--looks dir] [--replay strokes.json]
+//                              [--looks dir] [--replay strokes.json] [--live]
 //   --looks: sim.look('name') calls in the script save dir/NN-name.png
 //   sim.note('text') in the script adds an entry to notes/journal.md
 //   --replay: replay a stroke recording (Record strokes in the app) after opening
+//   --live: run the script in real time, as the page does by hand (by default it runs
+//           in lockstep: the sheet steps only while the script paints or calls
+//           sim.wait, so a script comes out the same every run)
 //   --bug file.wcbug [--bug-to N]: load a bug report and replay it (to entry N)
 //   (--layer writes prefix-filter-multiply.png and prefix-body-add.png)
 //
@@ -23,7 +26,7 @@ const CHROME = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Conte
 const APP_URL = process.env.APP_URL ?? 'http://127.0.0.1:8765/';
 
 const args = process.argv.slice(2);
-let script = null, open = null, save = null, shot = null, layer = null, looks = null, replay = null, bug = null, bugUpTo = null;
+let live = false, script = null, open = null, save = null, shot = null, layer = null, looks = null, replay = null, bug = null, bugUpTo = null;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--open') open = args[++i];
   else if (args[i] === '--save') save = args[++i];
@@ -31,6 +34,7 @@ for (let i = 0; i < args.length; i++) {
   else if (args[i] === '--layer') layer = args[++i];
   else if (args[i] === '--looks') looks = args[++i];
   else if (args[i] === '--replay') replay = args[++i];
+  else if (args[i] === '--live') live = true;
   else if (args[i] === '--bug') bug = args[++i];
   else if (args[i] === '--bug-to') bugUpTo = +args[++i];
   else script = args[i];
@@ -89,6 +93,7 @@ try {
     console.error(`replayed ${rec.events.length} events`);
   }
   if (script) {
+    if (!live) await page.evaluate(() => window.__sim.lockstep(true));
     await page.evaluate(await readFile(script, 'utf8'));
     await page.evaluate(() => window.__paintDone);
   }

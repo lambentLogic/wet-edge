@@ -19,7 +19,9 @@
 //   waitDry(points)      wait until the paper there is bone dry
 //   waitDamp(points)     wait until it has lost its shine (for soft drop-ins)
 
-const sleep = ms => new Promise(r => setTimeout(r, ms));
+// Pauses and timings in simulated time (sim.wait, sim.time): in lockstep a
+// script's waits step the sheet, and come out the same every run.
+const sleep = ms => window.__sim.wait(ms / 1000);
 
 export function makeMinds(sim) {
   const V = sim.values, h = sim.headless;
@@ -412,7 +414,7 @@ export function makeMinds(sim) {
   // cure: then let the gum set (bindTime of simulated time, stepped quickly
   // while the sheet is dry), so the next layer doesn't lift this one.
   async function waitDry(points, { maxS = 90, dryer = true, set = 1.5, cure = true } = {}) {
-    const t0 = performance.now();
+    const t0 = sim.time();
     const pts = points.length >= 3 ? gridIn(points, 6) : points;
     // The dryer only once the shine has gone, as a painter uses one: blowing
     // on a wet wash freezes the pigment before it settles into the grain or
@@ -422,7 +424,7 @@ export function makeMinds(sim) {
       for (;;) {
         let water = 0;
         for (const [x, y] of pts) water = Math.max(water, (await sim.sense(x, y, 10)).water);
-        if (water < 0.003 || (performance.now() - t0) / 1000 > maxS) break;
+        if (water < 0.003 || (sim.time() - t0) > maxS) break;
         await sleep(600);
       }
       sim.setDrying(true);
@@ -431,7 +433,7 @@ export function makeMinds(sim) {
       for (;;) {
         let wet = 0;
         for (const [x, y] of pts) { const s = await sim.sense(x, y, 10); wet = Math.max(wet, s.water, s.damp * 0.3); }
-        const t = (performance.now() - t0) / 1000;
+        const t = (sim.time() - t0);
         if (wet < 0.003) {
           await sleep(set * 1000);
           if (cure) { sim.setDrying(false); const h = sim.headless; h.begin(); try { await h.wait(V.bindTime * 1.2); } finally { h.end(); } }
@@ -454,11 +456,11 @@ export function makeMinds(sim) {
   };
 
   async function waitDamp(points, { below = 0.12, maxS = 60 } = {}) {
-    const t0 = performance.now();
+    const t0 = sim.time();
     for (;;) {
       let w = 0;
       for (const [x, y] of points) w = Math.max(w, (await sim.sense(x, y, 10)).water);
-      const t = (performance.now() - t0) / 1000;
+      const t = (sim.time() - t0);
       if (w < below) return t;
       if (t > maxS) return -1;
       await sleep(400);

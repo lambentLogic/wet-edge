@@ -119,7 +119,7 @@ window.__paintDone = (async () => {
   await S.look('4-bank');
 
   log('peel the mask; yellow flowers in the holes');
-  S.unmask(); await new Promise(r => setTimeout(r, 400));
+  S.unmask(); await S.wait(0.4);
   S.tool('paint'); h.setBrushPreset('round'); V.brushRadius = 2.2; V.brushPigment = 0.6; V.dipLoad = 0.4; h.setBrush('Bismuth Vanadate Yellow');
   for (const [x, y] of flowers) { h.lift(); await S.path([[x, y, 0.8], [x, y, 0.8]], 2); }
   V.dipLoad = 1;

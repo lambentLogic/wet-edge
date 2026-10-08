@@ -18,5 +18,5 @@ window.__paintDone = (async () => {
     V.flatAngle = Math.atan(slope) * 180 / Math.PI;   // tilt the flat to follow the ridge
     await S.path(line(x, ridge(x) + 6, x, 600, 4), 2);
   }
-  S.setDrying(true); await new Promise(r => setTimeout(r, 7000)); S.setDrying(false);
+  S.setDrying(true); await S.wait(7); S.setDrying(false);
 })();

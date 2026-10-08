@@ -200,17 +200,17 @@
       const out = {};
       await withValues({ brushRadius: 14, brushPigment: 0.5, brushCapacity: 4000 }, async () => {
         await S.path([[80, 200, 1], [950, 200, 1]].flatMap((p, k, arr) => k ? Array.from({ length: 30 }, (_, j) => [arr[0][0] + (p[0] - arr[0][0]) * (j + 1) / 30, 200, 1]) : [p]), 4);
-        await new Promise(r => setTimeout(r, 300));
+        await S.wait(0.3);
         out.loadedStart = await stats(100, 270, 200); out.loadedEnd = await stats(760, 930, 200);
         await S.path([[80, 400, 0.25], [950, 400, 0.25]], 30);
-        await new Promise(r => setTimeout(r, 300));
+        await S.wait(0.3);
         out.skim = await stats(200, 800, 400);
         h.setMode(1);
         await S.path([[60, 600, 1], [980, 600, 1]], 40);
-        await new Promise(r => setTimeout(r, 1500));
+        await S.wait(1.5);
         h.setMode(0);
         await S.path([[80, 600, 0.25], [950, 600, 0.25]], 30);
-        await new Promise(r => setTimeout(r, 300));
+        await S.wait(0.3);
         out.damp = await stats(200, 800, 600);
       });
       return out;
@@ -225,7 +225,7 @@
         const n = 30;
         const pts = Array.from({ length: n + 1 }, (_, k) => [150 + k * 24, 380, 1 - 0.9 * k / n]);
         await S.path(pts, 3);
-        await new Promise(r => setTimeout(r, 300));
+        await S.wait(0.3);
       });
       const a = await S.read();
       const width = x => { let rows = 0; for (let y = 330; y < 430; y++) if (a[(y * W + x) * 4 + 1] + a[(y * W + x) * 4 + 2] > 0.005) rows++; return rows; };

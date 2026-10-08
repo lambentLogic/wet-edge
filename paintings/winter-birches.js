@@ -63,7 +63,7 @@ window.__paintDone = (async () => {
   log(`snow dry after ${(await M.waitDry([[500, 650], [200, 700]])).toFixed(1)}s`);
 
   log('peel the mask');
-  S.unmask(); await new Promise(r => setTimeout(r, 300));
+  S.unmask(); await S.wait(0.3);
 
   log('trunk shading: the shadow side, a cool grey');
   h.setBrushPreset('round'); V.dipLoad = 1;
