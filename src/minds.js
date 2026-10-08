@@ -489,6 +489,7 @@ export function makeMinds(sim) {
     // flooded it). The brush starts half full and is wetted or blotted a
     // little after each row by what it sensed it left.
     if (water) V.dipLoad = Math.min(load0, 0.5 * Math.min(1, 40 / bigR));   // a big brush floods more (it covers each spot longer)
+    const dipCut = V.dipLoad;
     // The margin keeps a wash off paint it goes around; a glaze (not
     // avoiding paint) reaches right to its own edge (a sea washed up to a
     // dry sky left a white line along the horizon).
@@ -639,9 +640,13 @@ export function makeMinds(sim) {
       }
       h.setMode(mode0); V.brushRadius = bigR; V.mistRadius = reach0;
     }
-    // Inner rings first where they start at the same height (a painter
-    // cuts in, then works outward).
-    const todo = lines.map(({ l, L }) => ({ l, L, top: Math.min(...l.map(p => p[1])) })).sort((p, q) => p.top - q.top || p.L - q.L);
+    // A painter cuts in, then works outward: within each row's band the ring
+    // hugging the edge goes first, onto dry paper that pins it, then the
+    // wider ones. (Sorted by exact height, the wider ring's piece usually
+    // started a little higher and went first, and the edge ring, landing in
+    // its wet, spilled past the outline.)
+    const band = t => Math.floor(t / rowStep);
+    const todo = lines.map(({ l, L }) => ({ l, L, top: Math.min(...l.map(p => p[1])) })).sort((p, q) => band(p.top) - band(q.top) || p.L - q.L || p.top - q.top);
     // Rows: in the open (where the whole brush fits) at full width every
     // rowStep; in the band near a shape, where the brush narrows to fit,
     // rows closer together (fineStep), so the narrowed strokes still meet
@@ -679,7 +684,11 @@ export function makeMinds(sim) {
         const { l, L } = todo.shift();
         const p = L === cutL ? 0 : pressFor(L - margin);
         V.brushRadius = bigR; setLoad(l[0][0], l[0][1]);
+        // Cut-ins at the wash's starting water: the water sense only wets the
+        // brush for the open rows (a wetter tip along the edge spilled over it).
+        const dipNow = V.dipLoad; V.dipLoad = Math.min(dipNow, dipCut);
         h.lift(); await layStroke(l.map(([x, yy]) => [x, yy, p]), framesPerSeg, brushAt); cut++;
+        V.dipLoad = dipNow;
       }
       if (y >= H) continue;
       while (y >= nextCoarse) { await row(nextCoarse, false); nextCoarse += rowStep; }
