@@ -168,11 +168,15 @@ window.__paintDone = (async () => {
   // the near-black pool right under her, at satin so it keeps its shape by the crab
   // (pass 3's soft shadows alone left her floating)
   await S.skipTo('satin', { points: [[600, 600]] });
-  h.setBrush([['Raw Umber', 1.2], ['Perylene Maroon', 0.7], ['Perylene Green', 0.8]]); V.brushPigment = 0.8; V.dipLoad = 0.35;
-  await shade([[450, 446, 0.4], [540, 478, 0.9], [640, 490, 1], [740, 482, 0.8], [800, 462, 0.4]], 24);
-  V.brushPigment = 0.6;
-  await shade([[600, 668, 0.3], [700, 672, 0.8], [800, 664, 0.7], [856, 636, 0.3]], 14);
-  await shade([[268, 450, 0.3], [282, 540, 0.7], [304, 640, 0.4]], 11);
+  // thick paint on a nearly dry brush (pass 4's 0.8 at Wetness 0.35 thinned out in the wet
+  // sand, and the perylene maroon gave it a rusty halo): a cool dark of the sand's own colours
+  h.setBrush([['Raw Umber', 1.4], ['French Ultramarine', 0.8], ['Perylene Green', 0.8]]); V.brushPigment = 1; V.dipLoad = 0.12;
+  // (pass 5 laid these on the masking fluid over the claw's arm and palms, and they peeled off
+  // with it: they go just outside the silhouette, overlapping the mask's edge)
+  await shade([[466, 512, 0.4], [560, 528, 0.9], [660, 536, 1], [760, 532, 0.8], [836, 560, 0.4]], 24);
+  V.brushPigment = 0.75;
+  await shade([[590, 676, 0.3], [690, 682, 0.8], [790, 676, 0.7], [856, 650, 0.3]], 14);
+  await shade([[280, 452, 0.3], [292, 540, 0.7], [312, 640, 0.4]], 11);
   await dry();
   await S.look('sand');
   log('peel the mask');
@@ -280,9 +284,9 @@ window.__paintDone = (async () => {
   S.tool('paint'); h.setBrushPreset('round'); V.dipLoad = 0.35;
   // knobs at the joints: small, bright orange-red, each a little different, a white catch-light
   // (pass 2: identical brown discs, like rivets)
-  h.setBrush([['Pyrrole Scarlet', 1.5], ['Azo Condensation Yellow', 0.5]]); V.brushPigment = 0.75; V.dipLoad = 0.3;
+  h.setBrush([['Pyrrole Scarlet', 1.5], ['Azo Condensation Yellow', 0.5]]); V.brushPigment = 1; V.dipLoad = 0.25;
   const knobs = [...[...legs, ...paddles].flatMap(L => L.o.map(k => L.j[k])), ...claws.map(c => c.carpus[0])];
-  for (const k of knobs) await dab([k[0] + (rnd() - 0.5) * 4, k[1] + (rnd() - 0.5) * 4], 4 + rnd() * 2.5, 3);
+  for (const k of knobs) await dab([k[0] + (rnd() - 0.5) * 4, k[1] + (rnd() - 0.5) * 4], 6 + rnd() * 3, 5);
   h.setBrush('White Gouache'); V.brushPigment = 0.5;
   for (const k of knobs) await dab([k[0] - 1.5, k[1] - 1.5], 1.3, 1);
   h.setBrush([['Pyrrole Scarlet', 1.5], ['Perylene Maroon', 0.5]]); V.brushPigment = 0.55;
