@@ -778,7 +778,7 @@
     const { PARAMS } = await import('/src/params.js');
     const missing = [];
     for (const e of SCRIPT_API.filter(e => e.probe)) {
-      const v = e.probe.split('.').reduce((o, k) => o?.[k], { sim: S, __minds: window.__minds });
+      const v = e.probe.split('.').reduce((o, k) => o?.[k], { sim: S, __minds: window.__minds, __draw: window.__draw });
       if (v === undefined) missing.push(e.probe);
     }
     for (const t of TOOLS) { S.tool(t.name); if (h.mode() !== t.mode) missing.push(`tool ${t.name}`); }

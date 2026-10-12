@@ -3,6 +3,7 @@ import { simWGSL, renderWGSL, MAX_PIGMENTS, MAX_CHARGES } from './shaders.js';
 import { SHAPES, buildCharges, drawMagnet, hitMagnet } from './magnets.js';
 import { BRUSHES, DEFAULT_BRUSH } from './brushes.js';
 import { makeMinds } from './minds.js';
+import { makeDrawing } from './drawing.js';
 import { TOOLS, ACTIONS, STUDIO, KEYS } from './actions.js';
 import { KNOB_DOCS } from './knob-docs.js';
 import { makePaper, PAPERS, DEFAULT_PAPER, TONES } from './paper.js';
@@ -1631,6 +1632,7 @@ async function init() {
   window.__sim.layerBlobs = layerBlobs;
   window.__sim.renderOver = renderOver;
   window.__minds = makeMinds(window.__sim);
+  window.__draw = makeDrawing(window.__sim);   // constructional drawing in 3D, for scripts (src/drawing.js)
   // The Wash tool: a little mind a person can use too. Fills an outline
   // with the loaded brush, in real time, as one undo step. The painter's
   // lasso and scripts both call this.

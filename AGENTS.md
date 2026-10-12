@@ -10,6 +10,7 @@ Wet Edge is a physically based watercolour simulator (WebGPU, plain JS). A paint
 - `node tools/paint.mjs paintings/x.js [--shot out.png] [--save out.wcpaint] [--open in.wcpaint] [--looks dir] [--replay strokes.json]` runs a painting script in a private headless Chrome. See `paintings/` for examples.
 - `node tools/measure.mjs [probe ...] [--set knob=value] [--shot out.png]` runs the calibration probes (`tools/probes.js`). The `api` probe checks that everything in this guide exists.
 - `node tools/ui-shot.mjs out.png ['js']` screenshots the whole page, panel included.
+- Working from a reference photo: `node tools/ref-grid.mjs ref.jpg out.png [x0 y0 w] [step]` (the photo fitted to the canvas with a grid in canvas cells, zoomable, for measuring shapes), `node tools/ref-sample.mjs ref.jpg '[[name, x, y, r], ...]'` (its colours at canvas points), `node tools/ref-overlay.mjs ref.jpg drawing.png out.png` (a drawing's lines over the faded photo, to check alignment), `node tools/fit-camera.mjs landmarks.json` (a 3D camera for `window.__draw` from landmarks). Keep references in .local/refs (not the repo), with their source and licence.
 - **Scripts run in lockstep** (paint.mjs, unless `--live`, and measure.mjs): the sheet only moves on while the script paints (`sim.path`, the Wash tool, the minds) or waits (`await sim.wait(seconds)`, `skipTo`, `M.waitDry`), so the same script comes out the same every run. Time passes nowhere else: a `setTimeout` or a slow `await` dries nothing, and there is no pause between strokes unless you `sim.wait` for one (a painter's few seconds between rows of a wash are `await sim.wait(2)`). Time things with `sim.time()`, not the wall clock. A frame is 1/60 s, so `framesPerSeg` sets a stroke's speed in simulated time. Scripts written before lockstep (before 2026-10-08) ran in real time, and their gaps between strokes lasted however long the machine took; rerun under lockstep they come out somewhat differently (`--live` runs them the old way, not repeatably).
 - Paint in your own headless page (paint.mjs, measure.mjs), not the painter's tab. Never reload their tab without asking: the paint state lives on the GPU. Don't trigger downloads (the save actions) on their machine.
 
@@ -115,6 +116,13 @@ Other keys: [ ] previous / next pigment · Shift-drag side of the brush · Z / X
 - `M.mark(points, { target })`: A stroke that checks it actually left paint, and repeats if it skipped.
 - `M.waitDry(points)`: Wait until those points are dry and the gum has set: air-drying until the shine has gone, then the dryer (blow-drying a wet wash stops it settling), then the gum's setting time fast-forwarded (cure: false to skip, for working into barely-dry paint). Returns seconds.
 - `M.waitDamp(points, { below })`: Wait until those points are only damp (for soft-but-held marks).
+
+## Constructional drawing (src/drawing.js, window.__draw)
+
+- `D.camera({ eye, target, up, focal, center })`: A perspective camera: cam.project([x, y, z]) gives [x, y, depth] on the sheet; cam.unproject(x, y, height) puts a point measured on the sheet (off a photo) back in 3D at that height above the ground. tools/fit-camera.mjs fits one to landmarks on a reference.
+- `D.box({ at, size, turn }) / D.ellipsoid({ at, radii, turn, axes, contours, around }) / D.sausage({ spine, radius, contours })`: Forms in 3D. A sausage is a tube along a smooth spine (radius eased per spine point, rounded ends): legs, segments, fingers. An ellipsoid can be oriented by `axes`, three vectors measured off a photo. contours: cross-section rings that show which way a form turns.
+- `D.meet(a, b)`: The line where form b goes into form a (a leg into a body, one segment into the next): put it in the list with the forms. Drawing it is what makes a limb read as attached.
+- `D.lines(forms, cam, { hidden }) / await D.pencil(lines, { weight }) / D.gesture(points)`: See the forms from the camera: silhouettes, edges, contours and meeting lines, cut where a nearer form hides them (hidden: true keeps the hidden runs, faint). pencil() draws them with the Pencil tool, silhouettes firmest; gesture() is a quick light line through sheet points for a first pass. Practice sheets: drawings/.
 
 ## Looking and history
 
