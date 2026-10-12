@@ -230,6 +230,67 @@ export function makeDrawing(sim) {
     };
   }
 
+  // A prism: a polygon cross-section swept along a smooth spine, its width
+  // and thickness eased between the values given per spine point: hard,
+  // faceted things (a crab's palm, an arm with ridges), where sausages read
+  // soft. The section is in (across, up) units; the default is a flat
+  // hexagon (a ridge along each side, a face above and below). `up` keeps
+  // the section's up side toward that direction along the spine. The ridges
+  // are drawn as edges (outline where one face turns away), the ends capped.
+  function prism({ spine, width = 40, thick = 20, section = [[1, 0], [0.5, 1], [-0.5, 1], [-1, 0], [-0.5, -1], [0.5, -1]], up = [0, 1, 0], rings = 2, caps = [true, true] } = {}) {
+    const C = smoothPath(spine, 16), n = C.length, m = section.length;
+    const ease = vals => { const v = Array.isArray(vals) ? vals : spine.map(() => vals); return i => { const t = i / (n - 1) * (v.length - 1), k = Math.min(v.length - 2, Math.floor(t)), f = t - k; return v.length === 1 ? v[0] : v[k] + (v[k + 1] - v[k]) * (f * f * (3 - 2 * f)); }; };
+    const hw = ease(width), ht = ease(thick);
+    const tan = i => norm(sub(C[Math.min(i + 1, n - 1)], C[Math.max(i - 1, 0)]));
+    const frame = i => { const t = tan(i), sd = norm(cross(t, up)), vv = cross(sd, t); return [sd, vv, t]; };
+    const F = C.map((_, i) => frame(i));
+    const V = C.map((c, i) => section.map(([u, v]) => add(c, add(mul(F[i][0], u * hw(i) / 2), mul(F[i][1], v * ht(i) / 2)))));
+    // outward normal of the side face between section corners k and k+1, at spine sample i
+    const faceN = (i, k) => { const i1 = Math.min(i + 1, n - 1), i0 = i1 - 1, k1 = (k + 1) % m; const a = V[i0][k], b = V[i1][k], c = V[i0][k1]; let nn = norm(cross(sub(b, a), sub(c, a))); const mid = mul(add(add(V[i0][k], V[i0][k1]), add(V[i1][k], V[i1][k1])), 0.25); if (dot(nn, sub(mid, C[i0])) < 0) nn = mul(nn, -1); return { n: nn, p: mid }; };
+    const capN = [mul(tan(0), -1), tan(n - 1)];
+    const runs = (pts, kinds) => { const out = []; let cur = null; pts.forEach((p, j) => { const k = kinds[j]; if (!cur || cur.kind !== k) { if (cur && cur.pts.length) cur.pts.push({ p, n: null }); cur = { kind: k, pts: [] }; out.push(cur); } cur.pts.push({ p, n: null }); }); return out.filter(r => r.pts.length > 1); };
+    const cls = (fa, fb) => fa && fb ? 'edge' : fa || fb ? 'silhouette' : 'hidden';
+    return {
+      kind: 'prism', spine: C,
+      field(p) {
+        let bi = 0, bd = Infinity; for (let i = 0; i < n; i++) { const d = len(sub(p, C[i])); if (d < bd) { bd = d; bi = i; } }
+        const d = sub(p, C[bi]), [sd, vv, t] = F[bi], u = dot(d, sd) / (hw(bi) / 2), v = dot(d, vv) / (ht(bi) / 2);
+        const beyond = bi === 0 ? -dot(d, t) : bi === n - 1 ? dot(d, t) : -1;
+        return Math.max((Math.max(Math.abs(v), Math.abs(u) + 0.5 * Math.abs(v)) - 1) * Math.min(hw(bi), ht(bi)) / 2, beyond);
+      },
+      grid() { const rows = []; for (let i = 0; i < n; i++) { const row = []; for (let k = 0; k < m; k++) for (let s2 = 0; s2 < 4; s2++) { const a = V[i][k], b = V[i][(k + 1) % m]; row.push({ p: add(a, mul(sub(b, a), s2 / 4)), n: faceN(i, k).n }); } rows.push(row); } return { rows, wrap: true }; },
+      sample(step) {
+        const pts = [];
+        for (let i = 0; i < n - 1; i++) for (let k = 0; k < m; k++) {
+          const a = V[i][k], b = V[i + 1][k], c = V[i][(k + 1) % m], d = V[i + 1][(k + 1) % m];
+          const nu = Math.ceil(len(sub(c, a)) / step), nv = Math.ceil(len(sub(b, a)) / step);
+          for (let x = 0; x <= nu; x++) for (let y = 0; y <= nv; y++) { const p = add(mul(add(mul(a, 1 - x / nu), mul(c, x / nu)), 1 - y / nv), mul(add(mul(b, 1 - x / nu), mul(d, x / nu)), y / nv)); pts.push(p); }
+        }
+        for (const [i, on] of [[0, caps[0]], [n - 1, caps[1]]]) if (on) for (let s2 = 0; s2 <= 10; s2++) for (const q of V[i]) pts.push(add(C[i], mul(sub(q, C[i]), s2 / 10)));
+        return pts;
+      },
+      lines(cam) {
+        const out = [];
+        // the ridges along it: each between face k-1 and face k
+        for (let k = 0; k < m; k++) {
+          const pts = C.map((_, i) => V[i][k]), kinds = C.map((_, i) => cls(cam.facing(faceN(i, (k + m - 1) % m).p, faceN(i, (k + m - 1) % m).n) > 0, cam.facing(faceN(i, k).p, faceN(i, k).n) > 0));
+          out.push(...runs(pts, kinds));
+        }
+        // the ends: each rim edge between its side face and the cap
+        for (const [e, i] of [[0, 0], [1, n - 1]]) {
+          const capFront = caps[e] && cam.facing(C[i], capN[e]) > 0;
+          for (let k = 0; k < m; k++) { const f = faceN(i, k), side = cam.facing(f.p, f.n) > 0, kind = caps[e] ? cls(side, capFront) : side ? 'silhouette' : 'hidden'; out.push({ kind, pts: [{ p: V[i][k], n: null }, { p: V[i][(k + 1) % m], n: null }] }); }
+        }
+        // cross-section contours along it
+        for (let r = 1; r <= rings; r++) {
+          const i = Math.round(r / (rings + 1) * (n - 1));
+          for (let k = 0; k < m; k++) { const f = faceN(i, k); out.push({ kind: cam.facing(f.p, f.n) > 0 ? 'contour' : 'hidden', pts: [{ p: V[i][k], n: null }, { p: V[i][(k + 1) % m], n: null }] }); }
+        }
+        return out;
+      },
+    };
+  }
+
   // ---- where two forms meet ----
   // The curve where form b goes into form a: b's inside/outside field
   // contoured over a's surface (marching squares on a's grid). Put it in the
@@ -335,5 +396,5 @@ export function makeDrawing(sim) {
   // pass of a drawing (where the body goes and how each limb sweeps).
   const gestureLine = pts => ({ kind: 'gesture', pts: smoothPath(pts.map(p => [p[0], p[1], 0]), 10).map(p => [p[0], p[1]]) });
 
-  return { camera, box, ellipsoid, sausage, meet, lines, pencil, gesture: gestureLine, rotation, smoothPath, math: { add, sub, mul, dot, cross, len, norm } };
+  return { camera, box, ellipsoid, sausage, prism, meet, lines, pencil, gesture: gestureLine, rotation, smoothPath, math: { add, sub, mul, dot, cross, len, norm } };
 }
