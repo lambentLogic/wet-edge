@@ -89,7 +89,14 @@ const fingerShape = ([a, b], w0) => {
 };
 for (const L of [...legs, ...paddles]) { L.j = fromEdge(L.j); L.w = L.w.map(x => x * 1.35); }
 for (const P of paddles) P.blade = smooth(P.blade, 3);
-for (const c of claws) { c.palm = smooth(c.palm, 2); c.arm = fromEdge(c.arm); }
+for (const c of claws) {
+  c.palm = smooth(c.palm, 2); c.arm = fromEdge(c.arm);
+  // spines along the arm's lower edge (pass 3 placed them by eye, and they fell on the sand)
+  const [a0, a1] = c.arm, dx = a1[0] - a0[0], dy = a1[1] - a0[1], L = Math.hypot(dx, dy);
+  let nx = -dy / L, ny = dx / L; if (ny < 0) { nx = -nx; ny = -ny; }
+  c.spines = [0.3, 0.5, 0.68, 0.84].map(t => { const p = lerp(a0, a1, t); return [p[0] + nx * c.armW * 0.42, p[1] + ny * c.armW * 0.42]; });
+}
+const gap = [[468, 424], [520, 446], [600, 460], [680, 456], [745, 442], [790, 458], [780, 470], [700, 468], [600, 470], [530, 466], [480, 446]];
 
 const pFor = r => Math.min(1, Math.max(0, (r / V.brushRadius - V.taperMin) / (1 - V.taperMin)));
 async function limb(j, w, fps = 3) {
@@ -158,6 +165,14 @@ window.__paintDone = (async () => {
   V.brushPigment = 0.3;
   await shade([[200, 238, 0.3], [300, 232, 0.5], [390, 220, 0.3]], 10);
   await shade([[118, 396, 0.3], [210, 372, 0.5], [300, 320, 0.3]], 10);
+  // the near-black pool right under her, at satin so it keeps its shape by the crab
+  // (pass 3's soft shadows alone left her floating)
+  await S.skipTo('satin', { points: [[600, 600]] });
+  h.setBrush([['Raw Umber', 1.2], ['Perylene Maroon', 0.7], ['Perylene Green', 0.8]]); V.brushPigment = 0.8; V.dipLoad = 0.35;
+  await shade([[450, 446, 0.4], [540, 478, 0.9], [640, 490, 1], [740, 482, 0.8], [800, 462, 0.4]], 24);
+  V.brushPigment = 0.6;
+  await shade([[600, 668, 0.3], [700, 672, 0.8], [800, 664, 0.7], [856, 636, 0.3]], 14);
+  await shade([[268, 450, 0.3], [282, 540, 0.7], [304, 640, 0.4]], 11);
   await dry();
   await S.look('sand');
   log('peel the mask');
@@ -223,8 +238,15 @@ window.__paintDone = (async () => {
     h.setBrush([['Phthalo Blue (GS)', 1], ['Phthalo Turquoise', 1], ['Raw Umber', 0.15]]);
     await limb(L.j, L.w.map(x => x / 2), 3);
   }
+  log('a darker side along each leg, so it reads round');
+  await S.wait(3);
+  h.setBrush([['Phthalo Blue (GS)', 1], ['French Ultramarine', 0.8], ['Raw Umber', 0.2]]); V.brushPigment = 0.32; V.dipLoad = 0.3;
+  for (const L of legs) {
+    const sideJ = L.j.map((p, k) => { const q = L.j[Math.min(k + 1, L.j.length - 1)], r = L.j[Math.max(k - 1, 0)], dx = q[0] - r[0], dy = q[1] - r[1], d = Math.hypot(dx, dy) || 1; let nx = -dy / d, ny = dx / d; if (ny < 0) { nx = -nx; ny = -ny; } return [p[0] + nx * L.w[k] * 0.3, p[1] + ny * L.w[k] * 0.3]; });
+    await limb(sideJ.slice(0, -1), L.w.slice(0, -1).map(x => x * 0.2), 3);
+  }
   for (const P of paddles) {
-    h.setBrush([['Phthalo Blue (GS)', 1], ['Phthalo Turquoise', 1], ['Raw Umber', 0.15]]); V.brushPigment = 0.24;
+    h.setBrush([['Phthalo Blue (GS)', 1], ['Phthalo Turquoise', 1], ['Raw Umber', 0.15]]); V.brushPigment = 0.24; V.dipLoad = 0.5;
     await limb(P.j, P.w.map(x => x / 2), 3);
     h.setBrushPreset('mop'); V.brushRadius = 14; V.brushPigment = 0.3; V.dipLoad = 0.8;
     h.setBrush([['Phthalo Blue (GS)', 2], ['French Ultramarine', 1]]);
@@ -242,14 +264,15 @@ window.__paintDone = (async () => {
   h.setBrush([['Perylene Maroon', 1], ['Perylene Green', 1.5], ['Raw Umber', 1]]);
   // filled as the gap between the shell's front edge and the right claw's arm (pass 2's stroke was a stick)
   h.setBrushPreset('mop'); V.brushRadius = 10; V.brushPigment = 0.6; V.dipLoad = 0.7;
-  S.tool('wash'); await S.wash([[468, 424], [520, 446], [600, 460], [680, 456], [745, 442], [790, 458], [780, 470], [700, 468], [600, 470], [530, 466], [480, 446]], { kind: 'flat', paper: 'moist' });
+  S.tool('wash'); await S.wash(gap, { kind: 'flat', paper: 'moist' });
   S.tool('paint'); h.setBrushPreset('round');
 
   log('mouthparts: busy cream and olive bits over the dark');
   h.setBrush([['Transparent Yellow Oxide', 1], ['Raw Umber', 0.5]]); V.brushPigment = 0.25; V.dipLoad = 0.3;
-  for (let k = 0; k < 26; k++) {
-    const x = 480 + rnd() * 180, y = 448 + rnd() * 50;
-    V.brushRadius = 3 + rnd() * 4; await S.path([[x, y, 0.8], [x + (rnd() - 0.5) * 16, y + rnd() * 10, 0.3]], 3);
+  for (let k = 0; k < 40 && k < 400; ) {
+    const x = 480 + rnd() * 300, y = 424 + rnd() * 48;
+    if (!inPoly(gap, x, y)) continue;
+    k++; V.brushRadius = 2 + rnd() * 3; await S.path([[x, y, 0.8], [x + (rnd() - 0.5) * 10, y + rnd() * 4, 0.3]], 3);
   }
   await dry();
 
@@ -257,9 +280,9 @@ window.__paintDone = (async () => {
   S.tool('paint'); h.setBrushPreset('round'); V.dipLoad = 0.35;
   // knobs at the joints: small, bright orange-red, each a little different, a white catch-light
   // (pass 2: identical brown discs, like rivets)
-  h.setBrush([['Pyrrole Scarlet', 1.5], ['Azo Condensation Yellow', 0.6]]); V.brushPigment = 0.5;
+  h.setBrush([['Pyrrole Scarlet', 1.5], ['Azo Condensation Yellow', 0.5]]); V.brushPigment = 0.75; V.dipLoad = 0.3;
   const knobs = [...[...legs, ...paddles].flatMap(L => L.o.map(k => L.j[k])), ...claws.map(c => c.carpus[0])];
-  for (const k of knobs) await dab([k[0] + (rnd() - 0.5) * 4, k[1] + (rnd() - 0.5) * 4], 3 + rnd() * 2, 2);
+  for (const k of knobs) await dab([k[0] + (rnd() - 0.5) * 4, k[1] + (rnd() - 0.5) * 4], 4 + rnd() * 2.5, 3);
   h.setBrush('White Gouache'); V.brushPigment = 0.5;
   for (const k of knobs) await dab([k[0] - 1.5, k[1] - 1.5], 1.3, 1);
   h.setBrush([['Pyrrole Scarlet', 1.5], ['Perylene Maroon', 0.5]]); V.brushPigment = 0.55;
