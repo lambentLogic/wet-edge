@@ -237,7 +237,11 @@ export function makeDrawing(sim) {
   // hexagon (a ridge along each side, a face above and below). `up` keeps
   // the section's up side toward that direction along the spine. The ridges
   // are drawn as edges (outline where one face turns away), the ends capped.
-  function prism({ spine, width = 40, thick = 20, section = [[1, 0], [0.5, 1], [-0.5, 1], [-1, 0], [-0.5, -1], [0.5, -1]], up = [0, 1, 0], rings = 2, caps = [true, true] } = {}) {
+  // `ridges`: which section corners are real ridges (indices; default all). The
+  // others are only where the section is rounded off: drawn just where they turn
+  // into the outline (a smooth, flattened leg has a ridge along its rim, not a
+  // ridge at every corner of its section; drawn at every corner it read as lumber).
+  function prism({ spine, width = 40, thick = 20, section = [[1, 0], [0.5, 1], [-0.5, 1], [-1, 0], [-0.5, -1], [0.5, -1]], up = [0, 1, 0], rings = 2, caps = [true, true], ridges = null } = {}) {
     const C = smoothPath(spine, 16), n = C.length, m = section.length;
     const ease = vals => { const v = Array.isArray(vals) ? vals : spine.map(() => vals); return i => { const t = i / (n - 1) * (v.length - 1), k = Math.min(v.length - 2, Math.floor(t)), f = t - k; return v.length === 1 ? v[0] : v[k] + (v[k + 1] - v[k]) * (f * f * (3 - 2 * f)); }; };
     const hw = ease(width), ht = ease(thick);
@@ -274,7 +278,7 @@ export function makeDrawing(sim) {
         // the ridges along it: each between face k-1 and face k
         for (let k = 0; k < m; k++) {
           const pts = C.map((_, i) => V[i][k]), kinds = C.map((_, i) => cls(cam.facing(faceN(i, (k + m - 1) % m).p, faceN(i, (k + m - 1) % m).n) > 0, cam.facing(faceN(i, k).p, faceN(i, k).n) > 0));
-          out.push(...runs(pts, kinds));
+          out.push(...runs(pts, ridges && !ridges.includes(k) ? kinds.map(x => x === 'edge' ? null : x) : kinds).filter(r => r.kind));
         }
         // the ends: each rim edge between its side face and the cap
         for (const [e, i] of [[0, 0], [1, n - 1]]) {
@@ -376,7 +380,7 @@ export function makeDrawing(sim) {
           const ax = norm(axis ?? (ext[0] >= ext[1] && ext[0] >= ext[2] ? [1, 0, 0] : ext[2] >= ext[1] ? [0, 0, 1] : [0, 1, 0]));
           dv = verts.map(v => dot(sub(v, centre), ax));
         }
-        const dmin = Math.min(...dv), dmax = Math.max(...dv);
+        let dmin = Infinity, dmax = -Infinity; for (const d of dv) { if (d < dmin) dmin = d; if (d > dmax) dmax = d; }   // (not Math.min(...dv): a big mesh overflows the call stack)
         for (let r = 1; r <= loops; r++) { const s0 = dmin + (dmax - dmin) * r / (loops + 1); out.push(...levelLines(dv.map(d => d - s0), 'contour')); }
         // ridges of the prisms inside, kept where they're on the surface
         if (ridges) for (const f of parts) if (f.kind === 'prism') {
