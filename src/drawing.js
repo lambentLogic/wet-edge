@@ -291,6 +291,115 @@ export function makeDrawing(sim) {
     };
   }
 
+  // A mass: several forms blended into one smooth surface (their fields'
+  // smooth union: where two meet they flow together with a fillet `blend`
+  // wide, instead of a seam), for the organic masses that wrap around the
+  // simple forms and fill the spaces between them (a swelling, a knuckle, a
+  // joint). Made into a mesh (marching tetrahedra on a `cell`-sized grid);
+  // drawn as its outline (where the smoothed surface turns away from the
+  // eye), contour loops (slices across `axis`, `loops` of them; or with
+  // `along`, points down its middle, slices square to that line as it bends), and creases
+  // where the surface folds sharper than `crease` degrees. `cut`: forms
+  // carved out of it.
+  function mass({ parts, cut = [], blend = 4, cell = null, axis = null, along = null, loops = 4, crease = 50 } = {}) {
+    const smin = (a, b, k) => { const hh = Math.max(k - Math.abs(a - b), 0) / k; return Math.min(a, b) - hh * hh * k * 0.25; };
+    const field = p => { let v = Infinity; for (const f of parts) v = v === Infinity ? f.field(p) : smin(v, f.field(p), blend); for (const c of cut) v = Math.max(v, -c.field(p)); return v; };
+    // the box it lives in
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (const f of parts) for (const q of f.sample(3)) for (let c = 0; c < 3; c++) { lo[c] = Math.min(lo[c], q[c]); hi[c] = Math.max(hi[c], q[c]); }
+    const ext = sub(hi, lo), h0 = cell ?? Math.max(...ext) / 70, pad = blend + 2 * h0;
+    for (let c = 0; c < 3; c++) { lo[c] -= pad; hi[c] += pad; }
+    const N = [0, 1, 2].map(c => Math.ceil((hi[c] - lo[c]) / h0) + 1);
+    const at = (i, j, k) => [lo[0] + i * h0, lo[1] + j * h0, lo[2] + k * h0];
+    const F = new Float32Array(N[0] * N[1] * N[2]), idx = (i, j, k) => (k * N[1] + j) * N[0] + i;
+    for (let k = 0; k < N[2]; k++) for (let j = 0; j < N[1]; j++) for (let i = 0; i < N[0]; i++) F[idx(i, j, k)] = field(at(i, j, k));
+    // marching tetrahedra: each cube in six tetrahedra, each giving 0-2 triangles
+    const verts = [], vkey = new Map(), tris = [];
+    const vert = (a, b) => { // the surface crossing on grid edge a-b (shared between neighbours)
+      const key = a < b ? a * 1e8 + b : b * 1e8 + a; if (vkey.has(key)) return vkey.get(key);
+      const ka = Math.floor(a / (N[0] * N[1])), ja = Math.floor(a / N[0]) % N[1], ia = a % N[0], kb = Math.floor(b / (N[0] * N[1])), jb = Math.floor(b / N[0]) % N[1], ib = b % N[0];
+      const t = F[a] / (F[a] - F[b]), pa = at(ia, ja, ka), pb = at(ib, jb, kb);
+      verts.push(add(pa, mul(sub(pb, pa), t))); vkey.set(key, verts.length - 1); return verts.length - 1;
+    };
+    const TET = [[0, 5, 1, 6], [0, 1, 2, 6], [0, 2, 3, 6], [0, 3, 7, 6], [0, 7, 4, 6], [0, 4, 5, 6]];
+    const corner = [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]];
+    for (let k = 0; k < N[2] - 1; k++) for (let j = 0; j < N[1] - 1; j++) for (let i = 0; i < N[0] - 1; i++) {
+      const g = corner.map(([a, b, c]) => idx(i + a, j + b, k + c));
+      let anyIn = false, anyOut = false; for (const q of g) { if (F[q] < 0) anyIn = true; else anyOut = true; } if (!anyIn || !anyOut) continue;
+      for (const T of TET) {
+        const q = T.map(t => g[t]), inside = q.filter(x => F[x] < 0), outside = q.filter(x => F[x] >= 0);
+        if (inside.length === 1) tris.push(outside.map(o => vert(inside[0], o)));
+        else if (inside.length === 3) tris.push(inside.map(o => vert(outside[0], o)));
+        else if (inside.length === 2) { const [a, b] = inside, [c, d] = outside; const v1 = vert(a, c), v2 = vert(a, d), v3 = vert(b, c), v4 = vert(b, d); tris.push([v1, v2, v4], [v1, v4, v3]); }
+      }
+    }
+    // outward normals: the field's gradient (smooth across the mesh); triangles wound to match
+    const grad = p => { const e = h0 * 0.5; return norm([field(add(p, [e, 0, 0])) - field(sub(p, [e, 0, 0])), field(add(p, [0, e, 0])) - field(sub(p, [0, e, 0])), field(add(p, [0, 0, e])) - field(sub(p, [0, 0, e]))]); };
+    const VN = verts.map(grad);
+    const triN = tris.map(t => { let nn = norm(cross(sub(verts[t[1]], verts[t[0]]), sub(verts[t[2]], verts[t[0]]))); if (dot(nn, add(add(VN[t[0]], VN[t[1]]), VN[t[2]])) < 0) { nn = mul(nn, -1); t.reverse(); } return nn; });
+    const centre = mul(add(lo, hi), 0.5);
+    // the zero set of a per-vertex value over the triangles, chained into lines
+    const levelLines = (val, kindOf) => {
+      const segs = [];
+      for (const t of tris) {
+        const pts = [];
+        for (let e = 0; e < 3; e++) { const a = t[e], b = t[(e + 1) % 3], fa = val[a], fb = val[b]; if ((fa < 0) !== (fb < 0)) { const s2 = fa / (fa - fb); pts.push({ p: add(verts[a], mul(sub(verts[b], verts[a]), s2)), n: norm(add(mul(VN[a], 1 - s2), mul(VN[b], s2))) }); } }
+        if (pts.length === 2) segs.push(pts);
+      }
+      return chain(segs).map(line => ({ kind: kindOf, pts: line }));
+    };
+    const edgeMap = new Map();
+    tris.forEach((t, ti) => { for (let e = 0; e < 3; e++) { const a = t[e], b = t[(e + 1) % 3], key = a < b ? a * 1e8 + b : b * 1e8 + a; (edgeMap.get(key) ?? edgeMap.set(key, []).get(key)).push(ti); } });
+    return {
+      kind: 'mass', field, mesh: { verts, tris, normals: VN },
+      sample(step) {
+        const pts = [];
+        for (const t of tris) { const [a, b, c] = t.map(v => verts[v]), m = Math.max(1, Math.ceil(Math.max(len(sub(b, a)), len(sub(c, a))) / step)); for (let x = 0; x <= m; x++) for (let y = 0; y <= m - x; y++) pts.push(add(a, add(mul(sub(b, a), x / m), mul(sub(c, a), y / m)))); }
+        return pts;
+      },
+      tris: { verts, tris, normals: VN },
+      lines(cam) {
+        // outline: where the smoothed normal turns square to the eye (interpolated, so it's a smooth line, not the mesh's stair-steps)
+        const out = levelLines(verts.map((v, i) => dot(VN[i], norm(sub(cam.eye, v)))), 'silhouette').map(l => ({ ...l, pts: l.pts.map(q => ({ p: q.p, n: null })) }));
+        // contour loops: slices across the main axis (or the given one)
+        let dv;
+        if (along) {
+          // how far along the middle line each vertex lies (by its nearest point on the line)
+          const Lp = smoothPath(along, 12), cum = [0]; for (let i = 1; i < Lp.length; i++) cum.push(cum[i - 1] + len(sub(Lp[i], Lp[i - 1])));
+          dv = verts.map(v => { let best = Infinity, bt = 0; for (let i = 0; i < Lp.length - 1; i++) { const a = Lp[i], ab = sub(Lp[i + 1], a), t = Math.max(0, Math.min(1, dot(sub(v, a), ab) / (dot(ab, ab) || 1))), d = len(sub(v, add(a, mul(ab, t)))); if (d < best) { best = d; bt = cum[i] + t * (cum[i + 1] - cum[i]); } } return bt; });
+        } else {
+          const ax = norm(axis ?? (ext[0] >= ext[1] && ext[0] >= ext[2] ? [1, 0, 0] : ext[2] >= ext[1] ? [0, 0, 1] : [0, 1, 0]));
+          dv = verts.map(v => dot(sub(v, centre), ax));
+        }
+        const dmin = Math.min(...dv), dmax = Math.max(...dv);
+        for (let r = 1; r <= loops; r++) { const s0 = dmin + (dmax - dmin) * r / (loops + 1); out.push(...levelLines(dv.map(d => d - s0), 'contour')); }
+        // creases: mesh edges where the surface folds sharply, between faces both toward the eye
+        const cz = Math.cos(crease * Math.PI / 180);
+        for (const [key, ts] of edgeMap) {
+          if (ts.length !== 2 || dot(triN[ts[0]], triN[ts[1]]) > cz) continue;
+          const a = Math.floor(key / 1e8), b = key % 1e8;
+          out.push({ kind: 'edge', pts: [{ p: verts[a], n: VN[a] }, { p: verts[b], n: VN[b] }] });
+        }
+        return out;
+      },
+    };
+  }
+  // chain little segments [[q, q], ...] into polylines (by matching end points)
+  function chain(segs) {
+    const key = q => q.p.map(v => Math.round(v * 50)).join(','), ends = new Map(), used = new Uint8Array(segs.length), out = [];
+    segs.forEach((sg, i) => sg.forEach(q => { const kq = key(q); if (!ends.has(kq)) ends.set(kq, []); ends.get(kq).push(i); }));
+    for (let i = 0; i < segs.length; i++) {
+      if (used[i]) continue; used[i] = 1; const line = [segs[i][0], segs[i][1]];
+      for (const fwd of [true, false]) for (;;) {
+        const tip = fwd ? line[line.length - 1] : line[0], j = (ends.get(key(tip)) ?? []).find(x => !used[x]);
+        if (j === undefined) break; used[j] = 1; const nxt = key(segs[j][0]) === key(tip) ? segs[j][1] : segs[j][0];
+        if (fwd) line.push(nxt); else line.unshift(nxt);
+      }
+      out.push(line);
+    }
+    return out;
+  }
+
   // ---- where two forms meet ----
   // The curve where form b goes into form a: b's inside/outside field
   // contoured over a's surface (marching squares on a's grid). Put it in the
@@ -302,6 +411,11 @@ export function makeDrawing(sim) {
       kind: 'meet', owners: [a, b],
       sample() { return []; },
       lines() {
+        if (a.tris) {   // a mass: b's field contoured over a's triangles
+          const { verts, tris, normals } = a.tris, fv = verts.map(v => b.field(v)), segs = [];
+          for (const t of tris) { const pts = []; for (let e = 0; e < 3; e++) { const i = t[e], j = t[(e + 1) % 3]; if ((fv[i] < 0) !== (fv[j] < 0)) { const s2 = fv[i] / (fv[i] - fv[j]); pts.push({ p: add(verts[i], mul(sub(verts[j], verts[i]), s2)), n: norm(add(mul(normals[i], 1 - s2), mul(normals[j], s2))) }); } } if (pts.length === 2) segs.push(pts); }
+          return chain(segs).map(line => ({ kind: 'meet', pts: line }));
+        }
         const { rows, wrap } = a.grid(), f = rows.map(r => r.map(q => b.field(q.p))), segs = [];
         const cut = (q0, q1, f0, f1) => { const t = f0 / (f0 - f1); return { p: add(q0.p, mul(sub(q1.p, q0.p), t)), n: norm(add(mul(q0.n, 1 - t), mul(q1.n, t))) }; };
         for (let i = 0; i < rows.length - 1; i++) for (let k = 0; k < rows[i].length - (wrap ? 0 : 1); k++) {
@@ -396,5 +510,5 @@ export function makeDrawing(sim) {
   // pass of a drawing (where the body goes and how each limb sweeps).
   const gestureLine = pts => ({ kind: 'gesture', pts: smoothPath(pts.map(p => [p[0], p[1], 0]), 10).map(p => [p[0], p[1]]) });
 
-  return { camera, box, ellipsoid, sausage, prism, meet, lines, pencil, gesture: gestureLine, rotation, smoothPath, math: { add, sub, mul, dot, cross, len, norm } };
+  return { camera, box, ellipsoid, sausage, prism, mass, meet, lines, pencil, gesture: gestureLine, rotation, smoothPath, math: { add, sub, mul, dot, cross, len, norm } };
 }
