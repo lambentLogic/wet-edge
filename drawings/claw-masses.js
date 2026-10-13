@@ -61,16 +61,23 @@ const knuckle = blobAt([890, 524, 30], 30, 26, 28);    // where the arm swells i
 const wrist = blobAt([858, 606, 22], 32, 26, 30);      // the knob where the carpus meets the palm
 const palmSwell = (() => { const a = P([830, 612, 22]), b = P([735, 622, 20]), c = mul(add(a, b), 0.5), ax = mul(sub(b, a), 0.6); return D.ellipsoid({ at: c, axes: [ax, [0, mm(18, c), 0], mul(norm(D.math.cross(ax, [0, 1, 0])), mm(30, c))] }); })();   // the palm's upper bulge
 const hinge = blobAt([706, 634, 16], 22, 18, 22);      // the hinge's knuckle at the palm's end
-const claw = D.mass({ parts: [arm, carpus, palm, knuckle, wrist, palmSwell, hinge], blend: 4, cell: 0.7, along: [[700, 488, 28], [800, 502, 30], [884, 528, 30], [884, 570, 26], [850, 616, 22], [770, 630, 18], [705, 641, 15], [600, 666, 8]].map(P), loops: 10, crease: 55 });
+// Each segment its own mass, the masses within it blended, the joints between segments kept
+// (blending the whole claw into one surface lost the segments: the painter, "you also lost
+// the segments ;P"). Each segment runs a little into the next, so the joint is an overlap
+// with a meeting line where one tucks into the next.
+const seg = (parts, along, loops) => D.mass({ parts, blend: 4, cell: 0.6, along: along.map(P), loops, crease: 55 });
+const armM = seg([arm, knuckle], [[700, 488, 28], [800, 502, 30], [880, 522, 30]], 4);
+const carpM = seg([carpus], [[878, 524, 30], [886, 566, 28], [872, 612, 24]], 2);
+const propM = seg([palm, wrist, palmSwell, hinge], [[852, 616, 22], [770, 630, 18], [705, 641, 15], [600, 666, 8]], 5);
 
 window.__paintDone = (async () => {
   h.setPaper('hotPress', 5); h.setTone('white'); S.clear();
   const toView = ([x, y]) => [(x - X0) * k, (y - Y0) * k];
   log('gesture: the whole claw as one hook, then where it turns');
   await D.pencil([D.gesture([[690, 490], [800, 505], [884, 532], [882, 600], [800, 624], [700, 641], [600, 655], [530, 658]].map(toView))], { weight: { gesture: 0.2 } });
-  log('masses: the claw as one blended surface, the hinged finger and the spines meeting it');
-  const forms = [claw, dactyl, ...spines];
-  const meets = [D.meet(claw, dactyl), ...spines.map(sp => D.meet(claw, sp))];
+  log('masses: each segment its own blended surface, meeting the next at its joint');
+  const forms = [armM, carpM, propM, dactyl, ...spines];
+  const meets = [D.meet(armM, carpM), D.meet(propM, carpM), D.meet(propM, dactyl), ...spines.map(sp => D.meet(armM, sp))];
   await D.pencil(D.lines([...forms, ...meets], view));
   await S.look('claw');
 })();
