@@ -468,7 +468,7 @@ export function makeDrawing(sim) {
   // Returns polylines [{ kind, form, pts: [[x, y], ...] }] on the sheet: only
   // the visible runs (or, with { hidden: true }, the hidden runs as kind
   // 'hidden' too, for a construction drawing that shows its far side).
-  function lines(forms, cam, { hidden = false, step = 1.2 } = {}) {
+  function depthOf(forms, cam, step) {
     const zbuf = new Float32Array(W * H).fill(Infinity), owner = new Int16Array(W * H).fill(-1);
     forms.forEach((f, id) => {
       // sample spacing in world units for about `step` cells on the sheet at this form's depth
@@ -484,6 +484,19 @@ export function makeDrawing(sim) {
         }
       }
     });
+    return { zbuf, owner };
+  }
+  // Where each form is the visible surface: a mask over the sheet per form (Uint8Array, 1 inside),
+  // from the same depth buffer the lines are hidden by. For painting from a construction: a
+  // segment's wash stops where the shell's edge or another limb passes in front of it.
+  function regions(forms, cam, { step = 1.2 } = {}) {
+    const { owner } = depthOf(forms, cam, step);
+    const masks = forms.map(() => new Uint8Array(W * H));
+    for (let c = 0; c < W * H; c++) if (owner[c] >= 0) masks[owner[c]][c] = 1;
+    return masks;
+  }
+  function lines(forms, cam, { hidden = false, step = 1.2 } = {}) {
+    const { zbuf, owner } = depthOf(forms, cam, step);
     const out = [];
     forms.forEach((f, id) => {
       const mine = (f.owners ?? []).map(o => forms.indexOf(o));
@@ -543,5 +556,5 @@ export function makeDrawing(sim) {
   // pass of a drawing (where the body goes and how each limb sweeps).
   const gestureLine = pts => ({ kind: 'gesture', pts: smoothPath(pts.map(p => [p[0], p[1], 0]), 10).map(p => [p[0], p[1]]) });
 
-  return { camera, box, ellipsoid, sausage, prism, mass, meet, lines, pencil, gesture: gestureLine, rotation, smoothPath, math: { add, sub, mul, dot, cross, len, norm } };
+  return { camera, box, ellipsoid, sausage, prism, mass, meet, lines, regions, pencil, gesture: gestureLine, rotation, smoothPath, math: { add, sub, mul, dot, cross, len, norm } };
 }
