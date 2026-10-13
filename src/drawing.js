@@ -279,7 +279,9 @@ export function makeDrawing(sim) {
         // the ends: each rim edge between its side face and the cap
         for (const [e, i] of [[0, 0], [1, n - 1]]) {
           const capFront = caps[e] && cam.facing(C[i], capN[e]) > 0;
-          for (let k = 0; k < m; k++) { const f = faceN(i, k), side = cam.facing(f.p, f.n) > 0, kind = caps[e] ? cls(side, capFront) : side ? 'silhouette' : 'hidden'; out.push({ kind, pts: [{ p: V[i][k], n: null }, { p: V[i][(k + 1) % m], n: null }] }); }
+          // (an uncapped end is open: it goes under something, into shadow; nothing drawn across it)
+          if (!caps[e]) continue;
+          for (let k = 0; k < m; k++) { const f = faceN(i, k), side = cam.facing(f.p, f.n) > 0, kind = cls(side, capFront); out.push({ kind, pts: [{ p: V[i][k], n: null }, { p: V[i][(k + 1) % m], n: null }] }); }
         }
         // cross-section contours along it
         for (let r = 1; r <= rings; r++) {
@@ -491,6 +493,9 @@ export function makeDrawing(sim) {
         for (const q of fine) {
           const [x, y, z] = cam.project(q.p);
           let seen = ln.kind !== 'hidden' && (!q.n || cam.facing(q.p, q.n) > 0);
+          // a form with a clip box [x0, y0, x1, y1] on the sheet draws only there (still hiding
+          // what's behind it everywhere): context, like the edge of a shell a limb goes under
+          if (seen && f.clip && (x < f.clip[0] || y < f.clip[1] || x > f.clip[2] || y > f.clip[3])) seen = false;
           if (seen) {
             // hidden by another, nearer form here?
             const xi = Math.round(x), yi = Math.round(y);

@@ -46,11 +46,24 @@ const along = (pts, cells) => pts.map((q, i) => mm(cells[i], P(q)));
 // from the bottom of that; it came out a thin bar floating above them).
 // the arm (merus): a heavy rounded-triangular bar, from under the shell to the carpus
 // (top edge 690,455 to 880,470; bottom edge through the spine bases 705,512 / 790,540 / 870,560)
-const armPts = [[690, 484, 26], [790, 499, 30], [870, 515, 30]];
-const arm = D.prism({ spine: armPts.map(P), width: along(armPts, [56, 82, 90]), thick: along(armPts, [40, 56, 60]), section: [[1, -0.5], [0.5, 0.6], [0, 1], [-0.5, 0.6], [-1, -0.5], [0, -1]], rings: 2 });
+// (zoomed in: the blue arm's near end is rounded at x ~745; beyond it is the shoulder segment,
+// in shadow so its colour reads dark, with cream edges, partly covered by the shell: the
+// painter, after I'd first drawn it as a fade into shadow)
+const armPts = [[748, 479, 28], [800, 490, 30], [860, 506, 30], [880, 515, 30]];
+const arm = D.prism({ spine: armPts.map(P), width: along(armPts, [44, 70, 83, 86]), thick: along(armPts, [34, 50, 58, 60]), section: [[1, -0.5], [0.5, 0.6], [0, 1], [-0.5, 0.6], [-1, -0.5], [0, -1]], rings: 2 });
+// the shoulder segment: from the arm's end (745, 458-500) narrowing toward the body, a ridge
+// where its top face meets the edge (where the cream edge shows), running on under the shell
+const ischPts = [[756, 479, 27], [722, 474, 27], [676, 468, 26]];
+const ischium = D.prism({ spine: ischPts.map(P), width: along(ischPts, [44, 32, 14]), thick: along(ischPts, [30, 22, 10]),
+  section: [[1, 0], [0.4, 0.8], [-0.5, 0.8], [-1, 0], [-0.4, -0.9], [0.4, -0.9]], rings: 0 });
+// the shell's front margin covering the shoulder's far end: a low, small form, its edge
+// crossing the shoulder at x ~695 (measured zoomed; my earlier big oval wasn't in the photo)
+const front = (() => { const c = P([652, 456, 36]); return D.ellipsoid({ at: c, axes: [mul(norm(sub(P([700, 452, 36]), P([600, 430, 36]))), mm(56, c)), [0, mm(10, c), 0], mul(norm(sub(P([650, 470, 36]), P([650, 410, 36]))), mm(28, c))], contours: 0 }); })();
 // spines along its lower edge, pointing down and forward
-const spines = [[[706, 512, 24], [718, 540, 20]], [[740, 522, 26], [748, 548, 22]], [[790, 540, 26], [802, 562, 22]]]
-  .map(([a, b]) => D.sausage({ spine: [P(a), P(b)], radius: [mm(5, P(a)), 0.3], contours: 0 }));
+// stout white cones with red tips along the arm's lower edge (measured zoomed: the first
+// placing was 50 cells too far left, and needles where they're cones)
+const spines = [[[768, 500, 24], [763, 522, 20], 7], [[792, 512, 24], [787, 540, 20], 9], [[814, 532, 26], [812, 564, 22], 9]]
+  .map(([a, b, r]) => D.sausage({ spine: [P(a), P(b)], radius: [mm(r, P(a)), 0.4], contours: 0 }));
 // the carpus: a compact knobbed block where the limb turns down
 const carpPts = [[878, 524, 30], [886, 566, 28], [872, 612, 24]];
 const carpus = D.prism({ spine: carpPts.map(P), width: along(carpPts, [48, 60, 54]), thick: along(carpPts, [40, 44, 40]), rings: 1 });
@@ -86,14 +99,15 @@ for (let i = 0; i < 5; i++) { const x = 684 - i * 18, y = 657 + i * 2.2; teeth.p
 spines.push(D.sausage({ spine: [P([902, 548, 30]), P([924, 544, 30])], radius: [mm(6, P([902, 548, 30])), 0.3], contours: 0 }));
 spines.push(D.sausage({ spine: [P([862, 552, 28]), P([872, 574, 24])], radius: [mm(5, P([862, 552, 28])), 0.3], contours: 0 }));
 // the shell's front edge, where the arm goes under it
-const shellEdge = (() => { const c = P([600, 405, 36]); return D.ellipsoid({ at: c, axes: [mul(norm(sub(P([900, 470, 36]), P([490, 430, 36]))), mm(260, c)), [0, mm(16, c), 0], mul(norm(sub(P([600, 470, 36]), P([600, 300, 36]))), mm(70, c))], contours: 0 }); })();
+// (the shell edge I drew here as a big oval isn't in the photo: removed)
+const shellEdge0 = (() => { const c = P([600, 405, 36]); return D.ellipsoid({ at: c, axes: [mul(norm(sub(P([900, 470, 36]), P([490, 430, 36]))), mm(260, c)), [0, mm(16, c), 0], mul(norm(sub(P([600, 470, 36]), P([600, 300, 36]))), mm(70, c))], contours: 0 }); })();
 
 // Each segment its own mass, the masses within it blended, the joints between segments kept
 // (blending the whole claw into one surface lost the segments: the painter, "you also lost
 // the segments ;P"). Each segment runs a little into the next, so the joint is an overlap
 // with a meeting line where one tucks into the next.
 const seg = (parts, along, loops) => D.mass({ parts, blend: 4, cell: 0.6, along: along.map(P), loops, crease: 55 });
-const armM = seg([arm, knuckle], [[700, 488, 28], [800, 502, 30], [880, 522, 30]], 4);
+const armM = seg([arm, knuckle], [[750, 479, 28], [800, 490, 30], [880, 518, 30]], 3);
 const carpM = seg([carpus], [[878, 524, 30], [886, 566, 28], [872, 612, 24]], 2);
 // (no separate palm bulge: it covered the palm's ridge, and the palm's own section already swells)
 const propM = seg([palm, wrist, hinge], [[852, 616, 22], [770, 630, 18], [705, 641, 15], [600, 666, 8]], 5);
@@ -102,12 +116,14 @@ window.__paintDone = (async () => {
   h.setPaper('hotPress', 5); h.setTone('white'); S.clear();
   const toView = ([x, y]) => [(x - X0) * k, (y - Y0) * k];
   log('gesture: the whole claw as one hook, then where it turns');
-  await D.pencil([D.gesture([[690, 490], [800, 505], [884, 532], [882, 600], [800, 624], [700, 641], [600, 655], [530, 658]].map(toView))], { weight: { gesture: 0.2 } });
+  await D.pencil([D.gesture([[700, 476], [800, 492], [884, 532], [882, 600], [800, 624], [700, 641], [600, 655], [530, 658]].map(toView))], { weight: { gesture: 0.2 } });
   log('segments with their planes, joints with rims and collars, toothed fingers, spines, the arm under the shell');
   // (teeth left out: from above, the cutting edges face each other and don't show; drawn, they were scratches)
-  const forms = [shellEdge, armM, carpM, propM, dactyl, wristCollar, elbowCollar, ...spines];
+  // only the margin's edge where it crosses the shoulder is drawn (drawn whole, it was an oval)
+  front.clip = toView([660, 440]).concat(toView([720, 500]));
+  const forms = [front, ischium, armM, carpM, propM, dactyl, wristCollar, elbowCollar, ...spines];
   const meets = [D.meet(armM, carpM), D.meet(propM, carpM), D.meet(propM, dactyl), D.meet(carpM, wristCollar), D.meet(propM, wristCollar), D.meet(armM, elbowCollar), D.meet(carpM, elbowCollar),
-    ...spines.slice(0, 3).map(sp => D.meet(armM, sp)), D.meet(carpM, spines[3]), D.meet(armM, spines[4]), D.meet(shellEdge, armM)];
+    ...spines.slice(0, 3).map(sp => D.meet(armM, sp)), D.meet(carpM, spines[3]), D.meet(armM, spines[4]), D.meet(armM, ischium)];
   await D.pencil(D.lines([...forms, ...meets], view));
   await S.look('claw');
 })();
