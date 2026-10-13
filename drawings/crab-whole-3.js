@@ -53,9 +53,21 @@ const mid = [612, 318];
 const teethL = toothRow([[322, 272], [362, 335], [440, 418]], 8, 16, 40, 15);
 const teethR = toothRow([[896, 370], [826, 404], [741, 447]], 8, 17, 40, 15).reverse();   // front to spine, the way the outline runs
 // the front: an eye notch at each measured corner, four small teeth between
-// the orbits: deep U-shaped notches cut into the front corners, measured on zooms (the left socket
-// reaches up to y ~398; first drawn as shallow dents, the eyes measured inside them were buried in the shell)
-const front = [[450, 428], [454, 412], [460, 400], [470, 398], [477, 404], [480, 420], [486, 434], ...[0, 1, 2, 3].flatMap(k => { const x = 530 + k * 42, y = 444 + k * 2.5; return [[x - 12, y + 1], [x, y + 6], [x + 12, y + 2]]; }), [690, 453], [693, 440], [698, 431], [708, 430], [713, 437], [715, 450], [718, 456]];
+// The front, from close zooms (the painter: 'have you looked at the eye shapes closely?'). Each
+// socket: an outer wall, the eye inside it (a round globe, highlight on its upper side: left at
+// ~(448,404), right at ~(676,451)), and on its inner side a pale pointed triangle (left at
+// 458-476, 412-430; right at 655-668, 436-460) mirroring each other: the inner orbital tooth,
+// read as a lobe of the shell forming the socket's inner wall (where a swimming crab has one;
+// that reading is mine, the placing measured). I'd first taken the left triangle for the eye.
+// Four small frontal teeth between, spaced about the midline (measured below, at the mouth).
+const MID = [565.5, 465], MLEAN = -0.2, mL = Math.hypot(MLEAN, 1);
+const across = (v, u) => [MID[0] + MLEAN / mL * v + u / mL, MID[1] + v / mL - MLEAN / mL * u];
+const frontTeeth = [-45, -15, 15, 45].flatMap(u => [across(-27, u - 13), across(-21, u), across(-27, u + 13)]);
+const front = [
+  [436, 420], [437, 404], [446, 394], [462, 394], [469, 402], [470, 412], [474, 430], [478, 417], [486, 420],   // left socket; its inner tooth down to a point at (474,430) and back up, a small notch beside it
+  ...frontTeeth,
+  [644, 446], [650, 445], [656, 460], [661, 444], [667, 436], [678, 435], [688, 440], [692, 452], [700, 459], [718, 456],   // right socket, inner tooth's point at (656,460)
+];
 const outline = [
   [300, 250], [322, 266],
   ...teethL, ...front, ...teethR,
@@ -251,11 +263,9 @@ const frontMarks = [
   // the seam between the plates, dark, along the midline
   { kind: 'overlap', pts: [onAxis(-15), onAxis(0), onAxis(14)] },
 ].map(m => ({ ...m, pts: D.smoothPath(m.pts.map(([x, y]) => [x, y, 0]), 4).map(([x, y]) => [x, y]) }));
-// the eyes, drawn light: stalked knobs sticking forward out of their sockets, so seen from above
-// and in front they show above the rim line, inside the orbits (first placed in the bottom of
-// shallow notches, ~25 cells low: the painter caught it). Left measured on a zoom: a glossy knob at (466,418) in a dark
-// socket; right blurrier, a rounded shape topping out at y ~437, agreeing with the body's tilt.
-const eyes = [[466, 418], [703, 442]].map(([x, y]) => blobAt([x, y, RIM], 7, 6, 7));
+// the eyes, drawn light: round globes inside the sockets (first placed in the bottom of shallow
+// notches, ~25 cells low; then the left one on the socket's pale tooth instead of the globe)
+const eyes = [[448, 404, 8], [676, 451, 10]].map(([x, y, r]) => blobAt([x, y, RIM], r, r * 0.85, r));
 const underside = D.prism({ spine: [[480, 470], [590, 476], [690, 466]].map(([x, y]) => P([x, y, 30])), width: [[480, 470], [590, 476], [690, 466]].map(([x, y]) => mm(56, P([x, y, 30]))), thick: [8, 10, 8], rings: 0 });
 underside.clip = [0, 0, 0, 0];
 
