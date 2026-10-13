@@ -301,7 +301,10 @@ export function makeDrawing(sim) {
   // `along`, points down its middle, slices square to that line as it bends), and creases
   // where the surface folds sharper than `crease` degrees. `cut`: forms
   // carved out of it.
-  function mass({ parts, cut = [], blend = 4, cell = null, axis = null, along = null, loops = 4, crease = 50 } = {}) {
+  // `ridges`: draw the ridges of any prisms among the parts, wherever they lie
+  // on the finished surface (a blended mass keeps its planes: the meshing
+  // rounds a ridge off, so it's taken from the prism itself).
+  function mass({ parts, cut = [], blend = 4, cell = null, axis = null, along = null, loops = 4, crease = 50, ridges = true } = {}) {
     const smin = (a, b, k) => { const hh = Math.max(k - Math.abs(a - b), 0) / k; return Math.min(a, b) - hh * hh * k * 0.25; };
     const field = p => { let v = Infinity; for (const f of parts) v = v === Infinity ? f.field(p) : smin(v, f.field(p), blend); for (const c of cut) v = Math.max(v, -c.field(p)); return v; };
     // the box it lives in
@@ -373,6 +376,19 @@ export function makeDrawing(sim) {
         }
         const dmin = Math.min(...dv), dmax = Math.max(...dv);
         for (let r = 1; r <= loops; r++) { const s0 = dmin + (dmax - dmin) * r / (loops + 1); out.push(...levelLines(dv.map(d => d - s0), 'contour')); }
+        // ridges of the prisms inside, kept where they're on the surface
+        if (ridges) for (const f of parts) if (f.kind === 'prism') {
+          for (const ln of f.lines(cam)) {
+            if (ln.kind !== 'edge' && ln.kind !== 'silhouette') continue;
+            let run = [];
+            const flush = () => { if (run.length > 1) out.push({ kind: 'edge', pts: run }); run = []; };
+            for (let k = 0; k < ln.pts.length - 1; k++) for (let s2 = 0; s2 < 6; s2++) {
+              const p = add(ln.pts[k].p, mul(sub(ln.pts[k + 1].p, ln.pts[k].p), s2 / 6));
+              if (Math.abs(field(p)) < h0 * 0.9) run.push({ p, n: grad(p) }); else flush();
+            }
+            flush();
+          }
+        }
         // creases: mesh edges where the surface folds sharply, between faces both toward the eye
         const cz = Math.cos(crease * Math.PI / 180);
         for (const [key, ts] of edgeMap) {
@@ -480,7 +496,12 @@ export function makeDrawing(sim) {
             const xi = Math.round(x), yi = Math.round(y);
             if (xi >= 0 && yi >= 0 && xi < W && yi < H) { const c = yi * W + xi, o = owner[c]; if (o !== id && o >= 0 && !mine.includes(o) && zbuf[c] < z - 0.5 - z * 0.002) seen = false; }
           }
-          const k = seen ? ln.kind : 'hidden';
+          let k = seen ? ln.kind : 'hidden';
+          // an outline where this form passes in front of another reads heavier
+          if (seen && k === 'silhouette') {
+            const xi = Math.round(x), yi = Math.round(y);
+            for (const [dx, dy] of [[4, 0], [-4, 0], [0, 4], [0, -4], [3, 3], [-3, 3], [3, -3], [-3, -3]]) { const xx = xi + dx, yy = yi + dy; if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue; const c = yy * W + xx, o = owner[c]; if (o >= 0 && o !== id && !mine.includes(o) && zbuf[c] > z + 2 + z * 0.004) { k = 'overlap'; break; } }
+          }
           if (k !== runKind) { const last = run[run.length - 1]; flush(); runKind = k; if (last) run.push(last); }
           run.push([x, y]);
         }
@@ -495,7 +516,7 @@ export function makeDrawing(sim) {
   // ---- drawing it with the pencil ----
   // weight: pencil pressure for each kind of line (silhouettes firmest,
   // contours lighter, hidden lines faint). Each line one stroke.
-  async function pencil(polylines, { weight = { silhouette: 0.7, edge: 0.55, meet: 0.6, contour: 0.3, hidden: 0.12, gesture: 0.25 }, framesPerSeg = 1, every = 3 } = {}) {
+  async function pencil(polylines, { weight = { overlap: 0.95, silhouette: 0.65, edge: 0.45, meet: 0.6, contour: 0.28, hidden: 0.12, gesture: 0.25 }, framesPerSeg = 1, every = 3 } = {}) {
     const S = sim, V = S.values;
     S.tool('pencil');
     for (const l of polylines) {
