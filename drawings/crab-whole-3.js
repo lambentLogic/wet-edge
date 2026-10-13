@@ -53,20 +53,22 @@ const mid = [612, 318];
 const teethL = toothRow([[322, 272], [362, 335], [440, 418]], 8, 16, 40, 15);
 const teethR = toothRow([[896, 370], [826, 404], [741, 447]], 8, 17, 40, 15).reverse();   // front to spine, the way the outline runs
 // the front: an eye notch at each measured corner, four small teeth between
-// The front, from close zooms (the painter: 'have you looked at the eye shapes closely?'). Each
-// socket: an outer wall, the eye inside it (a round globe, highlight on its upper side: left at
-// ~(448,404), right at ~(676,451)), and on its inner side a pale pointed triangle (left at
-// 458-476, 412-430; right at 655-668, 436-460) mirroring each other: the inner orbital tooth,
-// read as a lobe of the shell forming the socket's inner wall (where a swimming crab has one;
-// that reading is mine, the placing measured). I'd first taken the left triangle for the eye.
-// Four small frontal teeth between, spaced about the midline (measured below, at the mouth).
+// The front, from close zooms. Each eye socket is a recess like a swollen, concave rhomboid,
+// with the eye a small ball attached at its outermost corner and sticking out past it (the
+// painter, after I'd drawn notches with the eye inside, then taken the socket's lit floor for
+// the eye, then tucked the eyes inside the corners). Measured: left socket outer corner (450,403),
+// top (470,394), inner (487,419), bottom (468,432), the eye at (446,401); right mirrored, inner
+// (642,449), top (658,435), outer (672,446), bottom (658,462), the eye at (679,449). The pale
+// triangle in each is the lit lower part of its concave floor. The shell's edge runs along each
+// socket's upper sides; the lower sides are marks. Four small frontal teeth between, spaced about
+// the midline (measured below, at the mouth).
 const MID = [565.5, 465], MLEAN = -0.2, mL = Math.hypot(MLEAN, 1);
 const across = (v, u) => [MID[0] + MLEAN / mL * v + u / mL, MID[1] + v / mL - MLEAN / mL * u];
 const frontTeeth = [-45, -15, 15, 45].flatMap(u => [across(-27, u - 13), across(-21, u), across(-27, u + 13)]);
 const front = [
-  [436, 420], [437, 404], [446, 394], [462, 394], [469, 402], [470, 412], [474, 430], [478, 417], [486, 420],   // left socket; its inner tooth down to a point at (474,430) and back up, a small notch beside it
+  [434, 414], [450, 403], [470, 394], [487, 419],   // the left socket's upper sides: outer corner (where the eye attaches), top, inner corner
   ...frontTeeth,
-  [644, 446], [650, 445], [656, 460], [661, 444], [667, 436], [678, 435], [688, 440], [692, 452], [700, 459], [718, 456],   // right socket, inner tooth's point at (656,460)
+  [642, 449], [658, 435], [672, 446], [690, 452], [700, 459], [718, 456],   // the right socket's upper sides: inner corner, top, outer corner (where the eye attaches)
 ];
 const outline = [
   [300, 250], [322, 266],
@@ -259,13 +261,17 @@ const half = [
 const clusterHalf = [[701, 467], [633, 492], onAxis(33)];
 const clusterEdge = [...clusterHalf, ...clusterHalf.slice(0, -1).reverse().map(mirror)];
 const frontMarks = [
+  // the sockets' lower sides, a little swollen, and a light curve down each concave floor
+  { kind: 'edge', pts: [[450, 403], [455, 418], [468, 432], [480, 428], [487, 419]] }, { kind: 'contour', pts: [[468, 397], [462, 412], [466, 428]] },
+  { kind: 'edge', pts: [[642, 449], [647, 458], [658, 462], [668, 456], [672, 446]] }, { kind: 'contour', pts: [[657, 438], [653, 448], [657, 459]] },
   ...half, ...half.map(m => ({ ...m, pts: m.pts.map(mirror) })),
   // the seam between the plates, dark, along the midline
   { kind: 'overlap', pts: [onAxis(-15), onAxis(0), onAxis(14)] },
 ].map(m => ({ ...m, pts: D.smoothPath(m.pts.map(([x, y]) => [x, y, 0]), 4).map(([x, y]) => [x, y]) }));
 // the eyes, drawn light: round globes inside the sockets (first placed in the bottom of shallow
 // notches, ~25 cells low; then the left one on the socket's pale tooth instead of the globe)
-const eyes = [[448, 404, 8], [676, 451, 10]].map(([x, y, r]) => blobAt([x, y, RIM], r, r * 0.85, r));
+// (attached at the outer corner and sticking out past it: forms in front of the shell's edge, hiding it)
+const eyes = [[446, 401, 6], [679, 449, 7]].map(([x, y, r]) => blobAt([x, y, RIM + 3], r, r * 0.9, r));
 const underside = D.prism({ spine: [[480, 470], [590, 476], [690, 466]].map(([x, y]) => P([x, y, 30])), width: [[480, 470], [590, 476], [690, 466]].map(([x, y]) => mm(56, P([x, y, 30]))), thick: [8, 10, 8], rings: 0 });
 underside.clip = [0, 0, 0, 0];
 
@@ -278,12 +284,10 @@ window.__paintDone = (async () => {
     [[343, 149], [362, 112], [380, 85]], [[915, 205], [865, 175], [815, 145]]];
   await D.pencil(sweeps.map(D.gesture), { weight: { gesture: 0.16 } });
   log('the shell: traced outline, toothed margins, dome, spines; claws and legs segment by segment');
-  const forms = [shell, ...spines, underside, ...R.forms, ...L.forms, ...legForms, ...paddles];
+  const forms = [shell, ...spines, ...eyes, underside, ...R.forms, ...L.forms, ...legForms, ...paddles];
   await D.pencil(D.lines([...forms, ...spines.map(sp => D.meet(shell, sp)), ...R.meets, ...L.meets, ...legMeets], cam));
   log('the front as marks placed by structure: maxilliped plates, seam, exopods, palps, sockets');
   await D.pencil([{ kind: 'silhouette', pts: D.smoothPath(clusterEdge.map(([x, y]) => [x, y, 0]), 8).map(([x, y]) => [x, y]) }], { every: 1 });
-  const eyeLines = D.lines([shell, ...eyes], cam).filter(l => l.form > 0);
-  await D.pencil(eyeLines, { weight: { silhouette: 0.3, overlap: 0.35, contour: 0.15, edge: 0.25 } });
   await D.pencil(frontMarks, { weight: { edge: 0.5, contour: 0.22, overlap: 0.8 }, every: 1 });
   await S.look('whole');
 })();
