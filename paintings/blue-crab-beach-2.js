@@ -281,7 +281,7 @@ const frontMarks = [
   { kind: 'contour', pts: [[660, 438], [654, 448], [650, 458]] }, { kind: 'contour', pts: [[666, 440], [663, 451], [662, 460]] }, { kind: 'contour', pts: [[642, 444], [639, 454]] },
   ...half, ...half.map(m => ({ ...m, pts: m.pts.map(mirror) })),
   // the seam between the plates, dark, along the midline
-  { kind: 'overlap', pts: [onAxis(-15), onAxis(0), onAxis(14)] },
+  { kind: 'overlap', pts: [onAxis(-6), onAxis(3), onAxis(11)] },   // (shorter: the full-length seam was the harshest line in the face)
 ].map(m => ({ ...m, pts: D.smoothPath(m.pts.map(([x, y]) => [x, y, 0]), 4).map(([x, y]) => [x, y]) }));
 // the eyes, drawn light: round globes inside the sockets (first placed in the bottom of shallow
 // notches, ~25 cells low; then the left one on the socket's pale tooth instead of the globe)
@@ -310,6 +310,20 @@ const grow = (m, r) => { const o = new Uint8Array(m.length), [x0, y0, x1, y1] = 
 const apart = (m, neighbours, r = 1) => { const near = grow(union(neighbours), r), o = new Uint8Array(m.length); for (let c = 0; c < m.length; c++) o[c] = m[c] && !near[c] ? 1 : 0; return o; };
 const and = (a, b) => { const o = new Uint8Array(a.length); for (let c = 0; c < a.length; c++) o[c] = a[c] && b[c] ? 1 : 0; return o; };
 const minus = (a, b) => { const o = new Uint8Array(a.length); for (let c = 0; c < a.length; c++) o[c] = a[c] && !b[c] ? 1 : 0; return o; };
+// a region split across its long axis: the lit (upper) and shaded (lower) halves, for forms
+// with no spine to measure from (the claws' masses)
+const halves = m => {
+  let n = 0, sx = 0, sy = 0; for (let c = 0; c < m.length; c++) if (m[c]) { n++; sx += c % SW; sy += (c / SW) | 0; }
+  const mx = sx / n, my = sy / n; let xx = 0, xy = 0, yy = 0;
+  for (let c = 0; c < m.length; c++) if (m[c]) { const dx = c % SW - mx, dy = ((c / SW) | 0) - my; xx += dx * dx; xy += dx * dy; yy += dy * dy; }
+  const th = 0.5 * Math.atan2(2 * xy, xx - yy); let nx = -Math.sin(th), ny = Math.cos(th); if (ny < 0) { nx = -nx; ny = -ny; }
+  const up = new Uint8Array(m.length), down = new Uint8Array(m.length);
+  for (let c = 0; c < m.length; c++) if (m[c]) { const s = (c % SW - mx) * nx + (((c / SW) | 0) - my) * ny; (s > 0 ? down : up)[c] = 1; }
+  return { up, down };
+};
+const count = m => { let n = 0; for (let c = 0; c < m.length; c++) n += m[c]; return n; };
+// the part of a form's region past fraction t along its spine (a spine's tip)
+const pastAlong = (f, t0) => { const a = toSheet(f.spine[0]), b = toSheet(f.spine.at(-1)), ex = b[0] - a[0], ey = b[1] - a[1], L2 = ex * ex + ey * ey, m = grow(regionOf(f), 1), o = new Uint8Array(m.length); for (let c = 0; c < m.length; c++) if (m[c] && ((c % SW - a[0]) * ex + (((c / SW) | 0) - a[1]) * ey) / L2 >= t0) o[c] = 1; return o; };
 const has = m => { for (let c = 0; c < m.length; c += 7) if (m[c]) return true; return false; };
 // the front's cluster: from the shell's front edge down to its lower outline
 const clusterPoly = [...front, ...clusterEdge];
@@ -336,7 +350,7 @@ const shadedHalf = f => {
 window.__paintDone = (async () => {
   h.setPaper('coldPress', 64); h.setTone('natural'); S.clear();
   log('underdrawing: outlines and main joints, light');
-  S.tool('pencil'); V.pencilRadius = 1.5; V.pencilDark = 0.18;
+  S.tool('pencil'); V.pencilRadius = 1.5; V.pencilDark = 0.11;   // (0.18 read as outlining every shape under the paint)
   const forms = [shell, ...spines, ...eyes, underside, ...R.forms, ...L.forms, ...legForms, ...paddles];
   const meets = [...spines.map(sp => D.meet(shell, sp)), ...R.meets, ...L.meets, ...legMeets];
   const skip = new Set(unassigned.map(f => forms.indexOf(f)));
@@ -355,6 +369,11 @@ window.__paintDone = (async () => {
   const crabMask = grow(union([...masks.filter((_, i) => forms[i] !== underside && !unassigned.includes(forms[i])), M.maskOf(clusterPoly)]), 1);
   S.tool('mask'); h.setBrushPreset('round'); V.brushRadius = 8;
   await M.washAround({ mask: crabMask }, { mist: false, avoidPaint: false, even: false });
+  // the thin cones (arm spines, lateral spines) stroked along at their own width: the wash's
+  // brush was too big for them and sand got in (pass 4)
+  const cones = [...spines, ...R.forms.slice(7), ...L.forms.slice(6)];
+  S.tool('mask');
+  for (const sp of cones) { const a = toSheet(sp.spine[0]), b = toSheet(sp.spine.at(-1)), Lc = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1; V.brushRadius = Math.max(2, 1.2 * count(regionOf(sp)) / Lc); await S.path([[...a, 1], [...lerp2(a, b, 0.7), 0.6], [...b, 0.15]], 3); }
   await S.look('mask');
 
   log('the sand: a neutral grey, laid wet over everything');
@@ -437,7 +456,8 @@ window.__paintDone = (async () => {
     if (has(z)) jointZones.push({ z, a: l.segs[k], b: l.segs[k + 1] });
   }
   h.setBrushPreset('round'); V.brushRadius = 4; V.dipLoad = 0.45;
-  for (const j of jointZones) { h.setBrush([['Pyrrole Scarlet', 1.3], ['Azo Condensation Yellow', 0.7]]); V.brushPigment = 0.5 + (rnd() - 0.5) * 0.15; await washIn(j.z); }
+  // (pass 4's flat orange read as tape: the photo's grade cream to bright orange to dark, like the finger tips)
+  for (const j of jointZones) { if (!has(j.z)) continue; h.setBrush([['Pyrrole Scarlet', 1], ['Azo Condensation Yellow', 1]]); V.brushPigment = 0.45 + (rnd() - 0.5) * 0.12; S.tool('wash'); await S.wash({ mask: j.z }, { kind: 'variegated', into: [['Pyrrole Scarlet', 1.2], ['Perylene Maroon', 0.7]], direction: 'down', paper: 'moist' }); }
   await dry();
   const allJoints = union(jointZones.map(j => j.z));
   log('legs, segment by segment: each its own small wash, up to its joints');
@@ -460,27 +480,41 @@ window.__paintDone = (async () => {
   h.setBrush([['Phthalo Blue (GS)', 1.5], ['French Ultramarine', 0.6], ['Raw Umber', 0.2]]);
   for (const pd of paddles) { S.tool('wash'); await S.wash({ mask: regionOf(pd) }, { kind: 'variegated', into: [['Phthalo Blue (GS)', 1], ['Phthalo Turquoise', 1]], direction: 'across', paper: 'moist' }); }
   await dry();
-  log('a catch-light on each joint');
-  S.tool('paint'); h.setBrush('White Gouache'); V.brushPigment = 0.6; V.dipLoad = 0.25;
-  for (const j of jointZones) { const [x0, y0, x1, y1] = bbox(j.z); await dab([(x0 + x1) / 2 - 1, (y0 + y1) / 2 - 1], 1.4, 2); }
+  log('the cream on the lit top of each joint, and a catch-light');
+  S.tool('paint'); V.dipLoad = 0.3;
+  for (const j of jointZones) {
+    let best = null, bv = Infinity; for (let c = 0; c < j.z.length; c++) if (j.z[c]) { const x = c % SW, y = (c / SW) | 0, v = y + 0.4 * x; if (v < bv) { bv = v; best = [x, y]; } }
+    if (!best) continue; const [x0, y0, x1, y1] = bbox(j.z), cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, p = lerp2(best, [cx, cy], 0.35);
+    h.setBrush([['Transparent Yellow Oxide', 1], ['White Gouache', 0.7]]); V.brushPigment = 0.45; await dab(p, Math.max(1.8, Math.min(x1 - x0, y1 - y0) * 0.22), 3);
+    h.setBrush('White Gouache'); V.brushPigment = 0.7; await dab([p[0] - 0.5, p[1] - 0.5], 1.1, 2);
+  }
+  log('the shine along each segment\'s lit side (the photo\'s legs are glossy; without it they sat flat beside the claws)');
+  h.setBrush('White Gouache'); V.brushPigment = 0.4; V.dipLoad = 0.25; V.brushRadius = 1.4;
+  for (const l of legSets) for (const sg of l.segs) {
+    const Lc = Math.hypot(...[0, 1].map(i => toSheet(sg.spine.at(-1))[i] - toSheet(sg.spine[0])[i])) || 1, w = count(regionOf(sg)) / Lc;
+    const side = sideOf(sg, -w * 0.25), n = side.length; if (n < 3) continue;
+    await S.path(side.slice(Math.floor(n * 0.2), Math.ceil(n * 0.75)).map((p, k, arr) => [...p, 0.3 + 0.5 * Math.sin(Math.PI * k / Math.max(1, arr.length - 1))]), 3);
+  }
 
   log('claws, segment by segment: arms blue above and cream below, carpus and palm nearly white, blue membrane at the joints');
   for (const C of [R, L]) {
     const segs = C.forms.filter(f => f.kind === 'mass');   // arm, carpus, propodus (and the right's shoulder is a prism, first)
     const [armM, carpM, propM] = segs;
-    // arm: blue fading to cream down its side
-    h.setBrushPreset('round'); V.brushRadius = 9; V.dipLoad = 0.6;
-    h.setBrush([['Phthalo Blue (GS)', 1], ['Phthalo Turquoise', 1]]); V.brushPigment = 0.3;
-    S.tool('wash'); await S.wash({ mask: own(armM, [carpM]) }, { kind: 'graded', fadeTo: 0.15, paper: 'moist' });
-    // the palm (with the fixed finger): a whisper of warm cream
-    h.setBrush([['Transparent Yellow Oxide', 1], ['Raw Umber', 0.3]]); V.brushPigment = 0.06; V.dipLoad = 0.8;
-    await washIn(own(propM, [carpM]));
+    // cream first, all over the arm (the painter: cream wants more presence)
+    h.setBrushPreset('round'); V.brushRadius = 9; V.dipLoad = 0.7;
+    h.setBrush([['Transparent Yellow Oxide', 1], ['Raw Umber', 0.3]]); V.brushPigment = 0.13;
+    await washIn(own(armM, [carpM]));
+    // the palm (with the fixed finger): warm cream
+    V.brushPigment = 0.14; await washIn(own(propM, [carpM]));
   }
   await dry();
   for (const C of [R, L]) {
     const segs = C.forms.filter(f => f.kind === 'mass'), [armM, carpM, propM] = segs;
-    h.setBrush([['Transparent Yellow Oxide', 1], ['Raw Umber', 0.35], ['Phthalo Turquoise', 0.15]]); V.brushPigment = 0.08; V.dipLoad = 0.7;
+    h.setBrush([['Transparent Yellow Oxide', 1], ['Raw Umber', 0.35], ['Phthalo Turquoise', 0.1]]); V.brushPigment = 0.13; V.dipLoad = 0.7;
     await washIn(own(carpM, [armM, propM]));
+    // then the arm's blue, on its upper half only, over the dry cream
+    h.setBrush([['Phthalo Blue (GS)', 1], ['Phthalo Turquoise', 1]]); V.brushPigment = 0.3; V.dipLoad = 0.6;
+    S.tool('wash'); await S.wash({ mask: halves(own(armM, [carpM])).up }, { kind: 'graded', fadeTo: 0.5, paper: 'moist' });
     // the membrane collars at wrist and elbow: blue bands
     h.setBrush([['Phthalo Blue (GS)', 1], ['Phthalo Turquoise', 0.6]]); V.brushPigment = 0.32; V.dipLoad = 0.5;
     for (const f of C === R ? [C.forms[5], C.forms[6]] : [C.forms[4], C.forms[5]]) await washIn(regionOf(f));
@@ -504,6 +538,9 @@ window.__paintDone = (async () => {
   await S.path([[262, 450, 0.3], [268, 500, 0.6], [264, 540, 0.25]], 6);
   for (const c of [[860, 612], [207, 444]]) await dab(c, 8, 4);
   await dry();
+  S.tool('paint'); h.setBrush('White Gouache'); V.brushPigment = 0.5; V.dipLoad = 0.25; V.brushRadius = 2;
+  await S.path([[730, 626, 0.3], [790, 618, 0.7], [832, 616, 0.3]], 3);
+  await S.path([[204, 458, 0.3], [208, 500, 0.7], [218, 532, 0.3]], 3);
   await S.look('limbs');
 
   log('the front, from its marks: dark in the gaps under the shell, cream on the lit rims');
@@ -511,7 +548,6 @@ window.__paintDone = (async () => {
   h.setBrushPreset('round'); V.brushRadius = 8; V.brushPigment = 0.26; V.dipLoad = 0.6;
   h.setBrush([['Transparent Yellow Oxide', 1], ['Perylene Green', 0.8], ['Raw Umber', 0.8]]);
   await washIn(apart(M.maskOf(clusterPoly), [regionOf(shell)], 0));
-  await dry();
   log('the layers behind the plates, flaking: rows of thin plates stacked down the cluster and out to the sockets, each a cream lit edge with a dark gap under it (pass 2 had too few to flake)');
   // laid out in the body's own frame (the measured midline): rows below the plates, and beside
   // them out toward the sockets; jittered per side so the two halves don't mirror exactly
@@ -525,15 +561,19 @@ window.__paintDone = (async () => {
       const inn = pts.filter(p => inside(...p)); if (inn.length > 2) flakes.push(inn);
     }
   }
+  // the darks dropped into the base while it's still moist, so they soften (pass 4's, on dry
+  // paper, made hard linework the painter flagged)
   S.tool('paint'); h.setBrushPreset('round'); V.dipLoad = 0.3;
-  h.setBrush([['Perylene Green', 1], ['Perylene Maroon', 0.8], ['Raw Umber', 0.5]]); V.brushPigment = 0.6; V.brushRadius = 2.4;
+  h.setBrush([['Perylene Green', 1], ['Perylene Maroon', 0.8], ['Raw Umber', 0.5]]); V.brushPigment = 0.55; V.brushRadius = 2.6;
   for (const fl of flakes) await S.path(fl.map(([x, y], k) => [x, y + 3, 0.4 + 0.5 * Math.sin(Math.PI * k / (fl.length - 1))]), 2);
-  h.setBrush([['Transparent Yellow Oxide', 1], ['White Gouache', 0.8]]); V.brushPigment = 0.5; V.brushRadius = 2;
-  for (const fl of flakes) await S.path(fl.map(([x, y], k) => [x, y, 0.3 + 0.6 * Math.sin(Math.PI * k / (fl.length - 1))]), 2);
-  S.tool('paint'); h.setBrush([['Transparent Yellow Oxide', 1], ['White Gouache', 0.6]]); V.brushPigment = 0.35; V.dipLoad = 0.3; V.brushRadius = 1.6;
-  for (const m of frontMarks.filter(m => m.kind === 'edge')) await S.path(m.pts.map(p => [...p, 0.6]), 2);
-  h.setBrush([['Perylene Green', 1], ['Perylene Maroon', 1]]); V.brushPigment = 0.7; V.brushRadius = 2.2;
-  for (const m of frontMarks.filter(m => m.kind === 'overlap')) await S.path(m.pts.map(p => [...p, 0.7]), 2);
+  for (const m of frontMarks.filter(m => m.kind === 'overlap')) await S.path(m.pts.map(p => [...p, 0.6]), 2);
+  await dry();
+  // the lit edges broken into pieces, pressure varied, as light catches an edge in places
+  const broken = pts => { const runs = []; let run = []; for (const p of pts) { if (rnd() < 0.22) { if (run.length > 1) runs.push(run); run = []; } else run.push(p); } if (run.length > 1) runs.push(run); return runs; };
+  h.setBrush([['Transparent Yellow Oxide', 1], ['White Gouache', 0.8]]); V.brushPigment = 0.45; V.brushRadius = 2;
+  for (const fl of flakes) for (const r of broken(fl)) await S.path(r.map(([x, y]) => [x, y, 0.35 + 0.5 * rnd()]), 2);
+  h.setBrush([['Transparent Yellow Oxide', 1], ['White Gouache', 0.6]]); V.brushPigment = 0.35; V.brushRadius = 1.6;
+  for (const m of frontMarks.filter(m => m.kind === 'edge')) for (const r of broken(m.pts)) await S.path(r.map(p => [...p, 0.4 + 0.4 * rnd()]), 2);
   log('the eyes: dark globes with a catch-light, in their sockets');
   h.setBrush([['Perylene Green', 1], ['Perylene Maroon', 0.6], ['French Ultramarine', 0.4]]); V.brushPigment = 0.6; V.dipLoad = 0.3;
   for (const e of eyes) await washIn(regionOf(e));
@@ -553,10 +593,14 @@ window.__paintDone = (async () => {
   const armSpines = [...R.forms.slice(7), ...L.forms.slice(6)];
   // (the photo's: cream cones, red at the tip; pass 3 had them backwards, red at the base,
   // after a fresh agent's 'red-based' over my own first reading: the painter caught it)
-  h.setBrush([['White Gouache', 1], ['Transparent Yellow Oxide', 0.3]]); V.brushPigment = 0.8; V.dipLoad = 0.35;
-  for (const sp of armSpines) { const a = toSheet(sp.spine[0]), b = toSheet(sp.spine.at(-1)); V.brushRadius = 4.5; await S.path([[...a, 0.9], [...lerp2(a, b, 0.6), 0.6]], 3); }
-  h.setBrush([['Pyrrole Scarlet', 1.3], ['Azo Condensation Yellow', 0.6]]); V.brushPigment = 0.75;
-  for (const sp of armSpines) { const a = toSheet(sp.spine[0]), b = toSheet(sp.spine.at(-1)); V.brushRadius = 3; await S.path([[...lerp2(a, b, 0.55), 0.8], [...b, 0.3]], 3); }
+  // filling each cone's whole region (pass 4: two strokes down each read as lines in the triangle)
+  h.setBrushPreset('round'); V.brushRadius = 2.5; V.dipLoad = 0.4;
+  h.setBrush([['Transparent Yellow Oxide', 1], ['White Gouache', 0.8]]); V.brushPigment = 0.35;
+  for (const sp of armSpines) await washIn(grow(regionOf(sp), 1));
+  await dry();
+  h.setBrush([['Pyrrole Scarlet', 1.3], ['Azo Condensation Yellow', 0.5]]); V.brushPigment = 0.6;
+  for (const sp of armSpines) await washIn(pastAlong(sp, 0.55));
+  S.tool('paint'); h.setBrushPreset('round');
   // the two pale lines across the shell, crisper (the painter: the white lines could have more definition)
   h.setBrush('White Gouache'); V.brushPigment = 0.7; V.dipLoad = 0.3; V.brushRadius = 1.8;
   await S.path([[520, 292, 0.3], [580, 296, 0.8], [640, 306, 0.6], [700, 322, 0.2]], 3);
