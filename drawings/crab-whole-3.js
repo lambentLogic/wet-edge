@@ -64,11 +64,16 @@ const teethR = toothRow([[896, 370], [826, 404], [741, 447]], 8, 17, 40, 15).rev
 // the midline (measured below, at the mouth).
 const MID = [565.5, 465], MLEAN = -0.2, mL = Math.hypot(MLEAN, 1);
 const across = (v, u) => [MID[0] + MLEAN / mL * v + u / mL, MID[1] + v / mL - MLEAN / mL * u];
-const frontTeeth = [-45, -15, 15, 45].flatMap(u => [across(-27, u - 13), across(-21, u), across(-27, u + 13)]);
+const frontTeeth = [-39, -13, 13, 39].flatMap(u => [across(-27, u - 11), across(-21, u), across(-27, u + 11)]);
+// a corner rounded off: the polyline from a, through corner c, to b, as a curve (the first
+// drawing had the sockets' upper corners sharp)
+const round = (a, c, b, k = 0.45, n = 6) => { const p = [c[0] + (a[0] - c[0]) * k, c[1] + (a[1] - c[1]) * k], q = [c[0] + (b[0] - c[0]) * k, c[1] + (b[1] - c[1]) * k]; return Array.from({ length: n + 1 }, (_, i) => { const t = i / n; return [(1 - t) ** 2 * p[0] + 2 * (1 - t) * t * c[0] + t * t * q[0], (1 - t) ** 2 * p[1] + 2 * (1 - t) * t * c[1] + t * t * q[1]]; }); };
+// the sockets' corners (re-measured: both bigger than first drawn, and near the same size)
+const sockL = { O: [453, 403], T: [474, 392], I: [493, 418], B: [470, 433] }, sockR = { I: [630, 450], T: [654, 429], O: [668, 446], B: [652, 467] };
 const front = [
-  [434, 414], [450, 403], [470, 394], [487, 419],   // the left socket's upper sides: outer corner (where the eye attaches), top, inner corner
+  [434, 414], sockL.O, ...round(sockL.O, sockL.T, sockL.I), ...round(sockL.T, sockL.I, frontTeeth[0], 0.3, 3),   // the left socket's upper sides: outer corner (where the eye attaches), top, inner corner, rounded
   ...frontTeeth,
-  [642, 449], [658, 435], [672, 446], [690, 452], [700, 459], [718, 456],   // the right socket's upper sides: inner corner, top, outer corner (where the eye attaches)
+  ...round(frontTeeth.at(-1), sockR.I, sockR.T, 0.3, 3), ...round(sockR.I, sockR.T, sockR.O), sockR.O, [690, 452], [700, 459], [718, 456],   // the right socket's upper sides: inner corner, top, outer corner (where the eye attaches), rounded
 ];
 const outline = [
   [300, 250], [322, 266],
@@ -262,8 +267,14 @@ const clusterHalf = [[701, 467], [633, 492], onAxis(33)];
 const clusterEdge = [...clusterHalf, ...clusterHalf.slice(0, -1).reverse().map(mirror)];
 const frontMarks = [
   // the sockets' lower sides, a little swollen, and a light curve down each concave floor
-  { kind: 'edge', pts: [[450, 403], [455, 418], [468, 432], [480, 428], [487, 419]] }, { kind: 'contour', pts: [[468, 397], [462, 412], [466, 428]] },
-  { kind: 'edge', pts: [[642, 449], [647, 458], [658, 462], [668, 456], [672, 446]] }, { kind: 'contour', pts: [[657, 438], [653, 448], [657, 459]] },
+  { kind: 'edge', pts: [sockL.O, [457, 420], sockL.B, [484, 430], sockL.I] },
+  { kind: 'edge', pts: [sockR.I, [638, 462], sockR.B, [663, 461], sockR.O] },
+  // the shadow the rim casts into the top of each hollow (dark green on the photo, the floor lit below it):
+  // what says hollow rather than bulge
+  { kind: 'overlap', pts: [[459, 403], [472, 398], [484, 410]] }, { kind: 'overlap', pts: [[637, 447], [653, 435], [663, 443]] },
+  // the little stripes down each concave floor, as the zooms show them (one bowed curve read convex)
+  { kind: 'contour', pts: [[457, 409], [459, 419], [468, 428]] }, { kind: 'contour', pts: [[470, 404], [474, 414], [476, 426]] }, { kind: 'contour', pts: [[485, 411], [487, 421]] },
+  { kind: 'contour', pts: [[660, 438], [654, 448], [650, 458]] }, { kind: 'contour', pts: [[666, 440], [663, 451], [662, 460]] }, { kind: 'contour', pts: [[642, 444], [639, 454]] },
   ...half, ...half.map(m => ({ ...m, pts: m.pts.map(mirror) })),
   // the seam between the plates, dark, along the midline
   { kind: 'overlap', pts: [onAxis(-15), onAxis(0), onAxis(14)] },
@@ -271,7 +282,7 @@ const frontMarks = [
 // the eyes, drawn light: round globes inside the sockets (first placed in the bottom of shallow
 // notches, ~25 cells low; then the left one on the socket's pale tooth instead of the globe)
 // (attached at the outer corner and sticking out past it: forms in front of the shell's edge, hiding it)
-const eyes = [[446, 401, 6], [679, 449, 7]].map(([x, y, r]) => blobAt([x, y, RIM + 3], r, r * 0.9, r));
+const eyes = [[447, 404, 9], [678, 450, 11]].map(([x, y, r]) => blobAt([x, y, RIM + 3], r, r * 0.9, r));
 const underside = D.prism({ spine: [[480, 470], [590, 476], [690, 466]].map(([x, y]) => P([x, y, 30])), width: [[480, 470], [590, 476], [690, 466]].map(([x, y]) => mm(56, P([x, y, 30]))), thick: [8, 10, 8], rings: 0 });
 underside.clip = [0, 0, 0, 0];
 
