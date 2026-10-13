@@ -53,12 +53,17 @@ const armPts = [[748, 479, 28], [800, 490, 30], [860, 506, 30], [880, 515, 30]];
 const arm = D.prism({ spine: armPts.map(P), width: along(armPts, [44, 70, 83, 86]), thick: along(armPts, [34, 50, 58, 60]), section: [[1, -0.5], [0.5, 0.6], [0, 1], [-0.5, 0.6], [-1, -0.5], [0, -1]], rings: 2 });
 // the shoulder segment: from the arm's end (745, 458-500) narrowing toward the body, a ridge
 // where its top face meets the edge (where the cream edge shows), running on under the shell
-const ischPts = [[756, 479, 27], [722, 474, 27], [676, 468, 26]];
-const ischium = D.prism({ spine: ischPts.map(P), width: along(ischPts, [44, 32, 14]), thick: along(ischPts, [30, 22, 10]),
+// (running on up under the shell's edge, so the edge cuts it off rather than it ending short with a flat end)
+const ischPts = [[756, 479, 27], [722, 474, 28], [684, 466, 30], [640, 452, 33], [612, 444, 34]];
+const ischium = D.prism({ spine: ischPts.map(P), width: along(ischPts, [44, 34, 28, 24, 22]), thick: along(ischPts, [30, 24, 20, 18, 16]),
   section: [[1, 0], [0.4, 0.8], [-0.5, 0.8], [-1, 0], [-0.4, -0.9], [0.4, -0.9]], rings: 0 });
-// the shell's front margin covering the shoulder's far end: a low, small form, its edge
-// crossing the shoulder at x ~695 (measured zoomed; my earlier big oval wasn't in the photo)
-const front = (() => { const c = P([652, 456, 36]); return D.ellipsoid({ at: c, axes: [mul(norm(sub(P([700, 452, 36]), P([600, 430, 36]))), mm(56, c)), [0, mm(10, c), 0], mul(norm(sub(P([650, 470, 36]), P([650, 410, 36]))), mm(28, c))], contours: 0 }); })();
+// the shell's front edge (its toothed margin), which the shoulder comes out from under: a
+// thin plate at the shell's height, its edge along the photo's front teeth (620,462 / 660,458 /
+// 705,450 / 745,440), the plate running back into the shell from there. (Not mouthparts, and
+// not an oval: an ellipsoid stand-in read as a ring round the shoulder's tip.)
+const edgePts = [[600, 463], [660, 458], [705, 450], [745, 440], [790, 424]];
+// (at the shell's height, above the shoulder: lower, the shoulder's top poked up through it)
+const front = D.prism({ spine: edgePts.map(([x, y]) => P([x, y - 30, 48])), width: edgePts.map(([x, y]) => mm(60, P([x, y, 48]))), thick: edgePts.map(([x, y]) => mm(8, P([x, y, 48]))), section: [[1, 0], [0, 1], [-1, 0], [0, -1]], rings: 0 });
 // spines along its lower edge, pointing down and forward
 // stout white cones with red tips along the arm's lower edge (measured zoomed: the first
 // placing was 50 cells too far left, and needles where they're cones)
@@ -120,7 +125,7 @@ window.__paintDone = (async () => {
   log('segments with their planes, joints with rims and collars, toothed fingers, spines, the arm under the shell');
   // (teeth left out: from above, the cutting edges face each other and don't show; drawn, they were scratches)
   // only the margin's edge where it crosses the shoulder is drawn (drawn whole, it was an oval)
-  front.clip = toView([660, 440]).concat(toView([720, 500]));
+  front.clip = toView([640, 436]).concat(toView([770, 470]));
   const forms = [front, ischium, armM, carpM, propM, dactyl, wristCollar, elbowCollar, ...spines];
   const meets = [D.meet(armM, carpM), D.meet(propM, carpM), D.meet(propM, dactyl), D.meet(carpM, wristCollar), D.meet(propM, wristCollar), D.meet(armM, elbowCollar), D.meet(carpM, elbowCollar),
     ...spines.slice(0, 3).map(sp => D.meet(armM, sp)), D.meet(carpM, spines[3]), D.meet(armM, spines[4]), D.meet(armM, ischium)];

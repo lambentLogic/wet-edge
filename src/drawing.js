@@ -467,7 +467,10 @@ export function makeDrawing(sim) {
   function lines(forms, cam, { hidden = false, step = 1.2 } = {}) {
     const zbuf = new Float32Array(W * H).fill(Infinity), owner = new Int16Array(W * H).fill(-1);
     forms.forEach((f, id) => {
-      for (const p of f.sample(step * 0.8)) {
+      // sample spacing in world units for about `step` cells on the sheet at this form's depth
+      // (a fixed spacing left holes in the depth buffer when zoomed in, and hidden lines leaked through as dashes)
+      const probe = f.sample(1e9)[0] ?? [0, 0, 0], zf = Math.max(1e-3, cam.project(probe)[2]);
+      for (const p of f.sample(step * 0.8 * zf / cam.focal)) {
         const [x, y, z] = cam.project(p);
         if (z <= 0) continue;
         for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
