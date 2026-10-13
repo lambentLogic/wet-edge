@@ -565,7 +565,13 @@ window.__paintDone = (async () => {
   // (pass 1: a dark brown block; the photo's cluster is olive and cream with dark gaps)
   h.setBrushPreset('round'); V.brushRadius = 8; V.brushPigment = 0.26; V.dipLoad = 0.6;
   h.setBrush([['Transparent Yellow Oxide', 1], ['Perylene Green', 0.8], ['Raw Umber', 0.8]]);
-  await washIn(apart(M.maskOf(clusterPoly), [regionOf(shell)], 0));
+  // the two plates kept out of it: on the photo they're shapes of value, grey-green and paler than
+  // the olive round them (pass 5's front drifted to straw texture and the plates dissolved)
+  const plateR = [[572, 457], [613, 457], [614, 470], [611, 477], [600, 481], [586, 482], [576, 479], [571, 472]];
+  const plates = union([M.maskOf(plateR), M.maskOf(plateR.map(mirror))]);
+  await washIn(minus(apart(M.maskOf(clusterPoly), [regionOf(shell)], 0), grow(plates, 1)));
+  h.setBrush([['Transparent Yellow Oxide', 0.6], ['Perylene Green', 0.5], ['Raw Umber', 0.4], ['French Ultramarine', 0.3]]); V.brushPigment = 0.13;
+  await washIn(plates);
   log('the layers behind the plates, flaking: rows of thin plates stacked down the cluster and out to the sockets, each a cream lit edge with a dark gap under it (pass 2 had too few to flake)');
   // laid out in the body's own frame (the measured midline): rows below the plates, and beside
   // them out toward the sockets; jittered per side so the two halves don't mirror exactly
@@ -591,7 +597,8 @@ window.__paintDone = (async () => {
   h.setBrush([['Transparent Yellow Oxide', 1], ['White Gouache', 0.8]]); V.brushPigment = 0.45; V.brushRadius = 2;
   for (const fl of flakes) for (const r of broken(fl)) await S.path(r.map(([x, y]) => [x, y, 0.35 + 0.5 * rnd()]), 2);
   h.setBrush([['Transparent Yellow Oxide', 1], ['White Gouache', 0.6]]); V.brushPigment = 0.35; V.brushRadius = 1.6;
-  for (const m of frontMarks.filter(m => m.kind === 'edge')) for (const r of broken(m.pts)) await S.path(r.map(p => [...p, 0.4 + 0.4 * rnd()]), 2);
+  // the plates' own rims whole (only the flakes behind are broken)
+  for (const m of frontMarks.filter(m => m.kind === 'edge')) await S.path(m.pts.map(p => [...p, 0.55]), 2);
   log('the eyes: dark globes with a catch-light, in their sockets');
   h.setBrush([['Perylene Green', 1], ['Perylene Maroon', 0.6], ['French Ultramarine', 0.4]]); V.brushPigment = 0.6; V.dipLoad = 0.3;
   for (const e of eyes) await washIn(regionOf(e));
