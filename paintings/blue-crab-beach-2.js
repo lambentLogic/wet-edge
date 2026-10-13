@@ -324,6 +324,14 @@ const halves = m => {
 const count = m => { let n = 0; for (let c = 0; c < m.length; c++) n += m[c]; return n; };
 // the part of a form's region past fraction t along its spine (a spine's tip)
 const pastAlong = (f, t0) => { const a = toSheet(f.spine[0]), b = toSheet(f.spine.at(-1)), ex = b[0] - a[0], ey = b[1] - a[1], L2 = ex * ex + ey * ey, m = grow(regionOf(f), 1), o = new Uint8Array(m.length); for (let c = 0; c < m.length; c++) if (m[c] && ((c % SW - a[0]) * ex + (((c / SW) | 0) - a[1]) * ey) / L2 >= t0) o[c] = 1; return o; };
+// a region split by a measured boundary (a polyline, extended at its ends): the side holding
+// the reference point, and the rest
+const splitBy = (m, line, ref) => {
+  const sideAt = (x, y) => { let best = Infinity, sd = 0; for (let i = 0; i < line.length - 1; i++) { const [ax, ay] = line[i], [bx, by] = line[i + 1], ex = bx - ax, ey = by - ay, L2 = ex * ex + ey * ey; let t = ((x - ax) * ex + (y - ay) * ey) / L2; if (i > 0) t = Math.max(0, t); if (i < line.length - 2) t = Math.min(1, t); const dx = x - ax - ex * t, dy = y - ay - ey * t, d = dx * dx + dy * dy; if (d < best) { best = d; sd = ex * (y - ay) - ey * (x - ax); } } return sd; };
+  const want = Math.sign(sideAt(...ref)), a = new Uint8Array(m.length), b = new Uint8Array(m.length);
+  for (let c = 0; c < m.length; c++) if (m[c]) (Math.sign(sideAt(c % SW, (c / SW) | 0)) === want ? a : b)[c] = 1;
+  return [a, b];
+};
 const has = m => { for (let c = 0; c < m.length; c += 7) if (m[c]) return true; return false; };
 // the front's cluster: from the shell's front edge down to its lower outline
 const clusterPoly = [...front, ...clusterEdge];
@@ -500,21 +508,29 @@ window.__paintDone = (async () => {
   for (const C of [R, L]) {
     const segs = C.forms.filter(f => f.kind === 'mass');   // arm, carpus, propodus (and the right's shoulder is a prism, first)
     const [armM, carpM, propM] = segs;
-    // cream first, all over the arm (the painter: cream wants more presence)
-    h.setBrushPreset('round'); V.brushRadius = 9; V.dipLoad = 0.7;
-    h.setBrush([['Transparent Yellow Oxide', 1], ['Raw Umber', 0.3]]); V.brushPigment = 0.13;
-    await washIn(own(armM, [carpM]));
-    // the palm (with the fixed finger): warm cream
-    V.brushPigment = 0.14; await washIn(own(propM, [carpM]));
+    // the arm: two fields, not a gradient (the painter): sky blue over its near part, cream over
+    // the elbow end, meeting along a boundary measured on zooms; the cream laid against the blue
+    // while it's wet, so a thin green forms where they meet, as on the photo. (Pass 5 split the arm
+    // lengthwise, teal glazed over dry cream; a variegated wash was a gradient.)
+    const arm = own(armM, [carpM]), [blueSide, creamSide] = splitBy(arm, C === R ? [[798, 506], [822, 494], [845, 484], [860, 465], [870, 455]] : [[312, 333], [321, 363], [327, 391], [332, 402]], C === R ? [760, 470] : [370, 380]);
+    h.setBrushPreset('round'); V.brushRadius = 8; V.dipLoad = 0.7;
+    h.setBrush([['Phthalo Blue (GS)', 1], ['Phthalo Turquoise', 0.5], ['French Ultramarine', 0.3]]); V.brushPigment = 0.24;
+    await washIn(blueSide);
+    // (laid into the blue while still very wet, pass 6's cream bled across ~40 cells: a gradient
+    // again. Damp, it meets with a soft edge and a thin green)
+    await S.skipTo('damp', { points: [C === R ? [780, 480] : [360, 375]] });
+    h.setBrush([['Transparent Yellow Oxide', 1], ['Raw Umber', 0.3]]); V.brushPigment = 0.14;
+    await washIn(creamSide);
+    // the palm (with the fixed finger): warm cream (the painter: cream wants more presence)
+    h.setBrush([['Transparent Yellow Oxide', 1], ['Raw Umber', 0.3]]); V.brushPigment = 0.14; V.dipLoad = 0.7;
+    await washIn(own(propM, [carpM]));
   }
   await dry();
   for (const C of [R, L]) {
     const segs = C.forms.filter(f => f.kind === 'mass'), [armM, carpM, propM] = segs;
     h.setBrush([['Transparent Yellow Oxide', 1], ['Raw Umber', 0.35], ['Phthalo Turquoise', 0.1]]); V.brushPigment = 0.13; V.dipLoad = 0.7;
     await washIn(own(carpM, [armM, propM]));
-    // then the arm's blue, on its upper half only, over the dry cream
-    h.setBrush([['Phthalo Blue (GS)', 1], ['Phthalo Turquoise', 1]]); V.brushPigment = 0.3; V.dipLoad = 0.6;
-    S.tool('wash'); await S.wash({ mask: halves(own(armM, [carpM])).up }, { kind: 'graded', fadeTo: 0.5, paper: 'moist' });
+
     // the membrane collars at wrist and elbow: blue bands
     h.setBrush([['Phthalo Blue (GS)', 1], ['Phthalo Turquoise', 0.6]]); V.brushPigment = 0.32; V.dipLoad = 0.5;
     for (const f of C === R ? [C.forms[5], C.forms[6]] : [C.forms[4], C.forms[5]]) await washIn(regionOf(f));
@@ -531,12 +547,14 @@ window.__paintDone = (async () => {
     S.tool('paint'); h.setBrush([['Quinacridone Magenta', 1.5], ['Perylene Maroon', 1]]); V.brushPigment = 0.5; V.dipLoad = 0.4; V.brushRadius = 4;
     await S.path([[...pre, 0.8], [...tip, 0.2]], 6);
   }
-  log('a blue edge along the top of each palm, and blue at the wrists');
+  log('the left palm\'s blue upper face along its right side');
+  // (no stripe on the right palm: it was the first painting's palm-edge line, misplaced into the
+  // middle of the palm, and the photo's right palm is cream throughout; the wrist blue is the collar)
   S.tool('paint'); h.setBrushPreset('round'); V.brushRadius = 7; V.brushPigment = 0.3; V.dipLoad = 0.45;
   h.setBrush([['Phthalo Blue (GS)', 1], ['Phthalo Turquoise', 0.6]]);
-  await S.path([[705, 618, 0.25], [780, 606, 0.6], [835, 604, 0.3]], 6);
   await S.path([[262, 450, 0.3], [268, 500, 0.6], [264, 540, 0.25]], 6);
-  for (const c of [[860, 612], [207, 444]]) await dab(c, 8, 4);
+  // (a touch of blue meant for the right carpus's inner edge landed on the sand: a crop's
+  // coordinates converted wrong; dropped)
   await dry();
   S.tool('paint'); h.setBrush('White Gouache'); V.brushPigment = 0.5; V.dipLoad = 0.25; V.brushRadius = 2;
   await S.path([[730, 626, 0.3], [790, 618, 0.7], [832, 616, 0.3]], 3);
