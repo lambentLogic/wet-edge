@@ -53,7 +53,9 @@ const mid = [612, 318];
 const teethL = toothRow([[322, 272], [362, 335], [440, 418]], 8, 16, 40, 15);
 const teethR = toothRow([[896, 370], [826, 404], [741, 447]], 8, 17, 40, 15).reverse();   // front to spine, the way the outline runs
 // the front: an eye notch at each measured corner, four small teeth between
-const front = [[452, 426], [462, 429], [468, 437], [480, 440], [487, 433], ...[0, 1, 2, 3].flatMap(k => { const x = 530 + k * 42, y = 444 + k * 2.5; return [[x - 12, y + 1], [x, y + 6], [x + 12, y + 2]]; }), [690, 453], [696, 461], [708, 462], [714, 456]];
+// the orbits: deep U-shaped notches cut into the front corners, measured on zooms (the left socket
+// reaches up to y ~398; first drawn as shallow dents, the eyes measured inside them were buried in the shell)
+const front = [[450, 428], [454, 412], [460, 400], [470, 398], [477, 404], [480, 420], [486, 434], ...[0, 1, 2, 3].flatMap(k => { const x = 530 + k * 42, y = 444 + k * 2.5; return [[x - 12, y + 1], [x, y + 6], [x + 12, y + 2]]; }), [690, 453], [693, 440], [698, 431], [708, 430], [713, 437], [715, 450], [718, 456]];
 const outline = [
   [300, 250], [322, 266],
   ...teethL, ...front, ...teethR,
@@ -215,42 +217,52 @@ const legMeets = [...legs, swimL, swimR].flatMap(l => l.meets).concat(D.meet(pad
 // Measured on the zoom (mp.png) with that in mind: grey plates with cream rims at x 526-557 and
 // 572-613, a dark seam between them at x ~565; lit strips outside each; small cream knobs at the
 // bottom by the midline; dark notches under the front edge either side of it.
-const frontMarks = [
-  // the two plates: open at the top, where each goes under the layer above; the lit rim broken
-  // into strokes down the outer side and across the bottom, a dark mark under it (closed, even
-  // outlines read as a pair of glasses; with circles for palps, as a snout: a lit edge with dark
-  // under it is what makes layers read as layers)
-  { kind: 'edge', pts: [[528, 455], [527, 468], [531, 475]] }, { kind: 'edge', pts: [[535, 477], [547, 478], [556, 476]] },
-  { kind: 'overlap', pts: [[531, 480], [543, 482], [553, 481]] }, { kind: 'contour', pts: [[559, 458], [559, 470]] },
+// The midline, measured: the cluster's mirror axis, found by mirroring the photo across candidate
+// lines and keeping the best match (.local/sym.py): it crosses y 465 at x 565.5 and leans
+// -0.20 (down and to the left, with the body). First drawn by eye, the seam leaned the other way
+// and the marks read tilted (the painter: the shell's centre line didn't line up with the mouth).
+// Marks are measured on the right half and mirrored across it.
+const AX = [565.5, 465], LEAN = -0.2, aL = Math.hypot(LEAN, 1), aD = [LEAN / aL, 1 / aL], aU = [1 / aL, -LEAN / aL];
+const mirror = ([x, y]) => { const dx = x - AX[0], dy = y - AX[1], u = dx * aU[0] + dy * aU[1], v = dx * aD[0] + dy * aD[1]; return [AX[0] - u * aU[0] + v * aD[0], AX[1] - u * aU[1] + v * aD[1]]; };
+const onAxis = v => [AX[0] + aD[0] * v, AX[1] + aD[1] * v];
+const half = [
+  // the plate: open at the top, where it goes under the layer above (drawn closed, the pair read
+  // as glasses); the lit rim broken into strokes down the outer side and across the bottom, a dark
+  // mark under it (a lit edge with dark under it is what makes layers read as layers); the inner
+  // side light along the seam
   { kind: 'edge', pts: [[613, 458], [614, 470]] }, { kind: 'edge', pts: [[611, 477], [600, 481], [586, 482], [576, 479]] },
-  { kind: 'overlap', pts: [[607, 485], [594, 486], [582, 485]] }, { kind: 'contour', pts: [[572, 460], [571, 472]] },
-  // the joint across each (where ischium meets merus: from anatomy, so light and partial)
-  { kind: 'contour', pts: [[531, 467], [541, 466]] }, { kind: 'contour', pts: [[600, 470], [611, 471]] },
-  // the seam between them, dark
-  { kind: 'overlap', pts: [[565, 450], [566, 464], [568, 479]] },
-  // the exopods, a strip along each plate's outer side, shadowed beneath
-  { kind: 'edge', pts: [[525, 450], [510, 452], [495, 458]] }, { kind: 'overlap', pts: [[522, 459], [508, 463]] },
+  { kind: 'overlap', pts: [[607, 485], [594, 486], [582, 485]] }, { kind: 'contour', pts: [[572, 458], [571, 472]] },
+  // the joint across it (where ischium meets merus: from anatomy, so light and partial)
+  { kind: 'contour', pts: [[600, 470], [611, 471]] },
+  // the exopod, a strip along the plate's outer side, shadowed beneath
   { kind: 'edge', pts: [[614, 455], [632, 459], [652, 466]] }, { kind: 'overlap', pts: [[618, 465], [636, 469]] },
-  // the palps folded at the plates' tips, by the midline: lit tops, dark under
-  { kind: 'edge', pts: [[552, 492], [556, 487], [561, 490]] }, { kind: 'overlap', pts: [[553, 497], [559, 498]] },
-  { kind: 'edge', pts: [[571, 492], [575, 488], [580, 491]] }, { kind: 'overlap', pts: [[572, 498], [578, 498]] },
-  // the layers behind, their lit edges showing below and between (measured on the zoom)
-  { kind: 'edge', pts: [[518, 484], [530, 488], [545, 491]] }, { kind: 'edge', pts: [[588, 492], [602, 490], [616, 487]] },
-  { kind: 'edge', pts: [[623, 482], [636, 485], [648, 491]] }, { kind: 'edge', pts: [[497, 466], [508, 470]] },
-  // the antennules' sockets under the front edge, dark
-  { kind: 'overlap', pts: [[533, 441], [541, 445], [549, 443]] }, { kind: 'overlap', pts: [[590, 444], [599, 448], [608, 446]] },
+  // the palp folded at the plate's tip, by the midline: a lit top, dark under
+  { kind: 'edge', pts: [[570, 492], [574, 488], [579, 491]] }, { kind: 'overlap', pts: [[571, 498], [577, 498]] },
+  // the layers behind, their lit edges showing below and beside
+  { kind: 'edge', pts: [[584, 490], [600, 487], [616, 484]] }, { kind: 'edge', pts: [[623, 482], [636, 485], [648, 491]] },
+  // the antennule's socket under the front edge, dark
+  { kind: 'overlap', pts: [[590, 444], [599, 448], [608, 446]] },
+];
+// the cluster's lower outline, mirrored too: low on the midline, rising to each side
+const clusterHalf = [[701, 467], [633, 492], onAxis(33)];
+const clusterEdge = [...clusterHalf, ...clusterHalf.slice(0, -1).reverse().map(mirror)];
+const frontMarks = [
+  ...half, ...half.map(m => ({ ...m, pts: m.pts.map(mirror) })),
+  // the seam between the plates, dark, along the midline
+  { kind: 'overlap', pts: [onAxis(-15), onAxis(0), onAxis(14)] },
 ].map(m => ({ ...m, pts: D.smoothPath(m.pts.map(([x, y]) => [x, y, 0]), 4).map(([x, y]) => [x, y]) }));
-// the eyes, small and drawn light (where: the specimen; their shape here: unconfirmed)
-const eyes = [[476, 444], [702, 466]].map(([x, y]) => blobAt([x, y, RIM - 2], 8, 7, 8));
-// the cluster's lower outline, where it bulges below the front edge (five measured points)
-const clusterEdge = [[470, 446], [520, 472], [564, 499], [633, 492], [701, 467]];
+// the eyes, drawn light: stalked knobs sticking forward out of their sockets, so seen from above
+// and in front they show above the rim line, inside the orbits (first placed in the bottom of
+// shallow notches, ~25 cells low: the painter caught it). Left measured on a zoom: a glossy knob at (466,418) in a dark
+// socket; right blurrier, a rounded shape topping out at y ~437, agreeing with the body's tilt.
+const eyes = [[466, 418], [703, 442]].map(([x, y]) => blobAt([x, y, RIM], 7, 6, 7));
 const underside = D.prism({ spine: [[480, 470], [590, 476], [690, 466]].map(([x, y]) => P([x, y, 30])), width: [[480, 470], [590, 476], [690, 466]].map(([x, y]) => mm(56, P([x, y, 30]))), thick: [8, 10, 8], rings: 0 });
 underside.clip = [0, 0, 0, 0];
 
 window.__paintDone = (async () => {
   h.setPaper('hotPress', 5); h.setTone('white'); S.clear();
   log('gesture: the body\'s width spine to spine, its depth back to front, and each limb\'s sweep');
-  const sweeps = [[[255, 236], [612, 300], [976, 352]], [[575, 198], [600, 320], [590, 450]],
+  const sweeps = [[[255, 236], [612, 300], [976, 352]], [[619, 198], [594.5, 320], [562.5, 480]]   /* the midline, along the mouth's measured axis */,
     ...[...legs, swimL, swimR].map(l => l.segs.map(sg => cam.project(sg.spine[0]).slice(0, 2)).concat([cam.project(l.segs[l.segs.length - 1].spine.at(-1)).slice(0, 2)])),
     [[420, 400], [262, 366], [212, 400], [222, 480], [242, 545], [316, 688]], [[700, 470], [880, 515], [882, 600], [800, 626], [700, 641], [530, 658]],
     [[343, 149], [362, 112], [380, 85]], [[915, 205], [865, 175], [815, 145]]];
