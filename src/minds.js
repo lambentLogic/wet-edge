@@ -208,15 +208,43 @@ export function makeMinds(sim) {
   // the wash senses the finished part behind the brush and scales the paint
   // strength of the rows to come. targetAt(y): relative strength wanted at
   // height y (a graded wash), 1 by default.
-  async function makeDoser(inside, targetAt = () => 1) {
+  // deep (optional): only these cells are measured, the open middle a wash's edge loops don't
+  // reach (measured over the whole region, the loops along the top set the target and the side
+  // loops steered every row after: a wash's middle came out 0.8 to 2.6 strokes by shape, the
+  // washeven probe). With it, the target is one stroke's own deposit: what the first row added
+  // over its core, measured as the probe measures a stroke; and if a shape has no deep cells,
+  // no target (the rows lay as loaded) rather than a bad one.
+  async function makeDoser(inside, targetAt = () => 1, deep = null) {
     const a0 = await sim.read();
     const laid = (a, c) => a[c * 4 + 1] + a[c * 4 + 2] - a0[c * 4 + 1] - a0[c * 4 + 2];
-    let T = null, y0 = 0, k = 1;
+    // (deep mode: the first row lays at the starting correction too, and the target is its deposit
+    // scaled back up: laid at full strength, the first row was a third heavier than every row after
+    // it, and it lies along the top of every shape)
+    let T = null, y0 = 0, k = deep ? 0.75 : 1, before = deep ? a0 : null;
+    let deepN = 0; if (deep) for (let c = 0; c < deep.length; c++) deepN += deep[c];
+    if (deep && deepN < 400) return { k: 1, async beforeRow() {}, async row() {} };   // no open middle: no target
     return {
       get k() { return k; },
+      // Just before each row (deep mode: the first row's own deposit is measured against this).
+      async beforeRow() { if (deep && T === null) before = await sim.read(); },
       // After a full row centred at y, of half-width hw.
       async row(y, hw) {
         const a = await sim.read();
+        if (deep) {
+          if (T === null) {
+            let sum = 0, n = 0;
+            const core = Math.max(3, hw * 0.17);
+            for (let yy = Math.max(0, Math.round(y - core)); yy <= Math.min(SH - 1, Math.round(y + core)); yy++)
+              for (let x = 0; x < SW; x++) { const c = yy * SW + x; if (inside[c]) { const d = a[c * 4 + 1] + a[c * 4 + 2] - before[c * 4 + 1] - before[c * 4 + 2]; if (d > 0) { sum += d; n++; } } }
+            if (n > 50 && sum > 0) { T = sum / n / k; y0 = y; }
+            return;
+          }
+          let sum = 0, want = 0, n = 0;
+          for (let yy = Math.max(0, Math.round(y - hw * 3.5)); yy < Math.min(SH, Math.round(y - hw * 1.5)); yy++)
+            for (let x = 0; x < SW; x++) { const c = yy * SW + x; if (deep[c]) { sum += laid(a, c); want += targetAt(yy) / targetAt(y0); n++; } }
+          if (n > 200 && sum > 0) k = Math.min(1.5, Math.max(0.1, k * Math.sqrt(Math.min(1.5, Math.max(0.5, T * want / sum)))));
+          return;
+        }
         if (T === null) {
           let sum = 0, n = 0;
           for (let yy = Math.max(0, Math.round(y - hw * 0.4)); yy <= Math.min(SH - 1, Math.round(y + hw * 0.4)); yy++) {
@@ -244,7 +272,8 @@ export function makeMinds(sim) {
     h.setMode(4); V.brushRadius = reach; V.mistRadius = reach;
     for (let y = reach * 0.6, d = 1; y < SH; y += reach * 1.1, d = -d) {
       let run = [];
-      const flush = async () => { if (run.length > 1) { h.lift(); await sim.path(run, 1); } run = []; };
+      // (a lone row goes out and back: one way, its start laid lighter, a disc's left side pale)
+      const flush = async () => { if (run.length === 1) run.push([run[0][0] + 0.5, run[0][1], run[0][2]]); if (lone && run.length > 1) run = [...run, ...run.slice(0, -1).reverse()]; if (run.length > 1) { h.lift(); await sim.path(run, 1); } run = []; };
       for (let k = 0; k <= Math.ceil(SW / 16); k++) {
         const x = d > 0 ? k * 16 : SW - k * 16, c = Math.round(y) * SW + Math.min(SW - 1, x);
         if (fromEdge[c] > reach * 0.9) run.push([x, y, 0.9]); else await flush();
@@ -552,6 +581,10 @@ export function makeMinds(sim) {
     // the room near an edge left stubby dashes along any upright edge.)
     const openAt0 = margin + bigR, levels = [cutL];
     while (levels[levels.length - 1] * 2 < openAt0) levels.push(levels[levels.length - 1] * 2);
+    // A shape too thin for rows anywhere gets a loop down its middle too: without it the middle of
+    // a band had only the loops' soft edges (0.6 of a stroke, the washeven probe).
+    let maxD = 0; for (let c = 0; c < N; c++) if (inside[c] && dist[c] < 1e8 && dist[c] > maxD) maxD = dist[c];
+    if (maxD <= openAt0) { while (levels.length > 1 && levels[levels.length - 1] >= maxD * 0.85) levels.pop(); if (maxD * 0.85 > levels[levels.length - 1] * 1.2) levels.push(maxD * 0.85); }
     // Each loop is cut into pieces at fixed horizontal slab lines, and the work goes slab by
     // slab, edge loop to inner loop within each, just ahead of the rows: a whole loop laid first
     // had dried at the bottom, with a hard edge, by the time the rows got there. (Cut by each
@@ -559,7 +592,11 @@ export function makeMinds(sim) {
     // neighbouring loops at one spot could go down seconds apart, the first drying before the
     // second met it: a ghost seam inside a round wash's edge, which side depending on how the
     // bands fell across the shape. DeepSeek's persimmon; traced with window.__washTrace.)
-    const slabH = Math.max(12, rowStep * 0.5), slabOf = y => Math.floor(y / slabH);
+    // (slabs, and the sweep below, measured from the area's own top, not the sheet's: on the
+    // sheet's grid the same disc half a row lower was laid in a different order and came out with
+    // twice the strength in its middle)
+    let top0 = H; for (let c = 0; c < N; c++) if (inside[c]) { top0 = (c / W) | 0; break; }
+    const slabH = Math.max(12, rowStep * 0.5), slabOf = y => Math.floor((y - top0) / slabH);
     const pieces = l => {
       const out = [];
       let cur = [l[0]];
@@ -567,7 +604,7 @@ export function makeMinds(sim) {
         const [x0, y0] = l[k - 1], [x1, y1] = l[k], s0 = slabOf(y0), s1 = slabOf(y1);
         if (s0 !== s1) {
           // split where the segment crosses the slab line, both pieces sharing that point
-          const yb = (s1 > s0 ? s1 : s0) * slabH, t = (yb - y0) / (y1 - y0), p = [x0 + (x1 - x0) * t, yb];
+          const yb = top0 + (s1 > s0 ? s1 : s0) * slabH, t = (yb - y0) / (y1 - y0), p = [x0 + (x1 - x0) * t, yb];
           cur.push(p); if (cur.length > 1) out.push(cur); cur = [p];
         }
         cur.push(l[k]);
@@ -617,9 +654,12 @@ export function makeMinds(sim) {
     }
     return out;
     }
-    const doser = even && h.mode() !== 1 ? await makeDoser(inside, pigmentAt ? y => pigmentAt(W / 2, y) : () => 1) : null;
+    let doser = null;   // (made once the open middle is known, below)
     const unturn = broadside();
-    const setLoad = (x, y) => { if (brushAt) h.setBrush(brushAt(x, y)); V.brushPigment = (pigmentAt ? pigmentAt(x, y) : pig0) * (doser?.k ?? 1); };
+    // (the doser's correction is for the rows, which overlap each other; the edge loops lay at the
+    // wash's own strength: scaled with the rows, every loop laid after the first row came out a
+    // quarter lighter, and a sweep from the top lays those along the bottom: a pale bottom edge)
+    const setLoad = (x, y, loop = false) => { if (brushAt) h.setBrush(brushAt(x, y)); V.brushPigment = (pigmentAt ? pigmentAt(x, y) : pig0) * (loop ? 1 : doser?.k ?? 1); };
     // Sweep top to bottom: rows of the big brush where it stays clear, and
     // each contour cut in just before the rows reach it.
     // Mist the open area first, so the cut-in rings and the fill strokes
@@ -639,7 +679,8 @@ export function makeMinds(sim) {
         V.brushRadius = mistR; V.mistRadius = mistR;   // the spray has its own reach; keep it this size
         for (let y = mistR * 0.6, dirx = 1; y < H; y += mistR * 1.1, dirx = -dirx) {
           let run = [];
-          const flush = async () => { if (run.length > 1) { h.lift(); await sim.path(run, 1); } run = []; };
+          // (a lone row goes out and back: one way, its start laid lighter, a disc's left side pale)
+      const flush = async () => { if (run.length === 1) run.push([run[0][0] + 0.5, run[0][1], run[0][2]]); if (lone && run.length > 1) run = [...run, ...run.slice(0, -1).reverse()]; if (run.length > 1) { h.lift(); await sim.path(run, 1); } run = []; };
           for (let k = 0; k <= Math.ceil(W / step); k++) {
             const x = dirx > 0 ? k * step : W - k * step;
             const d = at(x, y);
@@ -662,19 +703,62 @@ export function makeMinds(sim) {
     // rows closer together (fineStep), so the narrowed strokes still meet
     // (at one spacing they left gaps: stripes beside each shape).
     const openAt = margin + bigR, fineStep = Math.max(2, tipR * 2.5, bigR * fine);
-    let cut = 0, rows = 0, nextCoarse = rowStep / 2, dirx = 1;
+    let cut = 0, rows = 0, dirx = 1;
+    // Rows from the shape's own top to its own bottom, for each separate open part (where the
+    // whole brush fits) on its own: the first row then reaches the top edge as the last reaches
+    // the bottom. (On a grid fixed to the sheet, how far the first and last rows reached into the
+    // edges depended on where the shape sat: top 2x the middle on a rectangle, and the same disc
+    // half a row lower went from a 0.77 to a 0.49 bottom edge, the washeven probe.)
+    const comp = new Int32Array(N).fill(-1), comps = [];
+    for (let c0 = 0; c0 < N; c0++) {
+      if (comp[c0] >= 0 || !inside[c0] || !(dist[c0] > openAt)) continue;
+      const id = comps.length, q = [c0]; comp[c0] = id; let top = H, bot = -1;
+      while (q.length) { const c = q.pop(), x = c % W, y = (c / W) | 0; if (y < top) top = y; if (y > bot) bot = y;
+        for (const nb of [x > 0 ? c - 1 : -1, x < W - 1 ? c + 1 : -1, c - W, c + W]) if (nb >= 0 && nb < N && comp[nb] < 0 && inside[nb] && dist[nb] > openAt) { comp[nb] = id; q.push(nb); } }
+      comps.push({ top, bot });
+    }
+    const rowPlan = [];
+    // (an open part shorter than a row step gets one row through its middle: two at its top and
+    // bottom were dabs on a round shape, and its middle got none)
+    comps.forEach(({ top, bot }, id) => { if (bot - top < rowStep) { rowPlan.push({ y: (top + bot) / 2, id }); return; } const n = Math.ceil((bot - top) / rowStep - 1e-6); for (let k = 0; k <= n; k++) rowPlan.push({ y: top + (bot - top) * k / n, id }); });
+    for (const r of rowPlan) r.lone = rowPlan.filter(q => q.id === r.id).length === 1;
+    rowPlan.sort((p, q) => p.y - q.y);
+    // How far each cell is from where the rows run: a loop the rows will also reach lays a lighter
+    // dose (on a big shape the rows' ends and first and last rows cover its edges, and loops at
+    // full strength on top doubled them: the rectangle's sides 1.4x its middle)
+    // (the rows' planned footprints stamped into a coverage map, each a brush-wide band with a
+    // soft profile; a loop lays less in proportion to the coverage it lands on, against the
+    // coverage in the open middle)
+    const cov = new Float32Array(N);
+    for (const { y, id } of rowPlan) {
+      const yi = Math.round(y); let x0 = -1, x1 = -1;
+      for (let x = 0; x < W; x++) if (comp[yi * W + x] === id) { if (x0 < 0) x0 = x; x1 = x; }
+      if (x0 < 0) continue;
+      for (let yy = Math.max(0, Math.ceil(y - bigR)); yy <= Math.min(H - 1, Math.floor(y + bigR)); yy++) for (let x = Math.max(0, Math.ceil(x0 - bigR)); x <= Math.min(W - 1, Math.floor(x1 + bigR)); x++) {
+        const dx = x < x0 ? x0 - x : x > x1 ? x - x1 : 0, d2 = (dx * dx + (yy - y) * (yy - y)) / (bigR * bigR);
+        if (d2 < 1) cov[yy * W + x] += 1 - d2;
+      }
+    }
+    let covFull = 0; { const v = []; for (let c = 0; c < N; c += 3) if (comp[c] >= 0) v.push(cov[c]); v.sort((a, b) => a - b); covFull = v.length ? v[v.length >> 1] : 0; }
+    const rowCovered = l => { if (!covFull) return 0; let s = 0; for (const [x, y] of l) s += Math.min(1, cov[Math.min(H - 1, Math.max(0, Math.round(y))) * W + Math.min(W - 1, Math.max(0, Math.round(x)))] / covFull); return s / l.length; };
+    // the open middle beyond the deepest edge loop's reach, for the doser
+    const deep = new Uint8Array(N), reach = 2 * levels[levels.length - 1] + 4;
+    for (let c = 0; c < N; c++) if (inside[c] && dist[c] > reach) deep[c] = 1;
+    if (even && h.mode() !== 1) doser = await makeDoser(inside, pigmentAt ? y => pigmentAt(W / 2, y) : () => 1, deep);
     const lastRuns = [];   // the full-width runs, for picking up the bead at the end
-    const row = async (y, near) => {
+    const row = async (y, near, id = -1, lone = false) => {
       const before0 = rows;
       V.brushRadius = bigR;
+      if (doser && !near) await doser.beforeRow?.();
       let run = [];
-      const flush = async () => { if (run.length > 1) { setLoad(run[0][0], y); h.lift(); window.__washTrace?.push({ kind: 'row', t: sim.time(), pts: run.map(([x, yy]) => [x, yy]) }); await layStroke(run, framesPerSeg, brushAt); rows++; if (!near) lastRuns.push({ y, run: run.slice() }); } run = []; };
+      // (a lone row goes out and back: one way, its start laid lighter, a disc's left side pale)
+      const flush = async () => { if (run.length === 1) run.push([run[0][0] + 0.5, run[0][1], run[0][2]]); if (lone && run.length > 1) run = [...run, ...run.slice(0, -1).reverse()]; if (run.length > 1) { setLoad(run[0][0], y); h.lift(); window.__washTrace?.push({ kind: 'row', t: sim.time(), dip: V.dipLoad, pig: V.brushPigment, pts: run.map(([x, yy]) => [x, yy]) }); await layStroke(run, framesPerSeg, brushAt); rows++; if (!near) lastRuns.push({ y, run: run.slice() }); } run = []; };
       // (From a brush-width off the sheet: rows starting at its edge showed
       // their rounded ends.)
       for (let k = 0; k <= Math.ceil((W + 2 * bigR) / 10); k++) {
         const x = dirx > 0 ? -bigR + k * 10 : W + bigR - k * 10;
         const d = at(x, y);
-        const ok = near ? d > clearOf && d <= openAt : d > openAt;
+        const ok = near ? d > clearOf && d <= openAt : d > openAt && (id < 0 || comp[Math.min(H - 1, Math.max(0, Math.round(y))) * W + Math.min(W - 1, Math.max(0, Math.round(x)))] === id);
         if (ok) run.push([x, y, near ? pressFor(d - margin) : 1]); else await flush();
       }
       await flush();
@@ -689,11 +773,12 @@ export function makeMinds(sim) {
         if (n > 50 && sum > 0) V.dipLoad = Math.min(1, Math.max(0.1, V.dipLoad * Math.min(1.5, Math.max(0.5, water * n / sum))));
       }
     };
-    for (let y = fineStep / 2; y < H + rowStep; y += fineStep) {
+    for (let y = top0 - rowStep + fineStep / 2; y < H + rowStep; y += fineStep) {
       while (todo.length && todo[0].top < y + rowStep) {
         const { l, L } = todo.shift();
         const p = L === cutL ? 0 : pressFor(L - margin);
-        V.brushRadius = bigR; setLoad(l[0][0], l[0][1]);
+        V.brushRadius = bigR; setLoad(l[0][0], l[0][1], true);
+        V.brushPigment *= 1 - 0.5 * rowCovered(l);   // (0.7 passed the rectangle's sides but left discs' middles under 0.9 of a stroke)
         // Cut-ins at the wash's starting water: the water sense only wets the
         // brush for the open rows (a wetter tip along the edge spilled over it).
         const dipNow = V.dipLoad; V.dipLoad = Math.min(dipNow, dipCut);
@@ -702,7 +787,7 @@ export function makeMinds(sim) {
         V.dipLoad = dipNow;
       }
       if (y >= H) continue;
-      while (y >= nextCoarse) { await row(nextCoarse, false); nextCoarse += rowStep; }
+      while (rowPlan.length && y >= rowPlan[0].y) { const r = rowPlan.shift(); await row(r.y, false, r.id, r.lone); }
     }
     // Pick up the bead (off by default: this pass left a pale, hard-edged
     // band where it lifted; needs a gentler touch): the last row leaves a

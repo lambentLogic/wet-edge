@@ -768,7 +768,7 @@
           bottom: await pick(await mean(x0 + 2 * bw, x1 - 2 * bw, y1 - bw, y1)),
           left: await pick(await mean(x0, x0 + bw, y0 + 2 * bw, y1 - 2 * bw)),
           right: await pick(await mean(x1 - bw, x1, y0 + 2 * bw, y1 - 2 * bw)),
-          bw, mid: +mid.toFixed(2),
+          bw, mid: +mid.toFixed(4),
         };
       };
       const wash = async (poly, pts) => {
@@ -783,13 +783,14 @@
       await fresh(paper);
       await withValues({ brushRadius: R, brushPigment: 0.30, granulation: 0, brushCapacity: 0 }, async () => {
         h.setBrushPreset('mop');
+        S.values.brushRadius = R;   // (after the preset, which sets its own size: before, the wash ran at the mop's 30)
         h.setBrush([['Phthalo Blue (GS)', 1], ['French Ultramarine', 1]]);
         S.values.dipLoad = 0.36;
         // A rectangle, a disc, the same disc half a row step lower, a thin band.
         const rect = [60, 80, 480, 320];
         await wash(box(...rect), inside(...rect));
         Object.assign(out, { rect: await bands(rect[0], rect[1], rect[2], rect[3]) });
-        const dA = [700, 170, 80], dB = [700, 170 + rowStep / 2, 80];
+        const dA = [700, 170, 80], dB = [900, 170 + rowStep / 2, 80];   // (B beside A, not over it: at 700 it was a glaze over dried A)
         await wash(discPoly(dA[0], dA[1], dA[2]), [[dA[0], dA[1]]]);
         out.discA = await bands(dA[0] - dA[2], dA[1] - dA[2], dA[0] + dA[2], dA[1] + dA[2]);
         await wash(discPoly(dB[0], dB[1], dB[2]), [[dB[0], dB[1]]]);
@@ -801,7 +802,7 @@
         h.lift(); await h.paint(120, 700, 740, 700, R);
         S.act('dry', true);
         try { await S.skipTo('dry', { points: [[400, 700]] }); } finally { S.act('dry', false); }
-        out.stroke = +(await mean(200, 660, 690, 710)).toFixed(2);
+        out.stroke = +(await mean(200, 660, 690, 710)).toFixed(4);
       });
       h.end();
       for (const k of ['rect', 'discA', 'discB', 'band']) if (out[k]) out[k].midVsStroke = +(out[k].mid / (out.stroke || 1)).toFixed(2);
