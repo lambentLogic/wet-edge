@@ -759,15 +759,44 @@
           for (let x = Math.max(0, Math.round(x0)); x < Math.min(W, Math.round(x1)); x++) { s += a[(y * W + x) * 4 + 2]; n++; }
         return s / Math.max(1, n);
       };
-      const bands = async (x0, y0, x1, y1) => {
+      const inPoly = (poly, x, y) => {
+        let c = false;
+        for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+          const [xi, yi] = poly[i], [xj, yj] = poly[j];
+          if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) c = !c;
+        }
+        return c;
+      };
+      const bands = async (poly, x0, y0, x1, y1) => {
         const bw = Math.max(8, Math.min(R, Math.round((y1 - y0) / 6)));
-        const mid = await mean(x0 + 2 * bw, x1 - 2 * bw, y0 + 2 * bw, y1 - 2 * bw);
-        const pick = async (m) => +(m / (mid || 1)).toFixed(2);
+        const a = await S.read();
+        const avg = (xa, xb, ya, yb) => {
+          let s = 0, n = 0;
+          for (let y = Math.max(0, Math.round(ya)); y < Math.min(SH, Math.round(yb)); y++)
+            for (let x = Math.max(0, Math.round(xa)); x < Math.min(W, Math.round(xb)); x++) { s += a[(y * W + x) * 4 + 2]; n++; }
+          return s / Math.max(1, n);
+        };
+        const mid = avg(x0 + 2 * bw, x1 - 2 * bw, y0 + 2 * bw, y1 - 2 * bw);
+        const pick = (m) => +(m / (mid || 1)).toFixed(2);
+        // The worst column in the bottom band: a small unpainted notch at a shape's
+        // foot averages away in the band, so it needs its own number.
+        let bottomMin = 1;
+        for (let x = Math.round(x0 + 2 * bw); x < Math.round(x1 - 2 * bw); x++) bottomMin = Math.min(bottomMin, avg(x, x + 1, y1 - bw, y1) / (mid || 1));
         return {
-          top: await pick(await mean(x0 + 2 * bw, x1 - 2 * bw, y0, y0 + bw)),
-          bottom: await pick(await mean(x0 + 2 * bw, x1 - 2 * bw, y1 - bw, y1)),
-          left: await pick(await mean(x0, x0 + bw, y0 + 2 * bw, y1 - 2 * bw)),
-          right: await pick(await mean(x1 - bw, x1, y0 + 2 * bw, y1 - 2 * bw)),
+          top: pick(avg(x0 + 2 * bw, x1 - 2 * bw, y0, y0 + bw)),
+          bottom: pick(avg(x0 + 2 * bw, x1 - 2 * bw, y1 - bw, y1)),
+          left: pick(avg(x0, x0 + bw, y0 + 2 * bw, y1 - 2 * bw)),
+          right: pick(avg(x1 - bw, x1, y0 + 2 * bw, y1 - 2 * bw)),
+          bottomMin: +bottomMin.toFixed(2),
+          // Bare-paper share: cells inside the shape reading under 40% of the middle.
+          // A notch at a round shape's foot is a few cells wide and averages away.
+          pale: +(() => {
+            let n = 0, p = 0;
+            for (let y = Math.round(y0); y < Math.round(y1); y++)
+              for (let x = Math.round(x0); x < Math.round(x1); x++)
+                if (inPoly(poly, x, y)) { n++; if (a[(y * W + x) * 4 + 2] < 0.4 * mid) p++; }
+            return n ? 100 * p / n : 0;
+          })().toFixed(2),
           bw, mid: +mid.toFixed(4),
         };
       };
@@ -789,15 +818,20 @@
         // A rectangle, a disc, the same disc half a row step lower, a thin band.
         const rect = [60, 80, 480, 320];
         await wash(box(...rect), inside(...rect));
-        Object.assign(out, { rect: await bands(rect[0], rect[1], rect[2], rect[3]) });
+        Object.assign(out, { rect: await bands(box(...rect), rect[0], rect[1], rect[2], rect[3]) });
         const dA = [700, 170, 80], dB = [900, 170 + rowStep / 2, 80];   // (B beside A, not over it: at 700 it was a glaze over dried A)
         await wash(discPoly(dA[0], dA[1], dA[2]), [[dA[0], dA[1]]]);
-        out.discA = await bands(dA[0] - dA[2], dA[1] - dA[2], dA[0] + dA[2], dA[1] + dA[2]);
+        out.discA = await bands(discPoly(dA[0], dA[1], dA[2]), dA[0] - dA[2], dA[1] - dA[2], dA[0] + dA[2], dA[1] + dA[2]);
         await wash(discPoly(dB[0], dB[1], dB[2]), [[dB[0], dB[1]]]);
-        out.discB = await bands(dB[0] - dB[2], dB[1] - dB[2], dB[0] + dB[2], dB[1] + dB[2]);
+        out.discB = await bands(discPoly(dB[0], dB[1], dB[2]), dB[0] - dB[2], dB[1] - dB[2], dB[0] + dB[2], dB[1] + dB[2]);
+        // A bigger disc low on the sheet: the size and place where a pale notch at the
+        // foot shows up (r92 at y470), so the probe covers it.
+        const dC = [250, 470, 92];
+        await wash(discPoly(dC[0], dC[1], dC[2]), [[dC[0], dC[1]]]);
+        out.discC = await bands(discPoly(dC[0], dC[1], dC[2]), dC[0] - dC[2], dC[1] - dC[2], dC[0] + dC[2], dC[1] + dC[2]);
         const band = [80, 600, 780, 650];
         await wash(box(...band), inside(...band));
-        out.band = await bands(band[0], band[1], band[2], band[3]);
+        out.band = await bands(box(...band), band[0], band[1], band[2], band[3]);
         // One plain stroke, same brush, mix and strength: the doser's target.
         h.lift(); await h.paint(120, 700, 740, 700, R);
         S.act('dry', true);
@@ -805,7 +839,7 @@
         out.stroke = +(await mean(200, 660, 690, 710)).toFixed(4);
       });
       h.end();
-      for (const k of ['rect', 'discA', 'discB', 'band']) if (out[k]) out[k].midVsStroke = +(out[k].mid / (out.stroke || 1)).toFixed(2);
+      for (const k of ['rect', 'discA', 'discB', 'discC', 'band']) if (out[k]) out[k].midVsStroke = +(out[k].mid / (out.stroke || 1)).toFixed(2);
       return out;
     },
 

@@ -62,11 +62,9 @@ window.__paintDone=(async()=>{
   await S.path(pts(t=>[452+174*t,540+2*Math.sin(t*4),0.1+0.4*Math.sin(Math.PI*t)],16),3);
   await dry([[556,546]]);await S.look('shadow');
 
-  await dry([[566,534]]);await S.look('shadow');
-
   log('the fruit: yellow-orange across into deep red-orange, one variegated wash');
-  h.setBrushPreset('mop');h.setBrush(LIGHT);V.brushRadius=72;V.brushPigment=0.30;V.dipLoad=0.36;
-  await S.wash(fruit,{kind:'variegated',into:DARKER,direction:'across',paper:'moist'});
+  h.setBrushPreset('mop');h.setBrush(LIGHT);V.brushRadius=72;V.brushPigment=0.38;V.dipLoad=0.36;
+  await S.wash(fruit,{kind:'variegated',into:DEEP,direction:'across',paper:'moist'});
   await S.skipTo('shiny',{points:[[512,406]]});
 
   log('the deepest note low on the right, while shiny, following the form');
@@ -112,6 +110,6 @@ window.__paintDone=(async()=>{
   await S.path([[556,342,0.1],[598,352,0.45],[626,366,0.1]],4);
   await dry([[512,CALY]]);
   await S.look('finished');
-  await S.note('Autumn lantern (paintings/autumn-lantern.js), DeepSeek: a Fuyu persimmon on white paper, repainted on the wash fix. Where it landed: the fruit is one variegated wash laid moist, yellow-orange burning across into deep red-orange at 0.34, the deepest note dropped in while shiny, the top edge lifted with a thirstier clean brush so the light comes from above; the calyx is a dark collar with four points laid over the dry fruit, every mark clamped onto the fruit by onFruit, with rigger creases, tan lit rims, a pale stem scar and a small cast shadow. Tried and rejected on the way (recorded so they need not be repeated): glazing the turn as stroke shapes (smudges on a flat field); a masked sheen (peeled as a huge crisp eye); a calyx of four filled polygons (a pressed flower) or four thin tapered strokes (a moth - the lobes broke the silhouette); rebuilding the silhouette to a Fuyu\'s 1.25:1 with a superellipse (n 2.45 squared the sides into slabs, and the variegated wash at the narrower width split into a pale left crescent with a line through it); a flat wash with the turn stroked in afterwards at satin (flat and smudgy - the turn wants to come out of the wash). Still weak, honestly: the silhouette is more oval than a Fuyu, and the calyx, though seated, is heavy and dark. No physics changes.');
+  await S.note('Autumn lantern (paintings/autumn-lantern.js), DeepSeek: a Fuyu persimmon on white paper, repainted on the wash rework (d849fc3). What the rework changed for this study: the body wash now lands at about one stroke in the middle (was up to 2.6 times that on some shapes), so 0.30 comes out pale and flat and the body went to 0.38; and a variegated wash now really does carry the turn it promises, so the body is LIGHT variegated across into DEEP (pyrrole scarlet / red oxide / quinacridone rose), with one deep note low on the right while shiny, the top edge lifted, and the calyx clamped onto the dry fruit as before. Also tried on the fixed wash, in swatches (.local/turn-swatches.js): graded fadeTo 1.8 and 2.4 both carry a gentle top-to-bottom turn now (they were indistinguishable from flat before the rework) — worth remembering for subjects lit from above. No physics changes.');
   log('done');
 })();
