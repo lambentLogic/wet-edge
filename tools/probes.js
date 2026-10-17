@@ -732,6 +732,82 @@
       return +(peak / interior).toFixed(2);
     },
 
+    // Evenness of the moist wash (the Wash tool's default paper): deposited
+    // pigment in the edge bands against the open middle, on a rectangle, a
+    // small disc at two row-grid phases (the same shape shifted half a row
+    // step), and a long thin band. Also one plain stroke of the same brush and
+    // mix, as the wash's "one stroke of paint" reference. Every wash is dried
+    // before measuring (deposited pigment, not pooled water). Ratios are
+    // band / middle, so 1 is even; `mid` is the middle's means so absolute
+    // strength can be compared across code versions.
+    //
+    // The two diagnoses this exists to test
+    //   (1) rows run on a grid fixed to the sheet, so where the first row
+    //       falls decides the top edge's coverage while the last row stops
+    //       short of the bottom -> top/bottom asymmetry. discA and discB are
+    //       the same disc displaced by half a row step: if their ratios differ,
+    //       the grid phase is doing it, not the shape.
+    //   (2) the doser takes its target from a band of the finished wash that
+    //       includes the cut-in loops (top and sides), so the target inherits
+    //       the edges and the middle chases it -> `mid` vs `stroke`.
+    async washeven(paper = 'coldPress') {
+      const R = 60, rowStep = 0.7 * R, SH = 768;
+      const mean = async (x0, x1, y0, y1) => {
+        const a = await S.read();
+        let s = 0, n = 0;
+        for (let y = Math.max(0, Math.round(y0)); y < Math.min(SH, Math.round(y1)); y++)
+          for (let x = Math.max(0, Math.round(x0)); x < Math.min(W, Math.round(x1)); x++) { s += a[(y * W + x) * 4 + 2]; n++; }
+        return s / Math.max(1, n);
+      };
+      const bands = async (x0, y0, x1, y1) => {
+        const bw = Math.max(8, Math.min(R, Math.round((y1 - y0) / 6)));
+        const mid = await mean(x0 + 2 * bw, x1 - 2 * bw, y0 + 2 * bw, y1 - 2 * bw);
+        const pick = async (m) => +(m / (mid || 1)).toFixed(2);
+        return {
+          top: await pick(await mean(x0 + 2 * bw, x1 - 2 * bw, y0, y0 + bw)),
+          bottom: await pick(await mean(x0 + 2 * bw, x1 - 2 * bw, y1 - bw, y1)),
+          left: await pick(await mean(x0, x0 + bw, y0 + 2 * bw, y1 - 2 * bw)),
+          right: await pick(await mean(x1 - bw, x1, y0 + 2 * bw, y1 - 2 * bw)),
+          bw, mid: +mid.toFixed(2),
+        };
+      };
+      const wash = async (poly, pts) => {
+        await S.wash(poly, { kind: 'flat', paper: 'moist' });
+        S.act('dry', true);
+        try { await S.skipTo('dry', { points: pts }); } finally { S.act('dry', false); }
+      };
+      const box = (x0, y0, x1, y1) => [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+      const discPoly = (cx, cy, r) => Array.from({ length: 61 }, (_, i) => [cx + r * Math.cos(i / 60 * 2 * Math.PI), cy + r * Math.sin(i / 60 * 2 * Math.PI)]);
+      const inside = (x0, y0, x1, y1) => [[(x0 + x1) / 2, (y0 + y1) / 2], [x0 + (x1 - x0) * 0.25, y0 + (y1 - y0) * 0.3], [x1 - (x1 - x0) * 0.25, y1 - (y1 - y0) * 0.3]];
+      const out = {};
+      await fresh(paper);
+      await withValues({ brushRadius: R, brushPigment: 0.30, granulation: 0, brushCapacity: 0 }, async () => {
+        h.setBrushPreset('mop');
+        h.setBrush([['Phthalo Blue (GS)', 1], ['French Ultramarine', 1]]);
+        S.values.dipLoad = 0.36;
+        // A rectangle, a disc, the same disc half a row step lower, a thin band.
+        const rect = [60, 80, 480, 320];
+        await wash(box(...rect), inside(...rect));
+        Object.assign(out, { rect: await bands(rect[0], rect[1], rect[2], rect[3]) });
+        const dA = [700, 170, 80], dB = [700, 170 + rowStep / 2, 80];
+        await wash(discPoly(dA[0], dA[1], dA[2]), [[dA[0], dA[1]]]);
+        out.discA = await bands(dA[0] - dA[2], dA[1] - dA[2], dA[0] + dA[2], dA[1] + dA[2]);
+        await wash(discPoly(dB[0], dB[1], dB[2]), [[dB[0], dB[1]]]);
+        out.discB = await bands(dB[0] - dB[2], dB[1] - dB[2], dB[0] + dB[2], dB[1] + dB[2]);
+        const band = [80, 600, 780, 650];
+        await wash(box(...band), inside(...band));
+        out.band = await bands(band[0], band[1], band[2], band[3]);
+        // One plain stroke, same brush, mix and strength: the doser's target.
+        h.lift(); await h.paint(120, 700, 740, 700, R);
+        S.act('dry', true);
+        try { await S.skipTo('dry', { points: [[400, 700]] }); } finally { S.act('dry', false); }
+        out.stroke = +(await mean(200, 660, 690, 710)).toFixed(2);
+      });
+      h.end();
+      for (const k of ['rect', 'discA', 'discB', 'band']) if (out[k]) out[k].midVsStroke = +(out[k].mid / (out.stroke || 1)).toFixed(2);
+      return out;
+    },
+
     // Bleed: dense paint, then clean water laid alongside it. Pigment that
     // crossed into the water side after 1 s and 4 s.
     async bleed(paper = 'coldPress') {
