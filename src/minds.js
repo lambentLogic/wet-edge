@@ -552,15 +552,25 @@ export function makeMinds(sim) {
     // the room near an edge left stubby dashes along any upright edge.)
     const openAt0 = margin + bigR, levels = [cutL];
     while (levels[levels.length - 1] * 2 < openAt0) levels.push(levels[levels.length - 1] * 2);
-    // Each loop is cut into short pieces, laid just ahead of the rows as the
-    // sweep comes down to them: a whole loop laid first had dried at the
-    // bottom, with a hard edge, by the time the rows got there.
+    // Each loop is cut into pieces at fixed horizontal slab lines, and the work goes slab by
+    // slab, edge loop to inner loop within each, just ahead of the rows: a whole loop laid first
+    // had dried at the bottom, with a hard edge, by the time the rows got there. (Cut by each
+    // piece's own height instead, up to a brush radius, and queued by where its top fell, two
+    // neighbouring loops at one spot could go down seconds apart, the first drying before the
+    // second met it: a ghost seam inside a round wash's edge, which side depending on how the
+    // bands fell across the shape. DeepSeek's persimmon; traced with window.__washTrace.)
+    const slabH = Math.max(12, rowStep * 0.5), slabOf = y => Math.floor(y / slabH);
     const pieces = l => {
       const out = [];
-      let cur = [l[0]], lo = l[0][1], hi = l[0][1];
+      let cur = [l[0]];
       for (let k = 1; k < l.length; k++) {
-        cur.push(l[k]); lo = Math.min(lo, l[k][1]); hi = Math.max(hi, l[k][1]);
-        if (hi - lo > Math.max(bigR, 30) && k < l.length - 1) { out.push(cur); cur = [l[k]]; lo = hi = l[k][1]; }
+        const [x0, y0] = l[k - 1], [x1, y1] = l[k], s0 = slabOf(y0), s1 = slabOf(y1);
+        if (s0 !== s1) {
+          // split where the segment crosses the slab line, both pieces sharing that point
+          const yb = (s1 > s0 ? s1 : s0) * slabH, t = (yb - y0) / (y1 - y0), p = [x0 + (x1 - x0) * t, yb];
+          cur.push(p); if (cur.length > 1) out.push(cur); cur = [p];
+        }
+        cur.push(l[k]);
       }
       if (cur.length > 1) out.push(cur);
       return out;
@@ -645,8 +655,8 @@ export function makeMinds(sim) {
     // wider ones. (Sorted by exact height, the wider ring's piece usually
     // started a little higher and went first, and the edge ring, landing in
     // its wet, spilled past the outline.)
-    const band = t => Math.floor(t / rowStep);
-    const todo = lines.map(({ l, L }) => ({ l, L, top: Math.min(...l.map(p => p[1])) })).sort((p, q) => band(p.top) - band(q.top) || p.L - q.L || p.top - q.top);
+    // (slab by slab: within a slab, the loop hugging the edge first)
+    const todo = lines.map(({ l, L }) => ({ l, L, top: Math.min(...l.map(p => p[1])), slab: slabOf((Math.min(...l.map(p => p[1])) + Math.max(...l.map(p => p[1]))) / 2) })).sort((p, q) => p.slab - q.slab || p.L - q.L || p.top - q.top);
     // Rows: in the open (where the whole brush fits) at full width every
     // rowStep; in the band near a shape, where the brush narrows to fit,
     // rows closer together (fineStep), so the narrowed strokes still meet
@@ -658,7 +668,7 @@ export function makeMinds(sim) {
       const before0 = rows;
       V.brushRadius = bigR;
       let run = [];
-      const flush = async () => { if (run.length > 1) { setLoad(run[0][0], y); h.lift(); await layStroke(run, framesPerSeg, brushAt); rows++; if (!near) lastRuns.push({ y, run: run.slice() }); } run = []; };
+      const flush = async () => { if (run.length > 1) { setLoad(run[0][0], y); h.lift(); window.__washTrace?.push({ kind: 'row', t: sim.time(), pts: run.map(([x, yy]) => [x, yy]) }); await layStroke(run, framesPerSeg, brushAt); rows++; if (!near) lastRuns.push({ y, run: run.slice() }); } run = []; };
       // (From a brush-width off the sheet: rows starting at its edge showed
       // their rounded ends.)
       for (let k = 0; k <= Math.ceil((W + 2 * bigR) / 10); k++) {
@@ -687,6 +697,7 @@ export function makeMinds(sim) {
         // Cut-ins at the wash's starting water: the water sense only wets the
         // brush for the open rows (a wetter tip along the edge spilled over it).
         const dipNow = V.dipLoad; V.dipLoad = Math.min(dipNow, dipCut);
+        window.__washTrace?.push({ kind: 'cut', L, t: sim.time(), pts: l });   // (diagnostics: when each piece went down)
         h.lift(); await layStroke(l.map(([x, yy]) => [x, yy, p]), framesPerSeg, brushAt); cut++;
         V.dipLoad = dipNow;
       }
