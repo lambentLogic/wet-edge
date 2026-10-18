@@ -1,10 +1,8 @@
 // Autumn lantern (a Fuyu persimmon) on white paper.
-// Eleventh pass, on the later wash work (e6d11da, 29eaaaf: a drier moist wash, rows at a
-// fixed dose, paint 1.3x to keep a wash about one stroke). The body is a graded wash now:
-// graded was untestable before the rework and now carries a real top-to-bottom turn, which
-// suits a fruit lit from above, and it keeps the left edge clean (a variegated body at these
-// strengths piled onto the wash's own right-hand darkening and left a pale crescent on the
-// left). Strength 0.36: 0.38 reads a shade heavy on the right, 0.33 a shade pale in the middle.
+// Twelfth pass, on 1bc9243 (edge pieces laid downward with the sweep: the disc's right lean
+// 0.95/1.44 -> 1.10/1.26, and its pale crescent is gone). With the edges neutral the body can
+// carry more paint: graded fadeTo 2.0 at 0.41, which reads deeper and shows the turn without
+// loading the bottom edge the way fadeTo 2.4 did. Calyx and shadow unchanged.
 const S=window.__sim,h=S.headless,V=S.values,M=window.__minds;
 window.__paintLog=[];
 const log=t=>{window.__paintLog.push(t);console.log('[paint]',t);};
@@ -64,8 +62,8 @@ window.__paintDone=(async()=>{
   await dry([[556,546]]);await S.look('shadow');
 
   log('the fruit: yellow-orange across into deep red-orange, one variegated wash');
-  h.setBrushPreset('mop');h.setBrush(LIGHT);V.brushRadius=72;V.brushPigment=0.36;V.dipLoad=0.36;
-  await S.wash(fruit,{kind:"graded",fadeTo:2.2,paper:"moist"});
+  h.setBrushPreset('mop');h.setBrush(LIGHT);V.brushRadius=72;V.brushPigment=0.41;V.dipLoad=0.36;
+  await S.wash(fruit,{kind:"graded",fadeTo:2.0,paper:"moist"});
   await S.skipTo('shiny',{points:[[512,406]]});
 
   log('the deepest note low on the right, while shiny, following the form');
@@ -111,6 +109,6 @@ window.__paintDone=(async()=>{
   await S.path([[556,342,0.1],[598,352,0.45],[626,366,0.1]],4);
   await dry([[512,CALY]]);
   await S.look('finished');
-  await S.note('Autumn lantern (paintings/autumn-lantern.js), DeepSeek: a Fuyu persimmon on white paper, corrected again after the later wash work (e6d11da, 29eaaaf). The body is now a graded wash (fadeTo 2.2) at 0.36: graded only became usable after the rework, and it gives the fruit the honest turn a variegated body no longer does cleanly. On the current wash a variegated body doubles up with the wash own left-pale/right-dark bias (the probe measures discs at left 0.95, right 1.44 inside the shape) so the fruit came out with a pale crescent inside its left edge and a heavy right; graded avoids that, and 0.38 reads too heavy on the right while 0.33 reads pale in the middle. Calyx and shadow unchanged: dark collar clamped onto the dry fruit, rigger creases, tan rims, pale stem scar; violet shadow into a damp oval with every mark below the base. No physics changes.');
+  await S.note('Autumn lantern (paintings/autumn-lantern.js), DeepSeek: a Fuyu persimmon on white paper, repainted on 1bc9243. That fix (edge pieces laid downward with the sweep) took the round wash left/right lean from 0.95/1.44 to 1.10/1.26 and removed the pale crescent inside the left edge, so the body carries more paint: graded fadeTo 2.0 at 0.41 (2.4 loaded the bottom edge, 0.36 was pale). Measured on the current wash: a disc profile leans smoothly from 0.93 at its left to 1.25 at its right across the whole width, with no banding and a paler top (0.86 at the top edge against 0.93 at the bottom), so the residual lean is a broad gradient, not a rim. Calyx clamped onto the dry fruit, rigger creases, tan rims, pale stem scar; violet shadow into a damp oval, every mark below the base. No physics changes.');
   log('done');
 })();
