@@ -770,10 +770,15 @@
       const bands = async (poly, x0, y0, x1, y1) => {
         const bw = Math.max(8, Math.min(R, Math.round((y1 - y0) / 6)));
         const a = await S.read();
+        // Inside the shape only: a band across a disc's edge also catches the cells
+        // outside it, so any spill (or bare paper there) moved the number.
         const avg = (xa, xb, ya, yb) => {
           let s = 0, n = 0;
           for (let y = Math.max(0, Math.round(ya)); y < Math.min(SH, Math.round(yb)); y++)
-            for (let x = Math.max(0, Math.round(xa)); x < Math.min(W, Math.round(xb)); x++) { s += a[(y * W + x) * 4 + 2]; n++; }
+            for (let x = Math.max(0, Math.round(xa)); x < Math.min(W, Math.round(xb)); x++) {
+              if (!inPoly(poly, x, y)) continue;
+              s += a[(y * W + x) * 4 + 2]; n++;
+            }
           return s / Math.max(1, n);
         };
         const mid = avg(x0 + 2 * bw, x1 - 2 * bw, y0 + 2 * bw, y1 - 2 * bw);
