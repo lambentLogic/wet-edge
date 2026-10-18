@@ -695,6 +695,8 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     // and got an edge as the wetter paint ran back into it.
     let fresh = 1.0 + p.startWet * fr.startFresh;
     let level = p.brushWater * mix(fr.emptyW, 1.0, clamp(fr.load, 0.0, 1.0)) * fresh;
+    // the paint's level: the wetter start carries paint too only as far as startPaint says
+    let levelP = p.brushWater * mix(fr.emptyW, 1.0, clamp(fr.load, 0.0, 1.0)) * (1.0 + p.startWet * fr.startFresh * p.startPaint);
     // The brush drags wet paint the way a real one does: where it passes
     // over wet paint, the paint in the paper's water and in the brush's
     // hairs trade toward the same concentration. Where the paper's is
@@ -766,7 +768,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
         // brush's paint thins.
         let conc = p.brushPigment * frac * max(pig[id].phys2.z, 0.0) * max(fr.concMul, 0.0);
         let c0 = select(0.0, cur / w, w > p.wEps);
-        let next = max(cur, mix(cur, level * conc, k)) + chargeP * max(conc - c0, 0.0);
+let next = max(cur, mix(cur, levelP * conc, k)) + chargeP * max(conc - c0, 0.0);
         addCand(id, next - cur);
         gAdded += max(next - cur, 0.0);
       }

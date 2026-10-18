@@ -98,6 +98,7 @@ export const PARAMS = [
   { key: 'lingerRate',    v: 0.3,  min: 0, max: 2,   group: 'Brush', target: 'js',  label: 'resting brush adds (frames per frame)' },
   { key: 'dabDelay',      v: 0.25, min: 0, max: 1,   group: 'Brush', target: 'js',  label: 'hold still this long to dab (s)' },
   { key: 'startWet',      v: 0.5,  min: 0, max: 2,   group: 'Brush', target: 'sim', label: 'stroke starts wetter (fresh brush)' },
+  { key: 'startPaint',    v: 1,    min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'the wetter start carries paint too' },
   { key: 'brushFirmness', v: 0.4,  min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'firmness (how hard it scrubs)' },
   { key: 'brushDrag',     v: 0.1,  min: 0, max: 1,   group: 'Brush', target: 'sim', label: 'brush pushes wet paint' },
   { key: 'brushPickup',   v: 0.1,  min: 0, max: 2,   group: 'Brush', target: 'sim', label: 'brush picks up wet paint' },

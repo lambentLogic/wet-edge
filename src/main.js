@@ -1642,6 +1642,7 @@ async function init() {
   window.__sim.washOptions = { kind: 'flat', fadeTo: 0.2, paper: 'moist', dampen: true, water: false, dampenOnly: false, around: false, into: null, direction: 'down', area: 'lasso', scrubWidth: 40 };
   // (moist: dampened to a thin film and rows holding 0.08 of standing water; at 0.05 and 0.12, past
   // shiny, a 'moist' wash flooded, and its edge stepped out wherever its loops touched down: the painter)
+  const WASH_PAINT = 1.3;
   const WASH_PAPER = { moist: { film: 0.04, rows: 0.08 }, wet: { film: 0.15, rows: null } };
   // Show an area on the overlay (faint blue) while it's being washed.
   const drawArea = mask => {
@@ -1720,7 +1721,12 @@ async function init() {
     }
     if (outline.mask) drawArea(outline.mask);
     const areaMask = M.maskOf(outline);
-    const keep = ['brushRadius', 'brushPigment', 'mistRadius', 'dipLoad'].map(k => [k, values[k]]);
+    const keep = ['brushRadius', 'brushPigment', 'mistRadius', 'dipLoad', 'startPaint'].map(k => [k, values[k]]);
+    // (a wash's strokes are pieces of one wash, not fresh dips: their wetter starts carry no extra paint)
+    const startPaint0 = values.startPaint; values.startPaint = 0;
+    // ...and its paint a third stronger to make up for it, so a wash still comes out about one stroke
+    // of the same brush (without the starts' extra, washes were a quarter lighter: the painter)
+    const pigment0 = values.brushPigment; values.brushPigment *= WASH_PAINT;
     const mode0 = state.mode;   // (the pigment isn't restored: switching pans mid-wash variegates it)
     const load0 = state.brush.map(b => ({ ...b }));
     window.__sim.checkpoint();
@@ -1769,7 +1775,7 @@ async function init() {
       if (e.message !== 'cancelled') throw e;
       return false;
     } finally {
-      state.washing = false; state.cancelWash = false;
+      state.washing = false; state.cancelWash = false; values.startPaint = startPaint0; values.brushPigment = pigment0;
       if (kind === 'variegated') state.brush = load0;   // back to the colour it started from
       h.setMode(state.washReturn ?? mode0); state.washReturn = null;
       uiSync(); drawMagnets(); state.onWash?.();

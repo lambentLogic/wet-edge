@@ -599,7 +599,8 @@ export function makeMinds(sim) {
     // sheet's grid the same disc half a row lower was laid in a different order and came out with
     // twice the strength in its middle)
     let top0 = H; for (let c = 0; c < N; c++) if (inside[c]) { top0 = (c / W) | 0; break; }
-    const slabH = Math.max(12, rowStep * 0.5), slabOf = y => Math.floor((y - top0) / slabH);
+    // (a row step tall: at half that, each side was restarted twice as often, each restart a tick)
+    const slabH = Math.max(12, rowStep), slabOf = y => Math.floor((y - top0) / slabH);
     const pieces = l => {
       const out = [];
       let cur = [l[0]];
@@ -780,7 +781,10 @@ export function makeMinds(sim) {
       }
     };
     for (let y = top0 - rowStep + fineStep / 2; y < H + rowStep; y += fineStep) {
-      while (todo.length && todo[0].top < y + rowStep) {
+      // (half a row step ahead of the sweep: a full step let the bottom edge's loops go down before
+      // the last row and delay it, and its water pushed into the drying rows above: a band along a
+      // wash's foot with a crisp top edge, stronger the stronger the paint: the painter)
+      while (todo.length && todo[0].top < y + rowStep * 0.5) {
         const { l, L } = todo.shift();
         const p = L === cutL ? 0 : pressFor(L - margin);
         V.brushRadius = bigR; setLoad(l[0][0], l[0][1], true);
