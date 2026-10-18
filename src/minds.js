@@ -276,7 +276,7 @@ export function makeMinds(sim) {
     for (let y = reach * 0.6, d = 1; y < SH; y += reach * 1.1, d = -d) {
       let run = [];
       // (a lone row goes out and back: one way, its start laid lighter, a disc's left side pale)
-      const flush = async () => { if (run.length === 1) run.push([run[0][0] + 0.5, run[0][1], run[0][2]]); if (lone && run.length > 1) run = [...run, ...run.slice(0, -1).reverse()]; if (run.length > 1) { h.lift(); await sim.path(run, 1); } run = []; };
+      const flush = async () => { if (run.length > 1) { h.lift(); await sim.path(run, 1); } run = []; };
       for (let k = 0; k <= Math.ceil(SW / 16); k++) {
         const x = d > 0 ? k * 16 : SW - k * 16, c = Math.round(y) * SW + Math.min(SW - 1, x);
         if (fromEdge[c] > reach * 0.9) run.push([x, y, 0.9]); else await flush();
@@ -688,7 +688,7 @@ export function makeMinds(sim) {
         for (let y = mistR * 0.6, dirx = 1; y < H; y += mistR * 1.1, dirx = -dirx) {
           let run = [];
           // (a lone row goes out and back: one way, its start laid lighter, a disc's left side pale)
-      const flush = async () => { if (run.length === 1) run.push([run[0][0] + 0.5, run[0][1], run[0][2]]); if (lone && run.length > 1) run = [...run, ...run.slice(0, -1).reverse()]; if (run.length > 1) { h.lift(); await sim.path(run, 1); } run = []; };
+      const flush = async () => { if (run.length > 1) { h.lift(); await sim.path(run, 1); } run = []; };
           for (let k = 0; k <= Math.ceil(W / step); k++) {
             const x = dirx > 0 ? k * step : W - k * step;
             const d = at(x, y);
@@ -760,7 +760,7 @@ export function makeMinds(sim) {
       if (doser && !near) await doser.beforeRow?.();
       let run = [];
       // (a lone row goes out and back: one way, its start laid lighter, a disc's left side pale)
-      const flush = async () => { if (run.length === 1) run.push([run[0][0] + 0.5, run[0][1], run[0][2]]); if (lone && run.length > 1) run = [...run, ...run.slice(0, -1).reverse()]; if (run.length > 1) { setLoad(run[0][0], y); h.lift(); window.__washTrace?.push({ kind: 'row', t: sim.time(), dip: V.dipLoad, pig: V.brushPigment, pts: run.map(([x, yy]) => [x, yy]) }); await layStroke(run, framesPerSeg, brushAt); rows++; if (!near) lastRuns.push({ y, run: run.slice() }); } run = []; };
+      const flush = async () => { if (run.length === 1) run.push([run[0][0] + 0.5, run[0][1], run[0][2]]); if (lone && run.length > 1) run = [...run, ...run.slice(0, -1).reverse()]; if (run.length > 1) { setLoad(run[0][0], y); h.lift(); window.__washTrace?.push({ kind: 'row', t: sim.time(), dip: V.dipLoad, pig: V.brushPigment, r: V.brushRadius, pts: run.map(q => q.slice()) }); await layStroke(run, framesPerSeg, brushAt); rows++; if (!near) lastRuns.push({ y, run: run.slice() }); } run = []; };
       // (From a brush-width off the sheet: rows starting at its edge showed
       // their rounded ends.)
       for (let k = 0; k <= Math.ceil((W + 2 * bigR) / 10); k++) {
@@ -796,7 +796,7 @@ export function makeMinds(sim) {
         // Cut-ins at the wash's starting water: the water sense only wets the
         // brush for the open rows (a wetter tip along the edge spilled over it).
         const dipNow = V.dipLoad; V.dipLoad = Math.min(dipNow, dipCut);
-        window.__washTrace?.push({ kind: 'cut', L, t: sim.time(), pts: l });   // (diagnostics: when each piece went down)
+        window.__washTrace?.push({ kind: 'cut', L, t: sim.time(), pig: V.brushPigment, dip: V.dipLoad, r: V.brushRadius, pts: l.map(([x, yy]) => [x, yy, p]) });   // (diagnostics: when each piece went down)
         h.lift(); await layStroke(l.map(([x, yy]) => [x, yy, p]), framesPerSeg, brushAt); cut++;
         V.dipLoad = dipNow;
       }
