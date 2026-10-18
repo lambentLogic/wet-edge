@@ -616,7 +616,11 @@ export function makeMinds(sim) {
       if (cur.length > 1) out.push(cur);
       return out;
     };
-    const lines = levels.flatMap(L => contours(L).flatMap(l => pieces(l).map(p => ({ l: p, L }))));
+    // Every piece laid downward, with the sweep (a loop is traced one way round, so its pieces ran
+    // down one side of a shape and up the other: laid against the sweep, the up side's pieces finished
+    // in paint already there, and a disc came out with one side 1.4x its middle and the other 0.95)
+    const down = p => (p[0][1] > p[p.length - 1][1] + 2 ? p.slice().reverse() : p);
+    const lines = levels.flatMap(L => contours(L).flatMap(l => pieces(l).map(p => ({ l: down(p), L }))));
 
     function contours(L) {
     const g = 3, segs = [];
