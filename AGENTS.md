@@ -279,7 +279,7 @@ All in `sim.values` by key. The page shows the studio ones always, the brush and
 | `brushSoftness` | 0.4 | softness | How soft the edge of each brush mark is: 0 a hard-edged stamp, 1 fades from the centre out. |
 | `brushWater` | 0.3 | water level | How much water the brush lays down: the depth it tops a wash up to. More: juicy, flowing washes; less: stiffer, drier paint. |
 | `brushRate` | 0.4 | load rate | How quickly the brush releases its load onto the paper. More: a single pass reaches full strength; less: builds up over repeated passes. |
-| `brushCharge` | 0.1 | wet-in-wet charge | Extra burst of water a freshly loaded brush releases when touching an already wet wash. More: stronger wet-in-wet blooms and bursts. |
+| `brushCharge` | 0.1 | wet-in-wet charge | Extra burst of water a freshly loaded brush releases when touching an already wet wash, in proportion to how wet the brush is (Wetness): a creamy, drier brush hardly bursts. More: stronger wet-in-wet blooms and bursts. |
 | `chargeDuration` | 0.1 | charge lasts (s) | How long (s) after touchdown the wet-in-wet charge lasts before the brush has spent it. Longer: dragging through a wash keeps flooding it. |
 | `brushShape` | 0 | shape (0 round, 1 flat) | Brush shape: 0 round, 1 flat (a chisel-edged rectangle swept along the stroke). |
 | `flatThickness` | 0.18 | flat: edge thickness (x width) | Thickness of the flat brush's chisel edge as a fraction of its width. Less: a sharper, thinner edge line. |

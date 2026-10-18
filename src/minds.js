@@ -242,7 +242,10 @@ export function makeMinds(sim) {
           let sum = 0, want = 0, n = 0;
           for (let yy = Math.max(0, Math.round(y - hw * 3.5)); yy < Math.min(SH, Math.round(y - hw * 1.5)); yy++)
             for (let x = 0; x < SW; x++) { const c = yy * SW + x; if (deep[c]) { sum += laid(a, c); want += targetAt(yy) / targetAt(y0); n++; } }
-          if (n > 200 && sum > 0) k = Math.min(1.5, Math.max(0.1, k * Math.sqrt(Math.min(1.5, Math.max(0.5, T * want / sum)))));
+          // (no correction from there on: it read a band well behind the brush and changed the
+          // rows still landing on it, so it overshot, down into a pale band across a wash's middle
+          // and back up below it; overlapping rows top each other up toward the brush's level
+          // rather than piling up, so a fixed dose lays an even wash)
           return;
         }
         if (T === null) {
@@ -770,7 +773,10 @@ export function makeMinds(sim) {
         for (let yy = Math.max(0, Math.round(y - bigR * 0.4)); yy <= Math.min(H - 1, Math.round(y + bigR * 0.4)); yy++) {
           for (let x = 0; x < W; x++) { const c = yy * W + x; if (inside[c]) { sum += a[c * 4]; n++; } }
         }
-        if (n > 50 && sum > 0) V.dipLoad = Math.min(1, Math.max(0.1, V.dipLoad * Math.min(1.5, Math.max(0.5, water * n / sum))));
+        // (never wetter than the painter's Wetness: the sensing only blots the brush down from it.
+        // Allowed to wet it up toward the target, a dry brush's wash went shiny below a pale, moist top
+        // line laid by the edge loops at the brush's own Wetness, and met it in a hard line: the painter)
+        if (n > 50 && sum > 0) V.dipLoad = Math.min(load0, Math.max(0.1, V.dipLoad * Math.min(1.5, Math.max(0.5, water * n / sum))));
       }
     };
     for (let y = top0 - rowStep + fineStep / 2; y < H + rowStep; y += fineStep) {

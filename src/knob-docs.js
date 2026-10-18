@@ -91,7 +91,7 @@ export const KNOB_DOCS = {
   brushWater: { tier: 'studio', doc: 'How much water the brush lays down: the depth it tops a wash up to. More: juicy, flowing washes; less: stiffer, drier paint.' },
   brushPigment: { tier: 'studio', doc: 'Paint strength: pigment per water in the brush. More: darker, more concentrated mixes; less: paler tints.' },
   brushRate: { tier: 'studio', doc: 'How quickly the brush releases its load onto the paper. More: a single pass reaches full strength; less: builds up over repeated passes.' },
-  brushCharge: { tier: 'lab', doc: 'Extra burst of water a freshly loaded brush releases when touching an already wet wash. More: stronger wet-in-wet blooms and bursts.' },
+  brushCharge: { tier: 'lab', doc: 'Extra burst of water a freshly loaded brush releases when touching an already wet wash, in proportion to how wet the brush is (Wetness): a creamy, drier brush hardly bursts. More: stronger wet-in-wet blooms and bursts.' },
   chargeDuration: { tier: 'lab', doc: 'How long (s) after touchdown the wet-in-wet charge lasts before the brush has spent it. Longer: dragging through a wash keeps flooding it.' },
   brushShape: { tier: 'studio', doc: 'Brush shape: 0 round, 1 flat (a chisel-edged rectangle swept along the stroke).' },
   flatAngle: { tier: 'studio', doc: 'Angle of the flat brush in degrees (R or scroll to turn). Pulled broadside it lays a wide band; along its edge, a thin line.' },

@@ -750,6 +750,11 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
       }
     }
     if (fr.mode == 0u) {
+      // The burst scales with how wet the brush is (Wetness), as the clean brush's does: thick
+      // paint on a drier brush doesn't flood wet paper (at full charge every touchdown of even a
+      // creamy brush dumped water into a wash: the moist wash grew wet, and its edge stepped out
+      // wherever its loops touched down)
+      let chargeP = charge * clamp(fr.load, 0.0, 1.0);
       for (var b = 0; b < 4; b++) {
         let frac = fr.brushFrac[b];
         if (frac <= 0.0) { continue; }
@@ -761,11 +766,11 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
         // brush's paint thins.
         let conc = p.brushPigment * frac * max(pig[id].phys2.z, 0.0) * max(fr.concMul, 0.0);
         let c0 = select(0.0, cur / w, w > p.wEps);
-        let next = max(cur, mix(cur, level * conc, k)) + charge * max(conc - c0, 0.0);
+        let next = max(cur, mix(cur, level * conc, k)) + chargeP * max(conc - c0, 0.0);
         addCand(id, next - cur);
         gAdded += max(next - cur, 0.0);
       }
-      w = max(w, mix(w, level, k)) + charge;
+      w = max(w, mix(w, level, k)) + chargeP;
     } else if (cleanBrush()) {
       // The clean brush, as wet as it is (Wetness; the water brush's
       // store). Full, it floods; turned down, a damp brush that lays little

@@ -1640,7 +1640,9 @@ async function init() {
   // wet-in-wet) or 'wet' (shiny: a juicy background wash). Dampening
   // brings the area to that, and a moist wash's rows keep it there.
   window.__sim.washOptions = { kind: 'flat', fadeTo: 0.2, paper: 'moist', dampen: true, water: false, dampenOnly: false, around: false, into: null, direction: 'down', area: 'lasso', scrubWidth: 40 };
-  const WASH_PAPER = { moist: { film: 0.05, rows: 0.12 }, wet: { film: 0.15, rows: null } };
+  // (moist: dampened to a thin film and rows holding 0.08 of standing water; at 0.05 and 0.12, past
+  // shiny, a 'moist' wash flooded, and its edge stepped out wherever its loops touched down: the painter)
+  const WASH_PAPER = { moist: { film: 0.04, rows: 0.08 }, wet: { film: 0.15, rows: null } };
   // Show an area on the overlay (faint blue) while it's being washed.
   const drawArea = mask => {
     drawMagnets();
