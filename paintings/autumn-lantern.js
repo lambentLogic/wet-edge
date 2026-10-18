@@ -1,8 +1,8 @@
 // Autumn lantern (a Fuyu persimmon) on white paper.
-// Twelfth pass, on 1bc9243 (edge pieces laid downward with the sweep: the disc's right lean
-// 0.95/1.44 -> 1.10/1.26, and its pale crescent is gone). With the edges neutral the body can
-// carry more paint: graded fadeTo 2.0 at 0.41, which reads deeper and shows the turn without
-// loading the bottom edge the way fadeTo 2.4 did. Calyx and shadow unchanged.
+// Thirteenth pass, on bb046a8 (the paper does not dry while a wash is laid). The body wash
+// comes out about 15% lighter on the new behaviour, so the graded body goes 0.41 -> 0.47 at
+// fadeTo 2.0. The calyx is warmer and lighter, and two marks that read as objects are gone:
+// the ring of creases at its centre (a drawn circle) and the pale dot of the stem scar (an eye).
 const S=window.__sim,h=S.headless,V=S.values,M=window.__minds;
 window.__paintLog=[];
 const log=t=>{window.__paintLog.push(t);console.log('[paint]',t);};
@@ -14,7 +14,7 @@ const CX=512, CY=404, A=172, B=134;
 const LIGHT=[['Transparent Yellow Oxide',3],['Pyrrole Scarlet',2],['Bismuth Vanadate Yellow',1]];
 const DEEP=[['Pyrrole Scarlet',3],['Transparent Red Oxide',2],['Quinacridone Rose',0.5]];
 const DARKER=[['Transparent Red Oxide',3],['Pyrrole Scarlet',2],['Perylene Violet',0.5]];
-const CALYX_MIX=[['Raw Umber',3],['Transparent Yellow Oxide',2],['Perylene Green',0.7],['Perylene Maroon',1]];
+const CALYX_MIX=[['Raw Umber',2.5],['Transparent Yellow Oxide',3],['Perylene Green',0.4],['Perylene Maroon',0.6]];
 
 const fruit=pts(a=>{
   const t=a*2*Math.PI, c=Math.cos(t), s=Math.sin(t), e=2/2.3;
@@ -62,7 +62,7 @@ window.__paintDone=(async()=>{
   await dry([[556,546]]);await S.look('shadow');
 
   log('the fruit: yellow-orange across into deep red-orange, one variegated wash');
-  h.setBrushPreset('mop');h.setBrush(LIGHT);V.brushRadius=72;V.brushPigment=0.41;V.dipLoad=0.36;
+  h.setBrushPreset('mop');h.setBrush(LIGHT);V.brushRadius=72;V.brushPigment=0.47;V.dipLoad=0.36;
   await S.wash(fruit,{kind:"graded",fadeTo:2.0,paper:"moist"});
   await S.skipTo('shiny',{points:[[512,406]]});
 
@@ -81,11 +81,11 @@ window.__paintDone=(async()=>{
 
   log('the calyx: one dark collar on the shoulder, four points, all of it on the fruit');
   const collar=pts(t=>{const a=t*2*Math.PI;return onFruit([CX+62*Math.cos(a),CALY+24*Math.sin(a)],4);},48);
-  h.setBrush(CALYX_MIX);V.brushRadius=24;V.brushPigment=0.55;V.dipLoad=0.32;
+  h.setBrush(CALYX_MIX);V.brushRadius=24;V.brushPigment=0.42;V.dipLoad=0.34;
   await S.wash(collar,{kind:'flat',paper:'moist'});
   await dry([[512,CALY]]);
   for(const a of lobeAngles){
-    load(CALYX_MIX,0.52,16,0.3,'mop');
+    load(CALYX_MIX,0.4,16,0.3,'mop');
     await S.path(pts(t=>{const [x,y]=at(a,28+84*t,2*Math.sin(t*2));return [...onFruit([x,y],4),0.3+0.6*Math.sin(Math.PI*Math.pow(t,0.8))];},14),3);
   }
   await S.skipTo('damp',{points:[[512,CALY]]});
@@ -94,7 +94,6 @@ window.__paintDone=(async()=>{
   load([['Raw Umber',2],['Perylene Maroon',1.5],['Perylene Green',1]],0.55,3.5,0.18,'rigger');
   for(const a of lobeAngles.map(a=>a+Math.PI/4))
     await S.path(pts(t=>{const [x,y]=at(a,8+40*t,0);return [...onFruit([x,y],4),0.1+0.4*Math.sin(Math.PI*t)];},10),3);
-  await S.path(pts(t=>[CX+16*Math.cos(t*2*Math.PI),CALY+9*Math.sin(t*2*Math.PI),0.55],40),2);
   load('Raw Umber',0.6,3.5,0.25);
   await S.path([[CX,320,0.85],[CX-3,306,0.6],[CX+4,292,0.25]],4);
   await dry([[512,CALY]]);
@@ -103,12 +102,12 @@ window.__paintDone=(async()=>{
   for(const a of lobeAngles)
     await S.path(pts(t=>{const [x,y]=at(a,62+44*t,-9);return [...onFruit([x,y],4),0.15+0.4*Math.sin(Math.PI*t)];},10),3);
   // the stem scar, pale, around the stem
-  load([['Titanium Buff',2],['Transparent Yellow Oxide',1]],0.3,5,0.3);
-  await S.path(pts(t=>[CX+10*Math.cos(t*2*Math.PI),CALY-4+6*Math.sin(t*2*Math.PI),0.35],32),3);
-  load([['Transparent Red Oxide',2],['Pyrrole Scarlet',1],['Perylene Maroon',0.5]],0.24,10,0.12);
-  await S.path([[556,342,0.1],[598,352,0.45],[626,366,0.1]],4);
+  load([['Titanium Buff',2],['Transparent Yellow Oxide',1]],0.16,3,0.3);
+  await S.path(pts(t=>[CX+7+11*Math.cos(t*Math.PI),CALY-6+4*Math.sin(t*Math.PI),0.15+0.25*Math.sin(Math.PI*t)],14),4);
+  load([['Transparent Red Oxide',2],['Pyrrole Scarlet',1],['Perylene Maroon',0.5]],0.13,12,0.12);
+  await S.path([[560,344,0.1],[590,352,0.4],[612,362,0.1]],4);
   await dry([[512,CALY]]);
   await S.look('finished');
-  await S.note('Autumn lantern (paintings/autumn-lantern.js), DeepSeek: a Fuyu persimmon on white paper, repainted on 1bc9243. That fix (edge pieces laid downward with the sweep) took the round wash left/right lean from 0.95/1.44 to 1.10/1.26 and removed the pale crescent inside the left edge, so the body carries more paint: graded fadeTo 2.0 at 0.41 (2.4 loaded the bottom edge, 0.36 was pale). Measured on the current wash: a disc profile leans smoothly from 0.93 at its left to 1.25 at its right across the whole width, with no banding and a paler top (0.86 at the top edge against 0.93 at the bottom), so the residual lean is a broad gradient, not a rim. Calyx clamped onto the dry fruit, rigger creases, tan rims, pale stem scar; violet shadow into a damp oval, every mark below the base. No physics changes.');
+  await S.note('Autumn lantern (paintings/autumn-lantern.js), DeepSeek: a Fuyu persimmon on white paper, repainted on bb046a8 (the paper does not dry while a wash is laid). The body lands about 15% lighter on that behaviour, so graded fadeTo 2.0 goes 0.41 -> 0.47; the wash is now even top to bottom and side to side (rect 0.94/0.99, sides 1.00/1.01, pale cells 0.04%), with discs still leaning right about 13% (1.11/1.25) and their middles at ~0.75 of a stroke. Calyx: warmer and lighter (yellow oxide level with umber), and two marks removed that read as objects rather than as a calyx - the ellipse of creases at its centre read as a drawn ring, and the pale stem scar read as an eye. Body left plain: the wash is even enough now that depth has to come from the graded fade and the note. No physics changes.');
   log('done');
 })();
