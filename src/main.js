@@ -1727,6 +1727,13 @@ async function init() {
     // ...and its paint a third stronger to make up for it, so a wash still comes out about one stroke
     // of the same brush (without the starts' extra, washes were a quarter lighter: the painter)
     const pigment0 = values.brushPigment; values.brushPigment *= WASH_PAINT;
+    // The paper doesn't dry while the wash is laid: a painter keeps a wet edge, but the wash takes
+    // its strokes one at a time on a clock that dries ~6x faster than real paper, so its edge loops
+    // dried before the rows met them, a shape's first side before its second, its last row into
+    // drying paint: seams, wrinkles inside the edge, one side darker (the painter's suggestion).
+    // Water still flows, so strokes merge; drying resumes when it's done.
+    const dry0 = window.__washDries ? null : { evaporation: values.evaporation, edgeEvaporation: values.edgeEvaporation, absorption: values.absorption };
+    if (dry0) { values.evaporation = 0; values.edgeEvaporation = 0; values.absorption = 0; }
     const mode0 = state.mode;   // (the pigment isn't restored: switching pans mid-wash variegates it)
     const load0 = state.brush.map(b => ({ ...b }));
     window.__sim.checkpoint();
@@ -1776,6 +1783,7 @@ async function init() {
       return false;
     } finally {
       state.washing = false; state.cancelWash = false; values.startPaint = startPaint0; values.brushPigment = pigment0;
+      if (dry0) { Object.assign(values, dry0); }
       if (kind === 'variegated') state.brush = load0;   // back to the colour it started from
       h.setMode(state.washReturn ?? mode0); state.washReturn = null;
       uiSync(); drawMagnets(); state.onWash?.();
