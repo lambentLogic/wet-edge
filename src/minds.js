@@ -748,8 +748,13 @@ export function makeMinds(sim) {
       for (let k = 0; k <= Math.ceil((W + 2 * bigR) / 10); k++) {
         const x = dirx > 0 ? -bigR + k * 10 : W + bigR - k * 10;
         const d = at(x, y);
-        const ok = near ? d > clearOf && d <= openAt : d > openAt && (id < 0 || comp[Math.min(H - 1, Math.max(0, Math.round(y))) * W + Math.min(W - 1, Math.max(0, Math.round(x)))] === id);
-        if (ok) run.push([x, y, near ? pressFor(d - margin) : 1]); else await flush();
+        const inComp = d > openAt && (id < 0 || comp[Math.min(H - 1, Math.max(0, Math.round(y))) * W + Math.min(W - 1, Math.max(0, Math.round(x)))] === id);
+        // Rows run on past the open middle toward the edge, the brush narrowing to fit, as a painter's
+        // stroke does (stopped where the whole brush stopped fitting, a small shape's rows were barely
+        // longer than the brush: all thin start and end, a disc's middle ~0.75 of a stroke against a
+        // rectangle's 0.96, and its rim heavy by comparison)
+        const ok = near ? d > clearOf && d <= openAt : (inComp || (d > clearOf && d <= openAt));
+        if (ok) run.push([x, y, (near || !inComp) ? pressFor(d - margin) : 1]); else await flush();
       }
       await flush();
       dirx = -dirx;
