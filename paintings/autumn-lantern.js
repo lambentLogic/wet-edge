@@ -1,10 +1,9 @@
 // Autumn lantern (a Fuyu persimmon) on white paper.
-// Fourteenth pass, on d3c2bd0 (a wash's strokes no longer push wet paint; the push was what
-// made a round wash's heavy side and pale foot). With that gone a variegated body is clean again
-// - the reason I abandoned it was the bias - and it carries a lateral turn (L 58 left to 46
-// right) where a graded body gives only 60 to 56 top to bottom. Body: variegated 0.42 into the
-// darker mix; the wash's paint multiplier also dropped 1.38 -> 1.05, so the same density needs a
-// higher strength than before (a flat body matches at ~0.52).
+// Fifteenth pass, on 0bef39e (a wash's rows now run on to the edge with the brush narrowing, so a
+// small shape fills like a big one). Small shapes are fuller, so the body goes 0.42 -> 0.38. With
+// the wash even, a variegated body carries only ~4 L of its own across the fruit, so the turn comes
+// from the deep note dropped while shiny (raised to 0.34) as much as from the mix; the darker
+// `into` now carries a little perylene violet.
 const S=window.__sim,h=S.headless,V=S.values,M=window.__minds;
 window.__paintLog=[];
 const log=t=>{window.__paintLog.push(t);console.log('[paint]',t);};
@@ -15,7 +14,7 @@ const load=(mix,p,r,w,b='round')=>{S.tool('paint');h.setBrushPreset(b);h.setBrus
 const CX=512, CY=404, A=172, B=134;
 const LIGHT=[['Transparent Yellow Oxide',3],['Pyrrole Scarlet',2],['Bismuth Vanadate Yellow',1]];
 const DEEP=[['Pyrrole Scarlet',3],['Transparent Red Oxide',2],['Quinacridone Rose',0.5]];
-const DARKER=[['Transparent Red Oxide',3],['Pyrrole Scarlet',2],['Perylene Violet',0.5]];
+const DARKER=[['Transparent Red Oxide',3],['Pyrrole Scarlet',1.5],['Perylene Violet',1.4]];
 const CALYX_MIX=[['Raw Umber',2.5],['Transparent Yellow Oxide',3],['Perylene Green',0.4],['Perylene Maroon',0.6]];
 
 const fruit=pts(a=>{
@@ -57,19 +56,19 @@ window.__paintDone=(async()=>{
   log('cast shadow: violet into a damp oval, below the base, darkest right at the contact');
   await S.dampen(M.maskOf(oval(556,546,190,34)),0.8,0.009,26);
   load([['French Ultramarine',2],['Quinacridone Rose',1.5],['Raw Umber',0.5]],0.115,26,0.08,'mop');
-  for(const [dx,dy,w] of [[-46,2,0.94],[0,6,1.0],[44,12,0.86]])
+  for(const [dx,dy,w] of [[-46,2,0.9],[0,6,0.95],[38,12,0.68]])
     await S.path(pts(t=>[424+dx+272*t*w,542+dy+4*Math.sin(t*3),0.06+0.5*Math.sin(Math.PI*t)],18),3);
   load([['French Ultramarine',2],['Perylene Maroon',1],['Raw Umber',1]],0.13,17,0.07);
   await S.path(pts(t=>[452+174*t,540+2*Math.sin(t*4),0.1+0.4*Math.sin(Math.PI*t)],16),3);
   await dry([[556,546]]);await S.look('shadow');
 
   log('the fruit: yellow-orange across into deep red-orange, one variegated wash');
-  h.setBrushPreset('mop');h.setBrush(LIGHT);V.brushRadius=72;V.brushPigment=0.42;V.dipLoad=0.36;
+  h.setBrushPreset('mop');h.setBrush(LIGHT);V.brushRadius=72;V.brushPigment=0.38;V.dipLoad=0.36;
   await S.wash(fruit,{kind:"variegated",into:DARKER,direction:"across",paper:"moist"});
   await S.skipTo('shiny',{points:[[512,406]]});
 
   log('the deepest note low on the right, while shiny, following the form');
-  load(DARKER,0.24,32,0.2,'mop');
+  load(DARKER,0.34,34,0.2,'mop');
   for(let k=0;k<3;k++)
     await S.path(pts(t=>{const x=618+8*k-24*Math.sin(Math.PI*t);return [...onFruit([x,372+112*t+8*k],18),0.05+0.32*Math.sin(Math.PI*t)];},16),2);
 
@@ -110,6 +109,6 @@ window.__paintDone=(async()=>{
   await S.path([[560,344,0.1],[590,352,0.4],[612,362,0.1]],4);
   await dry([[512,CALY]]);
   await S.look('finished');
-  await S.note('Autumn lantern (paintings/autumn-lantern.js), DeepSeek: a Fuyu persimmon on white paper, repainted on d3c2bd0. That change (a wash strokes do not push wet paint; brushDrag 0 while the Wash tool works) removed the round wash heavy side and pale foot, so the probe now reads a symmetric rim (disc sides 1.23/1.20 and 1.21/1.21) and a foot of 1.00. Because the push had been spreading paint thin, the wash paint multiplier fell 1.38 -> 1.05 and the same density now needs a higher strength: a flat body matches the old 0.47 at about 0.52. Variegated is usable again now the bias is gone, and it is the better body here - measured on the fruit it runs L 58 left to 46 right, where a graded body only runs 60 to 56 top to bottom (graded does work; I had been measuring the wrong axis). Body variegated 0.42 into the darker red-oxide mix; calyx and shadow as before.');
+  await S.note('Autumn lantern (paintings/autumn-lantern.js), DeepSeek: a Fuyu persimmon on white paper, repainted on 0bef39e (rows run on to the edge with the brush narrowing, so small shapes fill like big ones). Body 0.42 -> 0.38, since a small shape now lands at about one stroke in its middle (probe: discs 0.97-1.01, rectangle 0.99) and its rim is a natural 1.05-1.11 of that. On this even wash a variegated body carries only about 4 L across the fruit, where the wash itself used to add a dozen, so the turn now comes as much from the deep note dropped while shiny (0.34) as from the mix; the deeper `into` carries a little perylene violet. Shadow trimmed so its far end stops instead of trailing. No physics changes.');
   log('done');
 })();
