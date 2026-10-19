@@ -1,8 +1,10 @@
 // Autumn lantern (a Fuyu persimmon) on white paper.
-// Thirteenth pass, on bb046a8 (the paper does not dry while a wash is laid). The body wash
-// comes out about 15% lighter on the new behaviour, so the graded body goes 0.41 -> 0.47 at
-// fadeTo 2.0. The calyx is warmer and lighter, and two marks that read as objects are gone:
-// the ring of creases at its centre (a drawn circle) and the pale dot of the stem scar (an eye).
+// Fourteenth pass, on d3c2bd0 (a wash's strokes no longer push wet paint; the push was what
+// made a round wash's heavy side and pale foot). With that gone a variegated body is clean again
+// - the reason I abandoned it was the bias - and it carries a lateral turn (L 58 left to 46
+// right) where a graded body gives only 60 to 56 top to bottom. Body: variegated 0.42 into the
+// darker mix; the wash's paint multiplier also dropped 1.38 -> 1.05, so the same density needs a
+// higher strength than before (a flat body matches at ~0.52).
 const S=window.__sim,h=S.headless,V=S.values,M=window.__minds;
 window.__paintLog=[];
 const log=t=>{window.__paintLog.push(t);console.log('[paint]',t);};
@@ -62,8 +64,8 @@ window.__paintDone=(async()=>{
   await dry([[556,546]]);await S.look('shadow');
 
   log('the fruit: yellow-orange across into deep red-orange, one variegated wash');
-  h.setBrushPreset('mop');h.setBrush(LIGHT);V.brushRadius=72;V.brushPigment=0.47;V.dipLoad=0.36;
-  await S.wash(fruit,{kind:"graded",fadeTo:2.0,paper:"moist"});
+  h.setBrushPreset('mop');h.setBrush(LIGHT);V.brushRadius=72;V.brushPigment=0.42;V.dipLoad=0.36;
+  await S.wash(fruit,{kind:"variegated",into:DARKER,direction:"across",paper:"moist"});
   await S.skipTo('shiny',{points:[[512,406]]});
 
   log('the deepest note low on the right, while shiny, following the form');
@@ -108,6 +110,6 @@ window.__paintDone=(async()=>{
   await S.path([[560,344,0.1],[590,352,0.4],[612,362,0.1]],4);
   await dry([[512,CALY]]);
   await S.look('finished');
-  await S.note('Autumn lantern (paintings/autumn-lantern.js), DeepSeek: a Fuyu persimmon on white paper, repainted on bb046a8 (the paper does not dry while a wash is laid). The body lands about 15% lighter on that behaviour, so graded fadeTo 2.0 goes 0.41 -> 0.47; the wash is now even top to bottom and side to side (rect 0.94/0.99, sides 1.00/1.01, pale cells 0.04%), with discs still leaning right about 13% (1.11/1.25) and their middles at ~0.75 of a stroke. Calyx: warmer and lighter (yellow oxide level with umber), and two marks removed that read as objects rather than as a calyx - the ellipse of creases at its centre read as a drawn ring, and the pale stem scar read as an eye. Body left plain: the wash is even enough now that depth has to come from the graded fade and the note. No physics changes.');
+  await S.note('Autumn lantern (paintings/autumn-lantern.js), DeepSeek: a Fuyu persimmon on white paper, repainted on d3c2bd0. That change (a wash strokes do not push wet paint; brushDrag 0 while the Wash tool works) removed the round wash heavy side and pale foot, so the probe now reads a symmetric rim (disc sides 1.23/1.20 and 1.21/1.21) and a foot of 1.00. Because the push had been spreading paint thin, the wash paint multiplier fell 1.38 -> 1.05 and the same density now needs a higher strength: a flat body matches the old 0.47 at about 0.52. Variegated is usable again now the bias is gone, and it is the better body here - measured on the fruit it runs L 58 left to 46 right, where a graded body only runs 60 to 56 top to bottom (graded does work; I had been measuring the wrong axis). Body variegated 0.42 into the darker red-oxide mix; calyx and shadow as before.');
   log('done');
 })();
