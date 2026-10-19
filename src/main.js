@@ -1642,7 +1642,7 @@ async function init() {
   window.__sim.washOptions = { kind: 'flat', fadeTo: 0.2, paper: 'moist', dampen: true, water: false, dampenOnly: false, around: false, into: null, direction: 'down', area: 'lasso', scrubWidth: 40 };
   // (moist: dampened to a thin film and rows holding 0.08 of standing water; at 0.05 and 0.12, past
   // shiny, a 'moist' wash flooded, and its edge stepped out wherever its loops touched down: the painter)
-  const WASH_PAINT = 1.38;   // (1.3 before the paper stopped drying during a wash; that took 4-11% off)
+  const WASH_PAINT = 1.05;   // (1.38 while the wash's own strokes pushed wet paint about: that spread it outward and thinned the middle)
   const WASH_PAPER = { moist: { film: 0.04, rows: 0.08 }, wet: { film: 0.15, rows: null } };
   // Show an area on the overlay (faint blue) while it's being washed.
   const drawArea = mask => {
@@ -1724,6 +1724,10 @@ async function init() {
     const keep = ['brushRadius', 'brushPigment', 'mistRadius', 'dipLoad', 'startPaint'].map(k => [k, values[k]]);
     // (a wash's strokes are pieces of one wash, not fresh dips: their wetter starts carry no extra paint)
     const startPaint0 = values.startPaint; values.startPaint = 0;
+    // ...nor push wet paint along as they go: each of a wash's short pieces shoved its paint in the
+    // direction it happened to run (a round shape's arcs over its top and bottom all ran one way, and
+    // one side came out a fifth darker than the other; with it off, the same strokes come out even)
+    const brushDrag0 = values.brushDrag; values.brushDrag = 0;
     // ...and its paint a third stronger to make up for it, so a wash still comes out about one stroke
     // of the same brush (without the starts' extra, washes were a quarter lighter: the painter)
     const pigment0 = values.brushPigment; values.brushPigment *= WASH_PAINT;
@@ -1782,7 +1786,7 @@ async function init() {
       if (e.message !== 'cancelled') throw e;
       return false;
     } finally {
-      state.washing = false; state.cancelWash = false; values.startPaint = startPaint0; values.brushPigment = pigment0;
+      state.washing = false; state.cancelWash = false; values.startPaint = startPaint0; values.brushDrag = brushDrag0; values.brushPigment = pigment0;
       if (dry0) { Object.assign(values, dry0); }
       if (kind === 'variegated') state.brush = load0;   // back to the colour it started from
       h.setMode(state.washReturn ?? mode0); state.washReturn = null;

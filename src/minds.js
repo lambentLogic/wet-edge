@@ -731,24 +731,6 @@ export function makeMinds(sim) {
     comps.forEach(({ top, bot }, id) => { if (bot - top < rowStep) { rowPlan.push({ y: (top + bot) / 2, id }); return; } const n = Math.ceil((bot - top) / rowStep - 1e-6); for (let k = 0; k <= n; k++) rowPlan.push({ y: top + (bot - top) * k / n, id }); });
     for (const r of rowPlan) r.lone = rowPlan.filter(q => q.id === r.id).length === 1;
     rowPlan.sort((p, q) => p.y - q.y);
-    // How far each cell is from where the rows run: a loop the rows will also reach lays a lighter
-    // dose (on a big shape the rows' ends and first and last rows cover its edges, and loops at
-    // full strength on top doubled them: the rectangle's sides 1.4x its middle)
-    // (the rows' planned footprints stamped into a coverage map, each a brush-wide band with a
-    // soft profile; a loop lays less in proportion to the coverage it lands on, against the
-    // coverage in the open middle)
-    const cov = new Float32Array(N);
-    for (const { y, id } of rowPlan) {
-      const yi = Math.round(y); let x0 = -1, x1 = -1;
-      for (let x = 0; x < W; x++) if (comp[yi * W + x] === id) { if (x0 < 0) x0 = x; x1 = x; }
-      if (x0 < 0) continue;
-      for (let yy = Math.max(0, Math.ceil(y - bigR)); yy <= Math.min(H - 1, Math.floor(y + bigR)); yy++) for (let x = Math.max(0, Math.ceil(x0 - bigR)); x <= Math.min(W - 1, Math.floor(x1 + bigR)); x++) {
-        const dx = x < x0 ? x0 - x : x > x1 ? x - x1 : 0, d2 = (dx * dx + (yy - y) * (yy - y)) / (bigR * bigR);
-        if (d2 < 1) cov[yy * W + x] += 1 - d2;
-      }
-    }
-    let covFull = 0; { const v = []; for (let c = 0; c < N; c += 3) if (comp[c] >= 0) v.push(cov[c]); v.sort((a, b) => a - b); covFull = v.length ? v[v.length >> 1] : 0; }
-    const rowCovered = l => { if (!covFull) return 0; let s = 0; for (const [x, y] of l) s += Math.min(1, cov[Math.min(H - 1, Math.max(0, Math.round(y))) * W + Math.min(W - 1, Math.max(0, Math.round(x)))] / covFull); return s / l.length; };
     // the open middle beyond the deepest edge loop's reach, for the doser
     const deep = new Uint8Array(N), reach = 2 * levels[levels.length - 1] + 4;
     for (let c = 0; c < N; c++) if (inside[c] && dist[c] > reach) deep[c] = 1;
@@ -792,7 +774,6 @@ export function makeMinds(sim) {
         const { l, L } = todo.shift();
         const p = L === cutL ? 0 : pressFor(L - margin);
         V.brushRadius = bigR; setLoad(l[0][0], l[0][1], true);
-        V.brushPigment *= 1 - 0.5 * rowCovered(l);   // (0.7 passed the rectangle's sides but left discs' middles under 0.9 of a stroke)
         // Cut-ins at the wash's starting water: the water sense only wets the
         // brush for the open rows (a wetter tip along the edge spilled over it).
         const dipNow = V.dipLoad; V.dipLoad = Math.min(dipNow, dipCut);
