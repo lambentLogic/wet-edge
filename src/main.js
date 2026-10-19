@@ -1728,6 +1728,8 @@ async function init() {
     // direction it happened to run (a round shape's arcs over its top and bottom all ran one way, and
     // one side came out a fifth darker than the other; with it off, the same strokes come out even)
     const brushDrag0 = values.brushDrag; values.brushDrag = 0;
+    // ...nor lay body: a wash's rows have to merge, and paint held as body didn't (pale feet)
+    const bodyHold0 = values.bodyHold; values.bodyHold = 0;
     // ...and its paint a third stronger to make up for it, so a wash still comes out about one stroke
     // of the same brush (without the starts' extra, washes were a quarter lighter: the painter)
     const pigment0 = values.brushPigment; values.brushPigment *= WASH_PAINT;
@@ -1786,7 +1788,7 @@ async function init() {
       if (e.message !== 'cancelled') throw e;
       return false;
     } finally {
-      state.washing = false; state.cancelWash = false; values.startPaint = startPaint0; values.brushDrag = brushDrag0; values.brushPigment = pigment0;
+      state.washing = false; state.cancelWash = false; values.startPaint = startPaint0; values.brushDrag = brushDrag0; values.bodyHold = bodyHold0; values.brushPigment = pigment0;
       if (dry0) { Object.assign(values, dry0); }
       if (kind === 'variegated') state.brush = load0;   // back to the colour it started from
       h.setMode(state.washReturn ?? mode0); state.washReturn = null;

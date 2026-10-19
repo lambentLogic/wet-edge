@@ -439,7 +439,8 @@ fn velocity(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) lid
       v = mix(v, clamp(bd.y, -vmax, vmax), bd.z);
     }
   }
-  Bout[i] = vec4f(clamp(finite(u), -vmax, vmax), clamp(finite(v), -vmax, vmax), 0.0, 0.0);
+  // (w carries the cell's held paint (see transport) on to this step: passed through unchanged)
+  Bout[i] = vec4f(clamp(finite(u), -vmax, vmax), clamp(finite(v), -vmax, vmax), 0.0, Bin[i].w);
 }
 
 // ---------------------------------------------------------------- transport + paper
@@ -461,6 +462,18 @@ fn jam(a: vec4f) -> f32 {
   return (1.0 - smoothstep(p.jamLo, p.jamHi, a.y / max(a.x, 1e-4))) * packed;
 }
 
+// Body: paint laid thick (from a drier brush, more pigment than water) doesn't blend into the
+// water it lands in at once; it sits as a blob that blends in over a few seconds (bodyTime). B.w
+// holds each cell's held amount, as it stood at the start of this step (Bin, so neighbours read a
+// stable value). Held paint isn't carried off by the flow and doesn't spread outward; the rest of
+// the cell's suspended paint (its free fraction) moves as usual. (Without it, a cell holds one
+// pool of water, and thick paint dropped into a wash mixed into it instantly: it spread exactly as
+// far as thin paint, peaking at a third of its strength on dry paper.)
+fn freeFrac(i: i32, a: vec4f) -> f32 {
+  if (a.y <= 1e-6) { return 1.0; }
+  return 1.0 - clamp(Bin[i].w / a.y, 0.0, 1.0);
+}
+
 fn amtOf(c: Comp8, id: u32) -> f32 {
   var a = 0.0;
   for (var k = 0; k < NG; k++) { if (c.amt[k] > 0.0 && c.id[k] == id) { a += c.amt[k]; } }
@@ -479,6 +492,7 @@ var<private> stK: vec3f;
 var<private> stS: vec3f;
 var<private> stA: f32;
 var<private> stL: f32;   // liftability-weighted amount (sum a / staining^2)
+var<private> heldAdd: f32;   // held paint the brush laid here this step (body)
 
 fn stainOmega(id: u32) -> f32 { return max(p.staining * pig[id].phys.y, 1e-4); }
 
@@ -552,13 +566,19 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
   // lines). Each face uses the receiving cell's jam, the same on both
   // sides, so pigment is conserved.
   let jI = jam(a); let jR = jam(aR); let jL = jam(aL); let jD = jam(aD); let jU = jam(aU);
-  let keep = 1.0 - p.dt * (max(uR, 0.0) * jR + max(-uL, 0.0) * jL + max(vD, 0.0) * jD + max(-vU, 0.0) * jU);
+  let fI = freeFrac(i, a);
+  var fL = 1.0; var fR = 1.0; var fU = 1.0; var fDn = 1.0;
+  if (x > 0) { fL = freeFrac(ix(x - 1, y), aL); }
+  if (x < W() - 1) { fR = freeFrac(ix(x + 1, y), aR); }
+  if (y > 0) { fU = freeFrac(ix(x, y - 1), aU); }
+  if (y < H() - 1) { fDn = freeFrac(ix(x, y + 1), aD); }
+  let keep = 1.0 - fI * p.dt * (max(uR, 0.0) * jR + max(-uL, 0.0) * jL + max(vD, 0.0) * jD + max(-vU, 0.0) * jU);
   for (var k = 0; k < NG; k++) { if (gi.amt[k] > 0.0) { addCand(gi.id[k], gi.amt[k] * keep); } }
   if (VARIANT != 4u) { for (var k = 0; k < NG; k++) {
-    if (uR < 0.0 && gR.amt[k] > 0.0) { addCand(gR.id[k], -p.dt * uR * gR.amt[k] * jI); }
-    if (uL > 0.0 && gL.amt[k] > 0.0) { addCand(gL.id[k],  p.dt * uL * gL.amt[k] * jI); }
-    if (vD < 0.0 && gD.amt[k] > 0.0) { addCand(gD.id[k], -p.dt * vD * gD.amt[k] * jI); }
-    if (vU > 0.0 && gU.amt[k] > 0.0) { addCand(gU.id[k],  p.dt * vU * gU.amt[k] * jI); }
+    if (uR < 0.0 && gR.amt[k] > 0.0) { addCand(gR.id[k], -p.dt * uR * gR.amt[k] * jI * fR); }
+    if (uL > 0.0 && gL.amt[k] > 0.0) { addCand(gL.id[k],  p.dt * uL * gL.amt[k] * jI * fL); }
+    if (vD < 0.0 && gD.amt[k] > 0.0) { addCand(gD.id[k], -p.dt * vD * gD.amt[k] * jI * fDn); }
+    if (vU > 0.0 && gU.amt[k] > 0.0) { addCand(gU.id[k],  p.dt * vU * gU.amt[k] * jI * fU); }
   } }
 
   if (VARIANT != 2u && (p.mixing > 0.5 || mag.anyMagnet > 0u)) { mixPigments(x, y, a, gi, aL, aR, aU, aD, gL, gR, gU, gD); }
@@ -668,6 +688,7 @@ fn transport(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) li
     let amt = fall * fr.brushScale * fr.pressure;
     let wBefore = w;
     var gAdded = 0.0;
+    heldAdd = 0.0;
     // The brush tops the paper up toward its own water level and pigment
     // concentration rather than adding a fixed amount per frame. Written so
     // passes compose exactly (two half-doses = one full dose), so a fast
@@ -919,6 +940,9 @@ let next = max(cur, mix(cur, levelP * conc, k)) + chargeP * max(conc - c0, 0.0);
       // (A spot is under the eraser for a few substeps of each pass.)
       eraseK = clamp(p.eraseRate * 0.5 * fall * fr.pressure, 0.0, 1.0);
     }
+    // Paint laid from a drier brush arrives thick, as body: held (bodyHold of it from a dry brush,
+    // none from one wetter than about 0.7), blending into the water over bodyTime.
+    if (fr.mode == 0u) { heldAdd = gAdded * clamp(p.bodyHold, 0.0, 1.0) * smoothstep(0.7, 0.1, clamp(fr.load, 0.0, 1.0)); }
     // Tally what the brush laid down, for its reservoir (read back on the CPU).
     let dw = max(w - wBefore, 0.0);
     if (dw > 1e-6) { atomicAdd(&tiles.brushAcc[0], u32(dw * 1e4 + 0.5)); }
@@ -1226,7 +1250,12 @@ let next = max(cur, mix(cur, levelP * conc, k)) + chargeP * max(conc - c0, 0.0);
   if (chS) { D[i].stamp = dep.stamp; }
   if (chI) { D[i].ids = packIds(dep); }
   if (any(dep.stainK != depIn.stainK) || any(dep.stainS != depIn.stainS)) { D[i].stainK = dep.stainK; D[i].stainS = dep.stainS; }
-  Aout[i] = vec4f(finite(w), sumG(gOut.amt), sumD(dep.amt) + dep.stainK.w, finite(s));
+  // Held paint blends into the water over bodyTime; never more than what's suspended; gone when dry.
+  let gTot = sumG(gOut.amt);
+  var held = (Bin[i].w + heldAdd) * exp(-fr.stepSec / max(p.bodyTime, 1e-3));
+  held = select(clamp(held, 0.0, gTot), 0.0, w <= p.wEps || maskNew > 0.5);
+  Bout[i].w = finite(held);
+  Aout[i] = vec4f(finite(w), gTot, sumD(dep.amt) + dep.stainK.w, finite(s));
 }
 
 // A deposited component's timestamp is the amount-weighted mean time its
@@ -1500,7 +1529,9 @@ fn mixPigments(x: i32, y: i32, a: vec4f, gi: Comp8,
     else if (k == 2) { ny = y - 1; n = aU; gn = gU; } else { ny = y + 1; n = aD; gn = gD; }
     if (!inb(nx, ny) || n.x <= p.wEps) { continue; }
     let j = ix(nx, ny);
-    let face = select(0.0, min(wi, smoothstep(p.mixEdgeLo, p.mixEdgeHi, aux[j].y)), mixOn);
+    // (held paint doesn't spread: the face's spreading scaled by the less free of the two cells,
+    // the same from both sides, so it conserves)
+    let face = select(0.0, min(wi, smoothstep(p.mixEdgeLo, p.mixEdgeHi, aux[j].y)), mixOn) * min(freeFrac(i, a), freeFrac(j, n));
     let wmin = min(a.x, n.x);
     if (face > 0.0) {
       // The Marangoni term acts most where paint meets much cleaner water

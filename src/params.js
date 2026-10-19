@@ -46,6 +46,8 @@ export const PARAMS = [
   { key: 'mixing',      v: 1,    min: 0, max: 1,   group: 'Pigment', target: 'sim', label: 'paint moves in water: diffusion, floc, Marangoni (0/1)' },
   { key: 'marangoniContrast', v: 1, min: 0, max: 4, group: 'Pigment', target: 'sim', label: 'Marangoni needs contrast' },
   { key: 'marangoni',   v: 4,    min: -2, max: 10,   group: 'Pigment', target: 'sim', label: 'spreads on water (Marangoni)' },
+  { key: 'bodyHold',    v: 0.9,  min: 0, max: 1,   group: 'Pigment', target: 'sim', label: 'thick paint holds together in water' },
+  { key: 'bodyTime',    v: 10,   min: 0.1, max: 60, group: 'Pigment', target: 'sim', label: 'thick paint blends in over (s)' },
   { key: 'pigmentDiffusion', v: 0.05, min: 0, max: 1, group: 'Pigment', target: 'sim', label: 'diffusion in water' },
   { key: 'mixEdgeLo',   v: 0.6,  min: 0, max: 1,   group: 'Pigment', target: 'sim', label: 'no mixing near edge (lo)' },
   { key: 'mixEdgeHi',   v: 0.9,  min: 0, max: 1,   group: 'Pigment', target: 'sim', label: 'no mixing near edge (hi)' },
