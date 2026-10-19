@@ -15,7 +15,7 @@ export const PARAMS = [
   { key: 'drag',          v: 0.5,    min: 0,    max: 5,     group: 'Flow', target: 'sim',  label: 'paper drag' },
   { key: 'dragMaxBoost',  v: 100,      min: 1,    max: 100,   group: 'Flow', target: 'sim',  label: 'thin-film drag cap' },
   { key: 'dragDepth',     v: 0.03,    min: 0,    max: 0.5,   group: 'Flow', target: 'sim',  label: 'drag reference depth' },
-  { key: 'paperRelief',   v: 0.01,    min: 0,    max: 2,     group: 'Flow', target: 'sim',  label: 'paper relief' },
+  { key: 'paperRelief',   v: 0.005,    min: 0,    max: 2,     group: 'Flow', target: 'sim',  label: 'paper relief' },
   { key: 'tiltX',         v: 0,      min: -0.05, max: 0.05, group: 'Flow', target: 'sim',  label: 'tilt x' },
   { key: 'tiltY',         v: 0,      min: -0.05, max: 0.05, group: 'Flow', target: 'sim',  label: 'tilt y' },
   { key: 'surfaceTension', v: 0.5,  min: 0,    max: 3,     group: 'Flow', target: 'sim',  label: 'surface tension' },

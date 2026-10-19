@@ -195,7 +195,7 @@ All in `sim.values` by key. The page shows the studio ones always, the brush and
 | `drag` | 0.5 | paper drag | Friction of the paper on moving water. More: washes creep and stay where laid; less: water slides and runs freely. |
 | `dragMaxBoost` | 100 | thin-film drag cap | Cap on how much extra friction thin films get over deep water (1 = none). More: a thin damp wash sticks to the paper while puddles still flow. |
 | `dragDepth` | 0.03 | drag reference depth | Water depth below which thin-film friction starts growing. More: fairly deep washes already count as thin and stick; less: only a bare film sticks. |
-| `paperRelief` | 0.01 | paper relief | How much the paper's tooth (hills and valleys) steers surface water. More: water gathers in the valleys and follows the texture. |
+| `paperRelief` | 0.005 | paper relief | How much the paper's tooth (hills and valleys) steers surface water. More: water gathers in the valleys and follows the texture. |
 | `surfaceTension` | 0.5 | surface tension | Surface tension of the water: more smooths a wash over the tooth, rounding bumps and filling dips in the film. Capped automatically in deep puddles. |
 | `capSuction` | 0 | thin-film suction | Meniscus pull toward thin water: more feeds a drying wash from its thick middle out to its thinning rim, so the edge recedes smoothly instead of in tide lines. 0 = off. |
 | `suctionDepth` | 0.02 | suction depth scale | Depth scale for thin-film suction: larger means deeper water still counts as thin and gets pulled toward. Only matters when thin-film suction is above 0. |
